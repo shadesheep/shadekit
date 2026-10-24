@@ -1,0 +1,51 @@
+name: 🐛 Bug 报告
+description: 报告扩展功能异常
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: dropdown
+    id: tool
+    attributes:
+      label: 相关工具
+      options:
+        - 账号切换
+        - 环境指示器
+        - JSON 格式化
+        - JSON 对比
+        - 图片 Base64
+        - 代码美化
+        - 模拟数据
+        - 其他/不确定
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 发生了什么？期望的行为是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 出现 ...
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: 浏览器及版本、扩展版本（扩展详情页可见）
+      placeholder: Chrome 131 / 扩展 v1.1.4
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志/报错
+      description: 控制台报错、选项页「开发日志」中的相关记录（注意脱敏，勿粘贴账号密码）
+      render: text

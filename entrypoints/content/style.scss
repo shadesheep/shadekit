@@ -1,0 +1,162 @@
+/* ShadeKit - Content Script 样式（Shadow DOM 版本） */
+
+/* ========== Focus Ring ========== */
+/* Shadow DOM 内已隔离，直接使用 :focus-visible */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+:host([data-dt-dark]) :focus-visible {
+  outline-color: #818cf8;
+}
+
+/* 搜索框已有 :focus-within 父级焦点指示，排除额外 outline */
+.as-search-input:focus-visible {
+  outline: none;
+}
+
+/* ========== 暗色模式变量 ========== */
+$dark-bg-surface: #161b22;
+$dark-border: #30363d;
+$dark-text: #c9d1d9;
+$dark-text-muted: #6e7681;
+$dark-bg-hover: #1e3a5f;
+$dark-border-hover: #58a6ff;
+
+/* 面板自身的暗色背景 */
+:host([data-dt-dark]) {
+  background: rgba(22, 27, 34, 0.95);
+  border-color: rgba(48, 54, 61, 0.8);
+}
+
+:host([data-dt-dark]) {
+  .devtools-panel-title {
+    background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(59,130,246,0.12));
+    border-bottom-color: $dark-border;
+    color: #f0f6fc;
+  }
+  .devtools-panel-close {
+    color: $dark-text-muted;
+    &:hover {
+      color: $dark-text;
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+  .devtools-panel-content {
+    color: $dark-text;
+  }
+}
+
+
+/* ========== 工具面板容器（.panel-host）========== */
+:host(.panel-host) {
+  position: fixed;
+  bottom: 70px;
+  right: 16px;
+  z-index: 999999;
+  width: 280px;
+  max-height: 400px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  display: block;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  animation: panel-enter 0.2s ease-out;
+}
+
+/* 面板暗色模式覆盖（必须在 :host(.panel-host) 之后） */
+:host(.panel-host[data-dt-dark]) {
+  background: rgba(22, 27, 34, 0.95);
+  border-color: rgba(48, 54, 61, 0.8);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.devtools-panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(59,130,246,0.06));
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.devtools-panel-close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0 4px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: all 0.2s ease-out;
+
+  &:hover {
+    color: #334155;
+    background: rgba(0, 0, 0, 0.05);
+    transform: rotate(90deg);
+  }
+}
+
+.devtools-panel-content {
+  padding: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ========== 快捷键浮动面板 ========== */
+.devtools-panel-float {
+  position: fixed !important;
+  bottom: auto !important;
+  right: auto !important;
+  width: 300px;
+  max-height: 400px;
+  z-index: 9999999;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
+  animation: float-panel-in 0.15s ease-out;
+}
+
+@keyframes float-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+:host([data-dt-dark]) .devtools-panel-float {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* ========== Toast 容器（.toast-host）========== */
+:host(.toast-host) {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 10000000;
+  pointer-events: none;
+}

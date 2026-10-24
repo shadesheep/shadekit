@@ -1,0 +1,641 @@
+/**
+ * JSON 页面自动格式化样式
+ * UI 风格与现有系统保持一致
+ * 所有选择器限定到 #jf-page 容器内，避免泄漏到宿主页面
+ */
+
+/* =================== Page Container =================== */
+#jf-page {
+  // 与 shared/design-tokens.css 保持一致
+  // 本文件是独立 content script，不能直接 import design-tokens.css（避免打包循环），
+  // 因此在 #jf-page 作用域内以 --jf-* 前缀定义同名局部变量。
+  --jf-error: #dc2626;
+  --jf-warning: #b45309;
+  --jf-warning-bg: #fef3c7;
+  --jf-warning-border: #fbbf24;
+  --jf-selection-bg: #fff3cd;
+  --jf-selection-border: #ffc107;
+
+  // 语法色对齐 entrypoints/json-format/App.vue 亮色模式
+  --jf-syntax-key: #881391;
+  --jf-syntax-string: #0b7500;
+  --jf-syntax-string-link: #0000cc;
+  --jf-syntax-string-link-hover: #b00;
+  --jf-syntax-number: #1c00cf;
+  --jf-syntax-bool: #ff6b00;
+  --jf-syntax-null: #808080;
+  --jf-syntax-quote: #bbb;
+  --jf-syntax-punctuation: #999;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  color: #374151;
+  background: #f8fafc;
+  min-height: 100vh;
+}
+
+/* =================== Top Bar =================== */
+#jf-page .top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+#jf-page .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: #6366f1;
+  flex-shrink: 0;
+}
+
+#jf-page .toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+/* =================== Buttons =================== */
+#jf-page .btn {
+  padding: 5px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  background: #fff;
+  color: #374151;
+  transition: all 0.2s ease;
+}
+
+#jf-page .btn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+#jf-page .btn.dt-btn-icon {
+  padding: 5px 8px;
+}
+
+#jf-page .btn-active {
+  background: var(--jf-warning-bg) !important;
+  border-color: var(--jf-warning-border) !important;
+  color: var(--jf-warning) !important;
+}
+
+#jf-page .divider {
+  width: 1px;
+  height: 20px;
+  background: #e2e8f0;
+  margin: 0 4px;
+}
+
+#jf-page .sort-label {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* =================== Sort Group =================== */
+#jf-page .sort-group {
+  display: inline-flex;
+  gap: 1px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+#jf-page .sort-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+#jf-page .sort-btn:hover {
+  color: #374151;
+}
+
+#jf-page .sort-btn.active {
+  background: #fff;
+  color: #6366f1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* =================== Content Area =================== */
+#jf-page .content-area {
+  padding: 12px 16px;
+}
+
+#jf-page .panel {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+#jf-page .panel-header {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+#jf-page #jfContent {
+  padding: 12px 14px;
+  min-height: 200px;
+}
+
+#jf-page #jfContent_pre {
+  padding: 12px 14px;
+  margin: 0;
+  word-break: break-all;
+  display: none;
+  font: 14px/18px monospace;
+  white-space: pre-wrap;
+}
+
+/* =================== Formatting Message =================== */
+#jf-page #formattingMsg {
+  position: absolute;
+  top: calc(40vh);
+  left: calc(45vw);
+  z-index: 100;
+  display: none;
+}
+
+#jf-page #formattingMsg .x-loading {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--jf-error);
+  border-radius: 50%;
+  box-shadow: 0 0 10px 2px;
+  color: var(--jf-error);
+  border-right-color: transparent;
+  border-top-color: transparent;
+  animation: spin-right 1s linear infinite normal;
+  margin: 0 5px 0 0;
+  display: inline-block;
+}
+
+#jf-page #formattingMsg .x-loading:before {
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: 1px;
+  border: 2px solid var(--jf-error);
+  content: ' ';
+  border-radius: 50%;
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+}
+
+@keyframes spin-right {
+  from { transform: rotate(0deg); opacity: 0.2; }
+  50% { transform: rotate(180deg); opacity: 1; }
+  to { transform: rotate(360deg); opacity: 0.2; }
+}
+
+/* =================== Toast =================== */
+#jf-page #jf-toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: #0f172a;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slide-in 0.2s ease;
+}
+
+@keyframes slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* =================== JSON Tree Items (FeHelper-style) =================== */
+html.fh-jf #jf-page {
+  font-size: 14px;
+  color: #333;
+}
+
+html.fh-jf #jf-page #formattedJson {
+  padding-left: 21px;
+  padding-top: 6px;
+}
+
+html.fh-jf #jf-page #formattedJson,
+html.fh-jf #jf-page #jsonpOpener,
+html.fh-jf #jf-page #jsonpCloser {
+  color: #333;
+  font: 14px/18px monospace;
+}
+
+html.fh-jf #jf-page #formattedJson {
+  color: #444;
+}
+
+html.fh-jf #jf-page * {
+  -webkit-font-smoothing: antialiased;
+}
+
+html.fh-jf #jf-page .x-json-tips {
+  color: var(--jf-error);
+}
+
+#jf-page .item {
+  display: block;
+  padding-left: 20px;
+  margin-left: -20px;
+  position: relative;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+#jf-page .item .kv-list {
+  display: block;
+  padding-left: 24px;
+  border-left: 1px dashed #bbb;
+  margin-left: 2px;
+}
+
+#jf-page .item-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+#jf-page .item-line .key {
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+#jf-page .item-line .colon {
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+#jf-page .item-line .comma {
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+#jf-page .item .string {
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+#jf-page .item-line .string {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+#jf-page .item .string a {
+  text-decoration: underline;
+  color: var(--jf-syntax-string-link);
+}
+
+#jf-page .item .string a:hover {
+  color: var(--jf-syntax-string-link-hover);
+}
+
+#jf-page .item .brace {
+  font-weight: bold;
+}
+
+#jf-page .item .expand {
+  width: 20px;
+  height: 18px;
+  display: inline-block;
+  position: absolute;
+  left: -20px;
+  top: 2px;
+  z-index: 5;
+  opacity: 0.35;
+  user-select: none;
+  cursor: pointer;
+}
+
+#jf-page .item > .expand:first-child {
+  position: absolute;
+  left: 4px;
+  top: 2px;
+}
+
+#jf-page .item.item-array .item-array-element > .expand:first-child {
+  position: absolute;
+  left: -16px;
+  top: 2px;
+}
+
+#jf-page .item .expand:after {
+  content: '\25bc';
+}
+
+#jf-page .item .expand:hover {
+  opacity: 0.35;
+}
+
+#jf-page .item .expand:active {
+  opacity: 0.5;
+}
+
+#jf-page .item.collapsed {
+  white-space: nowrap;
+}
+
+#jf-page .item.collapsed > .kv-list {
+  display: none;
+}
+
+#jf-page .item.collapsed .item .expand {
+  display: none;
+}
+
+#jf-page .item.collapsed > .ellipsis:after {
+  content: '\2026';
+  font-weight: bold;
+}
+
+#jf-page .item .ellipsis {
+  display: none;
+  cursor: pointer;
+  color: #888;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+#jf-page .item.collapsed > .ellipsis {
+  display: inline;
+}
+
+#jf-page .item.collapsed .item {
+  display: inline;
+}
+
+#jf-page .item.collapsed > .expand {
+  transform: rotate(-90deg);
+  top: -4px;
+  left: -2px;
+}
+
+#jf-page .remove-quote .quote {
+  display: none;
+}
+
+#jf-page .item > .expand:first-child + .quote {
+  margin-left: 0;
+}
+
+#jf-page .item.fh-hover {
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 2px;
+}
+
+/* =================== JSON Syntax Colors (Light) =================== */
+#jf-page .item .key {
+  color: var(--jf-syntax-key);
+}
+
+#jf-page .item .string {
+  color: var(--jf-syntax-string);
+}
+
+#jf-page .item .bool {
+  font-weight: bold;
+  color: var(--jf-syntax-bool);
+}
+
+#jf-page .item .null {
+  font-weight: bold;
+  color: var(--jf-syntax-null);
+}
+
+#jf-page .item .number {
+  font-weight: bold;
+  color: var(--jf-syntax-number);
+}
+
+#jf-page .item .item-object:hover > span,
+#jf-page .item .item-array:hover > span,
+#jf-page .item .item-block:hover > span {
+  font-weight: bold;
+  color: var(--jf-error);
+}
+
+#jf-page .item .item-line:hover,
+#jf-page .item-line.x-selected {
+  background: #f9f9f9;
+}
+
+#jf-page .item .item-line:hover span,
+#jf-page .item.x-selected > span {
+  font-weight: bolder;
+  background: var(--jf-selection-bg);
+}
+
+#jf-page .item .quote {
+  color: var(--jf-syntax-quote);
+}
+
+#jf-page .item .colon {
+  color: var(--jf-syntax-punctuation);
+}
+
+#jf-page .item .comma {
+  color: var(--jf-syntax-punctuation);
+}
+
+#jf-page .string-json-nested {
+  display: block;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+/* =================== Dark Mode =================== */
+[data-dt-dark] #jf-page {
+  background: #0d1117;
+  color: #c9d1d9;
+}
+
+[data-dt-dark] #jf-page .top-bar {
+  background: #161b22;
+  border-color: #30363d;
+}
+
+[data-dt-dark] #jf-page .brand {
+  color: #a5b4fc;
+}
+
+[data-dt-dark] #jf-page .btn {
+  background: #21262d;
+  border-color: #30363d;
+  color: #c9d1d9;
+}
+
+[data-dt-dark] #jf-page .btn:hover {
+  background: #30363d;
+  border-color: #484f58;
+}
+
+[data-dt-dark] #jf-page .btn-active {
+  background: #3d2e00 !important;
+  border-color: #d97706 !important;
+  color: #fbbf24 !important;
+}
+
+[data-dt-dark] #jf-page .divider {
+  background: #30363d;
+}
+
+[data-dt-dark] #jf-page .sort-label {
+  color: #8b949e;
+}
+
+[data-dt-dark] #jf-page .sort-group {
+  background: #30363d;
+}
+
+[data-dt-dark] #jf-page .sort-btn {
+  color: #8b949e;
+}
+
+[data-dt-dark] #jf-page .sort-btn:hover {
+  color: #c9d1d9;
+}
+
+[data-dt-dark] #jf-page .sort-btn.active {
+  background: #21262d;
+  color: #a5b4fc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-dt-dark] #jf-page .panel {
+  background: #161b22;
+  border-color: #30363d;
+}
+
+[data-dt-dark] #jf-page .panel-header {
+  border-color: #30363d;
+  color: #8b949e;
+}
+
+[data-dt-dark] #jf-page #jf-toast {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Dark mode JSON tree colors */
+[data-dt-dark] html.fh-jf #jf-page {
+  background: #0d1117;
+  color: #c9d1d9;
+}
+
+/* 暗色语法色对齐 json-format/App.vue 暗色模式 */
+[data-dt-dark] #jf-page {
+  --jf-syntax-key: #7ee787;
+  --jf-syntax-string: #a5d6ff;
+  --jf-syntax-string-link: #58a6ff;
+  --jf-syntax-string-link-hover: #b00;
+  --jf-syntax-number: #79c0ff;
+  --jf-syntax-bool: #ff7b72;
+  --jf-syntax-null: #8b949e;
+  --jf-syntax-quote: #6e7681;
+  --jf-syntax-punctuation: #8b949e;
+  --jf-selection-bg: rgba(255, 193, 7, 0.18);
+  --jf-selection-border: #ffc107;
+}
+
+[data-dt-dark] #jf-page .item .key {
+  color: var(--jf-syntax-key);
+}
+
+[data-dt-dark] #jf-page .item .kv-list {
+  border-left-color: #222;
+}
+
+[data-dt-dark] #jf-page .item .string {
+  color: var(--jf-syntax-string);
+}
+
+[data-dt-dark] #jf-page .item .string a {
+  color: var(--jf-syntax-string-link);
+}
+
+[data-dt-dark] #jf-page .item .string a:hover {
+  color: var(--jf-syntax-string-link-hover);
+}
+
+[data-dt-dark] #jf-page .item .brace,
+[data-dt-dark] #jf-page .item .colon,
+[data-dt-dark] #jf-page .item .comma {
+  color: var(--jf-syntax-punctuation);
+}
+
+[data-dt-dark] #jf-page .item .bool {
+  font-weight: bold;
+  color: var(--jf-syntax-bool);
+}
+
+[data-dt-dark] #jf-page .item .null {
+  font-weight: bold;
+  color: var(--jf-syntax-null);
+}
+
+[data-dt-dark] #jf-page .item .number {
+  font-weight: bold;
+  color: var(--jf-syntax-number);
+}
+
+[data-dt-dark] #jf-page .item .item-object:hover > span,
+[data-dt-dark] #jf-page .item .item-array:hover > span,
+[data-dt-dark] #jf-page .item .item-block:hover > span {
+  font-weight: bold;
+  color: #ffa657;
+}
+
+[data-dt-dark] #jf-page .item .item-line:hover,
+[data-dt-dark] #jf-page .item-line.x-selected {
+  background: #161b22;
+}
+
+[data-dt-dark] #jf-page .item .item-line:hover span,
+[data-dt-dark] #jf-page .item.x-selected > span {
+  background: var(--jf-selection-bg);
+}
+
+[data-dt-dark] #jf-page .item .quote {
+  color: var(--jf-syntax-quote);
+}
+
+[data-dt-dark] #jf-page .item .expand {
+  color: #fff;
+}

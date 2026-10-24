@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 安全漏洞
+    url: https://github.com/shadesheep/shadekit/security/advisories/new
+    about: 安全漏洞请勿开公开 Issue，走私密渠道（见 SECURITY.md）

@@ -1,0 +1,48 @@
+{
+  "origin": "http://studio.shadesheep.test:4173",
+  "environment": {
+    "name": "ShadeSheep · 测试环境",
+    "tags": ["test"],
+    "loginMethod": "generic",
+    "strategyConfig": {
+      "spec": {
+        "version": 2,
+        "template": "generic",
+        "ops": [
+          { "op": "clear.cookies", "range": "all" },
+          { "op": "goto", "url": "{origin}/login", "waitForLoad": true },
+          { "op": "fill", "target": { "css": "#username" }, "value": "{username}", "clearFirst": true },
+          { "op": "fill", "target": { "css": "#password" }, "value": "{password}", "clearFirst": true },
+          { "op": "click", "target": { "css": "#submit-btn" }, "onNotFound": "fail" },
+          { "op": "auth.write" }
+        ],
+        "success": [{ "page": { "type": "any", "of": [{ "type": "formGone" }, { "type": "urlChanged" }] } }],
+        "auth": { "mode": "page" },
+        "limits": { "requestMs": 15000, "stepMs": 5000, "settleMs": 10000 }
+      }
+    }
+  },
+  "accounts": [
+    {
+      "id": "demo-delivery-admin",
+      "name": "林屿 · 交付管理员",
+      "username": "admin@shadesheep.test",
+      "password": "shadesheep-demo",
+      "roles": ["管理员"],
+      "domains": ["http://studio.shadesheep.test:4173"]
+    },
+    {
+      "id": "demo-acceptance-tester",
+      "name": "周然 · 验收测试",
+      "username": "tester@shadesheep.test",
+      "password": "shadesheep-demo",
+      "roles": ["普通用户"],
+      "domains": ["http://studio.shadesheep.test:4173"]
+    }
+  ],
+  "envBadge": {
+    "enabled": true,
+    "position": "bottom-right",
+    "whitelist": ["http://studio.shadesheep.test:4173"]
+  }
+}

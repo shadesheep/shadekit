@@ -1,0 +1,342 @@
+/**
+ * ShadeKit 组件工具类
+ * 可复用的组件样式，通过 @extend 或直接使用类名引用。
+ *
+ * 使用方式：
+ * 1. 在 Vue 组件中 @import 此文件
+ * 2. 使用 @extend .dt-btn-gradient 或直接使用 class="dt-btn-gradient"
+ *
+ * 命名规范：所有公共类使用 .dt- 前缀，避免与组件内部样式冲突。
+ */
+
+/* ===== 按钮系列 ===== */
+
+/* 基础按钮 */
+.dt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.dt-btn:hover {
+  background: var(--bg-hover);
+  border-color: #cbd5e1;
+}
+
+[data-dt-dark] .dt-btn {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-dt-dark] .dt-btn:hover {
+  background: #30363d;
+}
+
+.dt-btn:active {
+  transform: scale(0.98);
+}
+
+/* 渐变主按钮 */
+.dt-btn-gradient {
+  @extend .dt-btn;
+  background: var(--gradient-primary);
+  border: none;
+  color: white;
+  box-shadow: var(--shadow-primary);
+}
+
+.dt-btn-gradient:hover {
+  background: var(--gradient-primary-hover);
+  box-shadow: var(--shadow-primary-hover);
+  transform: translateY(-1px);
+}
+
+.dt-btn-gradient:active {
+  transform: scale(0.98);
+}
+
+/* 次要按钮（边框样式） */
+.dt-btn-secondary {
+  @extend .dt-btn;
+  background: transparent;
+}
+
+/* 危险按钮 */
+.dt-btn-danger {
+  @extend .dt-btn;
+  background: var(--error);
+  border: none;
+  color: white;
+}
+
+.dt-btn-danger:hover {
+  background: #b91c1c;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+/* 按钮尺寸变体 */
+.dt-btn-sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+
+.dt-btn-icon {
+  padding: 5px 8px;
+}
+
+/* ===== 卡片容器 ===== */
+
+/* 表单卡片（紧凑版） */
+.dt-form-card {
+  background: var(--surface-base);
+  border: var(--border-default);
+  border-radius: var(--radius-xl);
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+}
+
+.dt-form-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  border-color: #cbd5e1;
+}
+
+[data-dt-dark] .dt-form-card {
+  background: var(--dark-card-gradient);
+  border-color: var(--border);
+  box-shadow: var(--dark-card-shadow);
+}
+
+[data-dt-dark] .dt-form-card:hover {
+  border-color: var(--dark-card-border-hover);
+  box-shadow: var(--dark-card-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.dt-form-card:last-child {
+  margin-bottom: 0;
+}
+
+.dt-form-card h3 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ===== 列表项 ===== */
+
+.dt-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: var(--border-default);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  background: var(--surface-base);
+}
+
+.dt-list-item:hover {
+  border-color: #93c5fd;
+  background: var(--bg-hover);
+}
+
+[data-dt-dark] .dt-list-item {
+  border-color: var(--border);
+}
+
+[data-dt-dark] .dt-list-item:hover {
+  border-color: #58a6ff;
+  background: rgba(30, 58, 95, 0.2);
+}
+
+.dt-list-item.active {
+  border-color: var(--primary-start);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.04), rgba(59, 130, 246, 0.04));
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.15);
+}
+
+[data-dt-dark] .dt-list-item.active {
+  border-color: #818cf8;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(59, 130, 246, 0.12));
+  box-shadow: none;
+}
+
+/* ===== 输入框 ===== */
+
+.dt-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.dt-input:focus {
+  border-color: var(--primary-start);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+  outline: none;
+}
+
+[data-dt-dark] .dt-input {
+  background: var(--surface-secondary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-dt-dark] .dt-input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.15);
+}
+
+.dt-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* 文本域 */
+.dt-textarea {
+  @extend .dt-input;
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+}
+
+/* 选择框 */
+.dt-select {
+  @extend .dt-input;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+/* ===== 标签/徽章 ===== */
+
+.dt-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.dt-badge-primary {
+  @extend .dt-badge;
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-start);
+}
+
+.dt-badge-success {
+  @extend .dt-badge;
+  background: rgba(22, 163, 74, 0.1);
+  color: var(--success);
+}
+
+.dt-badge-error {
+  @extend .dt-badge;
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--error);
+}
+
+/* ===== 空状态 ===== */
+
+.dt-empty-state {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.dt-empty-state .icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 12px;
+  opacity: 0.5;
+}
+
+.dt-empty-state p {
+  font-size: var(--text-base);
+  margin-bottom: 12px;
+}
+
+/* ===== 分割线 ===== */
+
+.dt-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+[data-dt-dark] .dt-divider {
+  background: var(--border);
+}
+
+.dt-divider-horizontal {
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+  margin: 12px 0;
+}
+
+/* ===== Flex 工具类 ===== */
+
+.dt-flex {
+  display: flex;
+}
+
+.dt-flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.dt-items-center {
+  align-items: center;
+}
+
+.dt-justify-between {
+  justify-content: space-between;
+}
+
+.dt-justify-center {
+  justify-content: center;
+}
+
+.dt-gap-sm {
+  gap: 6px;
+}
+
+.dt-gap-md {
+  gap: 10px;
+}
+
+.dt-gap-lg {
+  gap: 16px;
+}

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="ShadeSheep 交付台 — ShadeKit 本地虚构演示系统">
+  <title>登录 · ShadeSheep 交付台</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="login-body">
+  <main class="login-layout">
+    <section class="login-story">
+      <a class="brand" href="/login" aria-label="ShadeSheep 首页"><span class="brand-symbol">S<span>✦</span></span><span>shadesheep<span class="brand-sub">ShadeSheep 交付台</span></span></a>
+      <div class="story-copy">
+        <p class="eyebrow"><span class="status-dot"></span> DELIVERY, IN FOCUS.</p>
+        <h1>让每一次交付，<br>都有清晰的方向。</h1>
+        <p class="story-description">把分散的环境、发布与验收，收进同一个视野。<br>为认真推进每一件事的人而做。</p>
+      </div>
+      <section class="login-preview" aria-label="虚构交付进度概览">
+        <div class="preview-head"><span>交付概览 / OCTOBER</span><span class="tiny-label">FICTIONAL WORKSPACE</span></div>
+        <div class="preview-grid">
+          <div class="preview-metric"><span>进行中的交付</span><strong>12<small>个</small></strong><i>↗ 本月新增 3 个</i></div>
+          <div class="preview-metric accent"><span>本周验收通过率</span><strong>96.8<small>%</small></strong><svg viewBox="0 0 180 36" aria-hidden="true"><path d="M0 30L22 24L44 27L66 17L88 20L110 9L132 14L154 5L180 8"/></svg></div>
+          <div class="preview-track"><span class="tiny-label">NEXT MILESTONE</span><div><b>订单中心 · 灰度验收</b><span>10.28</span></div><div class="track-line"><i></i><i></i><i></i><i></i></div></div>
+        </div>
+      </section>
+      <footer class="login-footer"><span>专注交付，不必分心。</span><span>SHADESHEEP © 2026</span></footer>
+    </section>
+
+    <section class="login-panel">
+      <form id="login-form" class="login-card">
+        <div class="login-card-top"><span class="tiny-label">WORKSPACE ACCESS</span><span class="demo-badge">演示工作区</span></div>
+        <h2>欢迎回来</h2>
+        <p class="login-lead">登录，继续把好事做成。</p>
+        <label for="username">用户名</label>
+        <input id="username" name="username" type="email" autocomplete="username" placeholder="name@company.test" required>
+        <div class="password-label"><label for="password">密码</label><span>演示账号统一密码</span></div>
+        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <button id="submit-btn" class="login-submit" type="submit"><span>进入交付台</span><span aria-hidden="true">↗</span></button>
+        <div class="demo-accounts">
+          <p><span>选择身份自动填入</span><span>仅用于本地演示</span></p>
+          <button type="button" data-fill-user="admin@shadesheep.test"><span class="account-initial">林</span><span><b>林屿 · 交付管理员</b><small>admin@shadesheep.test</small></span><span aria-hidden="true">↗</span></button>
+          <button type="button" data-fill-user="tester@shadesheep.test"><span class="account-initial secondary">周</span><span><b>周然 · 验收测试</b><small>tester@shadesheep.test</small></span><span aria-hidden="true">↗</span></button>
+          <p class="demo-password">虚构账号 · 密码 <code>shadesheep-demo</code></p>
+        </div>
+        <p class="login-note"><span class="lock-icon" aria-hidden="true">◇</span> 本地运行 · 无外部请求 · 不收集任何数据</p>
+      </form>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector('#login-form');
+    const error = document.querySelector('#login-error');
+    for (const button of document.querySelectorAll('[data-fill-user]')) {
+      button.addEventListener('click', () => {
+        document.querySelector('#username').value = button.dataset.fillUser;
+        document.querySelector('#password').value = 'shadesheep-demo';
+        error.hidden = true;
+      });
+    }
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = document.querySelector('#submit-btn');
+      submit.disabled = true;
+      submit.firstElementChild.textContent = '正在进入…';
+      error.hidden = true;
+      try {
+        const response = await fetch('/api/session/login', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: form.username.value.trim(), password: form.password.value }),
+        });
+        if (!response.ok) {
+          const result = await response.json();
+          error.textContent = result.error || '暂时无法登录，请稍后重试';
+          error.hidden = false;
+          return;
+        }
+        location.assign('/console');
+      } catch {
+        error.textContent = '无法连接本地演示服务，请确认服务已启动';
+        error.hidden = false;
+      } finally {
+        submit.disabled = false;
+        submit.firstElementChild.textContent = '进入交付台';
+      }
+    });
+  </script>
+</body>
+</html>

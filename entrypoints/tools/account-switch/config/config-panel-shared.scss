@@ -1,0 +1,337 @@
+/**
+ * 账号切换配置页共享样式（scoped @import 用）
+ *
+ * Config.vue 与 config/DomainsPanel.vue 各自的 <style scoped> 通过
+ * @import 引用本文件：表单卡片、按钮、列表项、工具栏等样式在两个组件间
+ * 保持一致，且各自获得自己的 scoped 属性选择器（样式互不外泄）。
+ *
+ * 仅放两个组件都用到的选择器；单组件专用的样式留在各自文件中。
+ */
+
+/* Form card - 别名到全局 .dt-form-card */
+.form-card {
+  /* 样式由全局 .dt-form-card 提供 */
+}
+
+/* h3 子元素选择器，确保 scoped 下生效 */
+.form-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-dt-dark] .form-card h3 {
+  color: var(--text-primary, #f1f5f9);
+}
+
+.form-row {
+  margin-bottom: 12px;
+}
+
+.form-row label {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ===== @deprecated 按钮系统（保留向后兼容，不再新增使用） =====
+ *
+ * 下列按钮类已由 DtButton 组件（entrypoints/shared/components/DtButton.vue）统一接管：
+ *   .dt-btn-primary   → <DtButton variant="primary">
+ *   .dt-btn-secondary → <DtButton variant="secondary"> 或 variant="default"
+ *   .dt-btn-danger    → <DtButton variant="danger">
+ *   .btn-toolbar      → <DtButton size="sm">（无 variant 即 default）
+ *
+ * 新代码请直接使用 DtButton；这些类仅用于少数仍需以 <label> 等非按钮元素
+ * 承载按钮形态的场景（DtButton 始终渲染 <button>），不应再扩散。
+ */
+
+/* @deprecated 用 <DtButton variant="primary"> 替代 */
+.dt-btn-primary {
+  padding: 6px 16px;
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease-out;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
+  display: inline-flex;
+  align-items: center;
+}
+
+.dt-btn-primary:hover {
+  background: linear-gradient(135deg, #4f46e5, #2563eb);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
+}
+
+.dt-btn-primary:active {
+  transform: scale(0.98);
+}
+
+/* @deprecated 用 <DtButton variant="secondary"> 或 variant="default" 替代 */
+.dt-btn-secondary {
+  padding: 6px 16px;
+  background: #fff;
+  color: #374151;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease-out;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dt-btn-secondary:hover {
+  border-color: #93c5fd;
+  background: #f8fafc;
+  transform: translateY(-1px);
+}
+
+.dt-btn-secondary:active {
+  transform: scale(0.98);
+}
+
+[data-dt-dark] .dt-btn-secondary {
+  background: var(--dt-dark-surface-1);
+  border-color: var(--dt-dark-border);
+  color: #cbd5e1;
+}
+
+[data-dt-dark] .dt-btn-secondary:hover {
+  border-color: #58a6ff;
+  background: #1e3a5f;
+}
+
+/* @deprecated 用 <DtButton variant="danger"> 替代 */
+.dt-btn-danger {
+  padding: 6px 16px;
+  background: #fff;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease-out;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dt-btn-danger:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+  transform: translateY(-1px);
+}
+
+.dt-btn-danger:active {
+  transform: scale(0.98);
+}
+
+[data-dt-dark] .dt-btn-danger {
+  background: var(--dt-dark-surface-1);
+  border-color: #7f1d1d;
+  color: #f87171;
+}
+
+[data-dt-dark] .dt-btn-danger:hover {
+  background: #7f1d1d33;
+  border-color: #ef4444;
+}
+
+/* List */
+.item-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+[data-dt-dark] .item-name {
+  color: #f1f5f9;
+}
+
+.item-sub {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+}
+
+.item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Environment tag */
+.env-tag {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-weight: 500;
+}
+
+[data-dt-dark] .env-tag {
+  background: var(--dt-dark-surface-hover);
+  color: #8b949e;
+}
+
+/* Empty list */
+.empty-list {
+  text-align: center;
+  padding: 24px;
+}
+
+/* @deprecated 用 <DtButton size="sm"> 替代（需要 active 态的场景用 variant="primary"） */
+.btn-toolbar {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  transition: all 0.15s ease-out;
+}
+
+.btn-toolbar:hover {
+  border-color: #93c5fd;
+  color: #3b82f6;
+}
+
+.btn-toolbar.active {
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.25);
+}
+
+[data-dt-dark] .btn-toolbar {
+  background: var(--dt-dark-surface-1);
+  border-color: var(--dt-dark-border);
+  color: #8b949e;
+}
+
+[data-dt-dark] .btn-toolbar:hover {
+  border-color: #58a6ff;
+  color: #60a5fa;
+}
+
+[data-dt-dark] .btn-toolbar.active {
+  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* Toolbar layout */
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.toolbar-count {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+[data-dt-dark] .toolbar-count {
+  color: #64748b;
+}
+
+/* Form highlight (clone/edit 提示) */
+.form-card-highlight {
+  border-color: #f59e0b !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+  transition: border-color 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+[data-dt-dark] .form-card-highlight {
+  border-color: var(--warning-border-dark) !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.15);
+}
+
+/* Domain Chip Selector（账号表单关联环境 + 环境表单标签 chip 共用） */
+.domain-chip-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.domain-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  user-select: none;
+  transition: all 0.2s ease-out;
+}
+
+[data-dt-dark] .domain-chip {
+  background: var(--dt-dark-surface-1);
+  border-color: var(--dt-dark-border);
+  color: #8b949e;
+}
+
+.domain-chip:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+[data-dt-dark] .domain-chip:hover {
+  border-color: #58a6ff;
+  background: #1e3a5f;
+}
+
+.domain-chip.selected {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e40af;
+}
+
+[data-dt-dark] .domain-chip.selected {
+  background: #1e3a5f;
+  border-color: #58a6ff;
+  color: #93c5fd;
+}

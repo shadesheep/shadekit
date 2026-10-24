@@ -1,0 +1,72 @@
+{
+  "name": "shadekit",
+  "description": "面向开发/测试的浏览器工具箱：任意系统账号一键切换、环境指示、JSON 格式化与对比、代码美化、中文模拟数据生成",
+  "author": "ShadeSheep",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shadesheep/shadekit.git"
+  },
+  "homepage": "https://github.com/shadesheep/shadekit",
+  "bugs": "https://github.com/shadesheep/shadekit/issues",
+  "private": true,
+  "version": "1.1.4",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "dev:edge": "wxt -b edge",
+    "build": "wxt build",
+    "build:edge": "wxt build --browser edge",
+    "zip": "wxt zip",
+    "zip:edge": "wxt zip --browser edge",
+    "postinstall": "wxt prepare",
+    "check": "vue-tsc --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "test": "vitest run && node --test tests/*.test.mjs docs/readme-demo/*.test.mjs",
+    "test:demo": "node --test docs/readme-demo/server.test.mjs && vitest run tests/readme-demo-config.test.ts",
+    "release": "node scripts/release.mjs",
+    "chrome:login": "node scripts/chrome-login.mjs"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.0",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.0",
+    "codemirror": "^6.0.2",
+    "fast-json-patch": "^3.1.1",
+    "js-beautify": "^1.15.4",
+    "jsencrypt": "^3.3.2",
+    "json-source-map": "^0.6.1",
+    "pinia": "^2.2.6",
+    "sql-formatter": "^15.7.3",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.13",
+    "@iconify-json/lucide": "^1.2.0",
+    "@types/chrome": "^0.2.9",
+    "@types/fs-extra": "^11.0.4",
+    "@types/js-beautify": "^1.14.3",
+    "@unocss/preset-icons": "^66.10.2",
+    "@unocss/preset-uno": "^66.10.2",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "fs-extra": "^11.3.5",
+    "happy-dom": "^20.11.2",
+    "jsdom": "^29.1.1",
+    "sass-embedded": "^1.104.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "undici": "^7.29.0",
+    "unocss": "^66.10.2",
+    "vite": "^8.3.0",
+    "vitest": "^4.1.5",
+    "vue-tsc": "^2.1.10",
+    "wxt": "^0.21.4"
+  }
+}

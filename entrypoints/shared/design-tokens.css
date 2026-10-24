@@ -1,0 +1,211 @@
+/**
+ * ShadeKit 设计 Token
+ * 全局 CSS 变量，用于统一圆角、阴影、过渡等视觉参数。
+ *
+ * 使用方式：在各组件中通过 var(--radius-md) 等方式引用。
+ * 暗色模式 Token 通过 [data-dt-dark] 选择器覆盖。
+ */
+
+/* ===== 圆角 ===== */
+:root {
+  --radius-sm: 4px;   /* sort-btn、小按钮 */
+  --radius-md: 6px;   /* 输入框、modal、CodeMirror 边框 */
+  --radius-lg: 8px;   /* 卡片、列表项、tab */
+  --radius-xl: 12px;  /* 面板容器 */
+}
+
+/* ===== 阴影 ===== */
+:root {
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-primary: 0 1px 3px rgba(99, 102, 241, 0.3);
+  --shadow-primary-hover: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+/* ===== 过渡 ===== */
+:root {
+  --transition-fast: 0.15s ease-out;
+  --transition-normal: 0.2s ease-out;
+}
+
+/* ===== 颜色 ===== */
+:root {
+  --primary-start: #6366f1;
+  --primary-end: #3b82f6;
+  --primary-hover-start: #4f46e5;
+  --primary-hover-end: #2563eb;
+  --success: #16a34a;
+  --success-dark: #4ade80;
+  --error: #dc2626;
+  --error-dark: #f87171;
+  --info: #3b82f6;
+  --info-dark: #60a5fa;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+  --bg-hover: #f8fafc;
+  --bg-secondary: #f1f5f9;
+}
+
+/* ===== 排版 ===== */
+:root {
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 22px;
+}
+
+/* ===== 暗色模式颜色覆盖 ===== */
+/* 覆盖 light mode 同名变量，使 var(--text-primary) 等自动切换 */
+[data-dt-dark] {
+  --text-primary: #f1f5f9;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --border: #30363d;
+  --bg-hover: #21262d;
+  --bg-secondary: #1c2128;
+}
+
+/* ===== 暗色模式颜色 ===== */
+[data-dt-dark] {
+  --dark-bg-surface: #161b22;
+  --dark-bg-deep: #0d1117;
+  --dark-bg-hover: #21262d;
+  --dark-border: #30363d;
+  --dark-border-hover: #58a6ff;
+  --dark-text: #c9d1d9;
+  --dark-text-muted: #6e7681;
+}
+
+/* ===== 暗色模式阴影 ===== */
+[data-dt-dark] {
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-primary: 0 1px 3px rgba(99, 102, 241, 0.4);
+  --shadow-primary-hover: 0 4px 12px rgba(99, 102, 241, 0.5);
+}
+
+/* ===== 暗色模式卡片表面 ===== */
+[data-dt-dark] {
+  --dark-card-gradient: linear-gradient(135deg, var(--dark-bg-surface), var(--dark-bg-deep));
+  --dark-card-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --dark-card-inset-strong: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --dark-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --dark-card-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 1px rgba(99, 102, 241, 0.08);
+  --dark-card-border-hover: rgba(99, 102, 241, 0.3);
+}
+
+/* ===== 渐变 ===== */
+:root {
+  --gradient-primary: linear-gradient(135deg, var(--primary-start), var(--primary-end));
+  --gradient-primary-hover: linear-gradient(135deg, var(--primary-hover-start), var(--primary-hover-end));
+  --gradient-primary-vertical: linear-gradient(180deg, var(--primary-start), var(--primary-end));
+  --gradient-header-bg: linear-gradient(135deg, rgba(99,102,241,0.06), rgba(59,130,246,0.06), rgba(6,182,212,0.04));
+}
+
+[data-dt-dark] {
+  --gradient-header-bg: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(59,130,246,0.12), rgba(6,182,212,0.08));
+}
+
+/* ===== 边框 ===== */
+:root {
+  --border-default: 1px solid var(--border);
+  --border-accent: 1px solid rgba(99, 102, 241, 0.08);
+  --border-accent-dark: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+/* ===== 表面颜色 ===== */
+:root {
+  --surface-base: #ffffff;
+  --surface-secondary: #f8fafc;
+  --surface-hover: #f1f5f9;
+}
+
+[data-dt-dark] {
+  --surface-base: #161b22;
+  --surface-secondary: #1c2128;
+  --surface-hover: #21262d;
+}
+
+/* ===== 毛玻璃 ===== */
+:root {
+  --backdrop-blur: blur(12px);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+}
+
+[data-dt-dark] {
+  --glass-bg: rgba(22, 27, 34, 0.85);
+}
+
+/* ===== 等宽字体 ===== */
+:root {
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* ===== 警示色 ===== */
+:root {
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+  --warning-border: #fbbf24;
+}
+
+[data-dt-dark] {
+  --warning-dark: #fbbf24;
+  --warning-bg-dark: rgba(251, 191, 36, 0.12);
+  --warning-border-dark: #f59e0b;
+}
+
+/* ===== 选中色 ===== */
+:root {
+  --selection-bg: #fff3cd;
+  --selection-border: #ffc107;
+}
+
+[data-dt-dark] {
+  --selection-bg-dark: rgba(255, 193, 7, 0.18);
+  --selection-border-dark: #ffc107;
+}
+
+/* ===== 工具语义色 ===== */
+:root {
+  /* account-switch — indigo 品牌主色，旗舰工具 */
+  --tool-account-switch-start: #6366f1;
+  --tool-account-switch-end: #3b82f6;
+
+  /* json-format — amber 结构化数据「高亮」感 */
+  --tool-json-format-start: #f59e0b;
+  --tool-json-format-end: #d97706;
+
+  /* json-diff — violet 对比/差异 */
+  --tool-json-diff-start: #8b5cf6;
+  --tool-json-diff-end: #6d28d9;
+
+  /* image-base64 — pink 图像/媒体 */
+  --tool-image-base64-start: #ec4899;
+  --tool-image-base64-end: #db2777;
+
+  /* code-beautify — cyan 代码/工程感 */
+  --tool-code-beautify-start: #06b6d4;
+  --tool-code-beautify-end: #0891b2;
+
+  /* mock-data — emerald 生成/种子数据 */
+  --tool-mock-data-start: #10b981;
+  --tool-mock-data-end: #059669;
+}
+
+/* ===== Focus Ring ===== */
+:root {
+  --focus-ring-color: var(--primary-start);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}
+
+[data-dt-dark] {
+  --focus-ring-color: #818cf8;
+}

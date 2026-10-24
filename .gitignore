@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Build output
+.output/
+.dist/
+
+# WXT
+.wxt/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Python tooling
+__pycache__/
+*.py[cod]
+
+# Env (only the empty template is public)
+.env
+.env.*
+!.env.example
+
+# Private login packages and local work tracking
+docs/login-specs/*.local.json
+.scratch/
+docs/superpowers/
+
+# 本地演示截图与录像；最终公开素材在 docs/images/
+docs/images/raw/
+
+# Internal AI tooling / work tracking (not for open source)
+.superpowers/
+.claude/
+.agents/
+.codemoss/
+.ccgui/
+
+# Signing keys and local release state
+*.pem
+*.key
+*.p12
+*.pfx
+keys/
+
+# Service account key JSON (referenced by CHROME_SERVICE_ACCOUNT_JSON)
+*-service-account*.json
+service-account*.json

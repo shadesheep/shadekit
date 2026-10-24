@@ -1,0 +1,148 @@
+/**
+ * 共享独立工具页样式
+ * JSON 格式化、JSON 对比、代码美化、图片 Base64 等独立标签页的共用布局样式。
+ * 各页面在 main.ts 中 import 本文件（全局生效）。
+ *
+ * 按钮 / 面板 / 空态不由本文件提供，统一使用
+ * shared/components 下的 <DtButton> / <DtPanel> / <DtEmptyState>。
+ */
+
+.page-wrapper {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+[data-dt-dark] .page-wrapper {
+  background: var(--dt-dark-base, #0d1117);
+  color: #f0f6fc;
+}
+
+/* ===== 顶部工具栏 ===== */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  flex-shrink: 0;
+}
+
+[data-dt-dark] .top-bar {
+  background: #161b22;
+  border-color: var(--border, #30363d);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--primary-start, #6366f1);
+  flex-shrink: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  row-gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+/* 工具栏内的小字标签（如「排序：」「示例：」） */
+.toolbar-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+[data-dt-dark] .toolbar-label {
+  color: #8b949e;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border, #e2e8f0);
+  margin: 0 4px;
+}
+
+[data-dt-dark] .divider {
+  background: var(--border, #30363d);
+}
+
+/* ===== 内容区域 ===== */
+.content-area {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content-area.layout-left-right {
+  flex-direction: row;
+}
+
+.content-area.layout-up-down {
+  flex-direction: column;
+}
+
+/* 布局比例: 编辑器窄, 输出宽（搭配 <DtPanel class="editor-panel|output-panel">） */
+.content-area.layout-left-right .editor-panel {
+  flex: 0 0 35%;
+  min-width: 300px;
+}
+
+.content-area.layout-left-right .output-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.content-area.layout-up-down .editor-panel {
+  flex: 0 0 30%;
+  min-height: 200px;
+}
+
+.content-area.layout-up-down .output-panel {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ===== CodeMirror 编辑器容器 ===== */
+.code-editor {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ===== 拖拽悬停遮罩 ===== */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(99, 102, 241, 0.1);
+  border: 2px dashed #6366f1;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #6366f1;
+  font-weight: 600;
+  z-index: 100;
+  pointer-events: none;
+}
+
+[data-dt-dark] .drop-overlay {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: #818cf8;
+  color: #a5b4fc;
+}

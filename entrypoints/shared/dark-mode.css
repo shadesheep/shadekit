@@ -1,0 +1,261 @@
+/**
+ * 全局暗色模式样式
+ * 通过 [data-dt-dark] 属性控制暗色模式。
+ *
+ * 使用原则：
+ * - 各 Vue 组件的暗色样式应在组件 scoped style 中通过 [data-dt-dark] 选择器定义。
+ * - 此文件仅保留无法放入 scoped style 的全局规则：
+ *   1. 滚动条样式（::-webkit-scrollbar 伪元素无法 scoped）
+ *   2. 非 Vue 组件创建的 DOM 元素（如 content/index.ts 创建的容器）
+ *   3. 第三方库生成的类（UnoCSS 原子类覆盖等）
+ *   4. Checkbox/Radio 统一样式（避免各组件重复定义）
+ *
+ * !important 使用场景：仅在全局规则中用于覆盖第三方库样式或确保优先级。
+ */
+
+/* 引入设计 Token 变量 */
+@import './design-tokens.css';
+
+/* ===== 亮色模式色彩系统 ===== */
+:root,
+:host {
+  /* 色彩层级 */
+  --dt-light-base: #ffffff;
+  --dt-light-surface: #ffffff;
+  --dt-light-surface-secondary: #f8fafc;
+  --dt-light-surface-hover: #f1f5f9;
+
+  /* 边框 */
+  --dt-light-border: #e2e8f0;
+  --dt-light-border-hover: #cbd5e1;
+  --dt-light-border-accent: rgba(99, 102, 241, 0.2);
+
+  /* 文本层级 */
+  --dt-light-text-primary: #0f172a;
+  --dt-light-text-secondary: #64748b;
+  --dt-light-text-muted: #94a3b8;
+  --dt-light-text-disabled: #cbd5e1;
+
+  /* 阴影 */
+  --dt-light-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --dt-light-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.04);
+  --dt-light-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+
+  /* 品牌色 */
+  --dt-light-accent: #6366f1;
+  --dt-light-accent-hover: #4f46e5;
+  --dt-light-accent-glow: rgba(99, 102, 241, 0.15);
+}
+
+/* ===== 暗色模式色彩系统 (GitHub 风格) ===== */
+/* 在 Light DOM 中使用 :root[data-dt-dark]，在 Shadow DOM 中使用 :host([data-dt-dark]) */
+:root[data-dt-dark],
+:host([data-dt-dark]) {
+  /* 色彩层级 - GitHub 风格 */
+  --dt-dark-base: #0d1117;
+  --dt-dark-surface-1: #161b22;
+  --dt-dark-surface-2: #161b22;
+  --dt-dark-surface-3: #21262d;
+  --dt-dark-surface-hover: #21262d;
+
+  /* 边框 - GitHub 风格 */
+  --dt-dark-border: #30363d;
+  --dt-dark-border-hover: #484f58;
+  --dt-dark-border-accent: rgba(99, 102, 241, 0.3);
+
+  /* 文本层级 */
+  --dt-dark-text-primary: #f1f5f9;
+  --dt-dark-text-secondary: #8b949e;
+  --dt-dark-text-muted: #6e7681;
+  --dt-dark-text-disabled: #484f58;
+
+  /* 阴影 */
+  --dt-dark-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --dt-dark-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --dt-dark-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --dt-dark-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --dt-dark-shadow-inset-strong: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  /* 品牌色 */
+  --dt-dark-accent: #818cf8;
+  --dt-dark-accent-hover: #6366f1;
+  --dt-dark-accent-glow: rgba(129, 140, 248, 0.2);
+}
+
+/* ===== 全局 Focus Ring ===== */
+/* 限定在 extension 页面容器内，不泄漏到宿主页面。
+ * 约定：任何扩展 UI 容器根节点挂 data-dt-root 属性即自动获得
+ * focus ring / 输入框 / 滚动条样式（ADR: UI 评审 2026-10）。 */
+[data-dt-root] :focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+[data-dt-dark] [data-dt-root] :focus-visible {
+  outline-color: var(--dt-dark-accent, #818cf8);
+}
+
+/* 搜索框已有 :focus-within 父级 glow，排除额外 outline */
+:is(.as-search-input, .search-input):focus-visible {
+  outline: none;
+}
+
+/* ===== 输入框 Focus Ring 统一 ===== */
+/* 限定在 extension 容器内 */
+[data-dt-root]
+  :is(input[type="text"], input[type="number"], input[type="password"], textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]) {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-dt-root]
+  :is(input[type="text"], input[type="number"], input[type="password"], textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.12);
+  outline: none;
+}
+[data-dt-dark] [data-dt-root]
+  :is(input[type="text"], input[type="number"], input[type="password"], textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.15);
+}
+
+/* ===== 滚动条样式 ===== */
+/* 限定到 ShadeKit 容器，不影响宿主页面 */
+#devtools-panel ::-webkit-scrollbar,
+.devtools-panel-float ::-webkit-scrollbar,
+[data-dt-root] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+#devtools-panel ::-webkit-scrollbar-track,
+.devtools-panel-float ::-webkit-scrollbar-track,
+[data-dt-root] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+#devtools-panel ::-webkit-scrollbar-thumb,
+.devtools-panel-float ::-webkit-scrollbar-thumb,
+[data-dt-root] ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+#devtools-panel ::-webkit-scrollbar-thumb:hover,
+.devtools-panel-float ::-webkit-scrollbar-thumb:hover,
+[data-dt-root] ::-webkit-scrollbar-thumb:hover {
+  background: #9aa0a6;
+}
+
+/* 暗色模式 */
+[data-dt-dark] #devtools-panel ::-webkit-scrollbar,
+[data-dt-dark] .devtools-panel-float ::-webkit-scrollbar,
+[data-dt-dark] [data-dt-root] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+[data-dt-dark] #devtools-panel ::-webkit-scrollbar-track,
+[data-dt-dark] .devtools-panel-float ::-webkit-scrollbar-track,
+[data-dt-dark] [data-dt-root] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-dt-dark] #devtools-panel ::-webkit-scrollbar-thumb,
+[data-dt-dark] .devtools-panel-float ::-webkit-scrollbar-thumb,
+[data-dt-dark] [data-dt-root] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3a3f4b, #2a2e3a);
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+[data-dt-dark] #devtools-panel ::-webkit-scrollbar-thumb:hover,
+[data-dt-dark] .devtools-panel-float ::-webkit-scrollbar-thumb:hover,
+[data-dt-dark] [data-dt-root] ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #4a4f5b, #3a3f4b);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ===== Toggle Switch (Standard) ===== */
+/* 用于 ToolMarket、account-switch Config 等 */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 20px;
+  transition: background 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+[data-dt-dark] .toggle-slider {
+  background: #475569;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 2px;
+  bottom: 2px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease-in-out;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* 激活态用纯色：渐变只保留给主操作按钮与品牌标识（ADR: UI 评审 2026-10） */
+.toggle-switch input:checked + .toggle-slider {
+  background: #6366f1;
+}
+
+[data-dt-dark] .toggle-switch input:checked + .toggle-slider {
+  background: #818cf8;
+  box-shadow: 0 0 6px rgba(129, 140, 248, 0.4);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+/* ===== Form Card ===== */
+/* 全局复用的卡片样式，使用 .dt-form-card 避免冲突 */
+.dt-form-card {
+  background: #fff;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.04));
+  box-sizing: border-box;
+}
+
+.dt-form-card:last-child {
+  margin-bottom: 0;
+}
+
+[data-dt-dark] .dt-form-card {
+  background: var(--dark-card-gradient, linear-gradient(135deg, var(--dt-dark-surface-1, #1a1d26), var(--dt-dark-base, #0d1117)));
+  border-color: var(--dt-dark-border, #2a2e3a);
+  box-shadow: var(--dark-card-shadow, 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.04));
+}
+
+.dt-form-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: var(--text-primary, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+[data-dt-dark] .dt-form-card h3 {
+  color: var(--text-primary, #f1f5f9);
+}
