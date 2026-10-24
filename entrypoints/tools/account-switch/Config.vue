@@ -2289,7 +2289,7 @@ select[multiple] option {
   text-align: right;
 }
 
-[data-dt-dark] .env-table th {
+.env-table th {
   position: sticky;
   top: 0;
   z-index: 1;
