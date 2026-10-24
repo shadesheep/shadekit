@@ -57,7 +57,7 @@
     "@unocss/preset-uno": "^66.11.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "fs-extra": "^11.4.1",
-    "happy-dom": "^20.14.6",
+    "happy-dom": "^21.0.4",
     "jsdom": "^29.1.1",
     "sass-embedded": "^1.106.0",
     "tsx": "^4.23.15",
