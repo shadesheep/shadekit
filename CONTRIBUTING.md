@@ -36,7 +36,7 @@ npm run dev          # Chrome 开发模式（dev:firefox / dev:edge 对应其他
 
 ## 分支模型
 
-- `master` — 主干，PR 目标分支
+- `main` — 主干，PR 目标分支
 - `feature/*` — 功能分支
 - `v*` — 版本线分支（如 `v1.1.4`）
 
