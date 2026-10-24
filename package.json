@@ -45,7 +45,7 @@
     "json-source-map": "^0.6.1",
     "pinia": "^2.2.6",
     "sql-formatter": "^15.7.3",
-    "vue": "^3.5.13"
+    "vue": "^3.5.44"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.13",
