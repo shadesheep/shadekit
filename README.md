@@ -76,33 +76,7 @@ npm run build:edge     # Edge 版本
 npm run zip:edge       # 打包为 zip
 ```
 
-> **维护者发布**：`npm run release` 一键构建并提交 Chrome/Edge 双商店，需 `.env` 中的商店发布凭证（格式见 `.env.example`）。Chrome 使用 Web Store API v2 的服务账号认证，配置步骤见下节。普通开发、构建和 CI 不读取发布凭证。
-
-#### Chrome v2 发布配置
-
-1. 在 [Google Cloud Console](https://console.cloud.google.com/) 启用 **Chrome Web Store API**。
-2. 创建**服务账号**（无需授予项目角色），在 [Chrome 开发者后台](https://chrome.google.com/webstore/devconsole/) 的 **Account** 页把服务账号邮箱加为成员。
-3. 为该服务账号创建 **JSON 密钥**并下载；文件内 `type` 必须是 `service_account`（OAuth 客户端 JSON 不能用于 v2）。
-4. 在开发者后台 **Publisher → Settings** 复制 **Publisher ID**。
-5. 在 `.env` 填写：
-   ```dotenv
-   CHROME_EXTENSION_ID=扩展 ID
-   CHROME_PUBLISHER_ID=Publisher ID
-   CHROME_SERVICE_ACCOUNT_JSON=keys/chrome-service-account.json
-   ```
-   也可以不落盘密钥，改用 `CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL` 与 `CHROME_SERVICE_ACCOUNT_PRIVATE_KEY` 两个字段。
-6. 先干跑验证凭据（v2 会实际请求 fetchStatus，但不上传）：
-   ```bash
-   make publish DRY=1
-   ```
-7. 通过后发布会自动提交审核：`make publish`；只重发 Chrome 用 `make publish SKIP_BUILD=1 ONLY=chrome`。
-
-> **备选：OAuth 桌面客户端**。若服务账号一直停留在「待处理」而无法授权，可改用个人 Google 账号授权：
-> 1. Google Cloud 创建「桌面应用」类型的 OAuth 客户端，下载 JSON 到 `keys/chrome-oauth-client.json`；
-> 2. 运行 `npm run chrome:login`，浏览器打开打印的链接并同意授权（Google 已停用 OOB，必须走 `http://localhost` 回环）；
-> 3. 脚本把 refresh token 写回 `.env`，`make publish` 会自动识别并改用自管的 v2 通道（`scripts/chrome-v2.mjs`）。
->
-> 两种认证同时配置时**优先走 OAuth**；服务账号字段可保留备用。
+> **维护者发布**：`npm run release` 一键构建并提交 Chrome/Edge 双商店，需 `.env` 中的商店发布凭证（字段说明见 `.env.example`，Chrome v2 / Edge 的变量命名差异见 `Makefile` 头部注释）。Chrome 使用 Web Store API v2 的服务账号认证。普通开发、构建和 CI 不读取发布凭证。
 
 ## 使用说明
 
