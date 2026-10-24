@@ -144,6 +144,7 @@ try {
     await drawer.locator('.trial-result').scrollIntoViewIfNeeded();
     await pause(300);
     await drawer.screenshot({ path: resolve(OUT, 'recipe-03-trial.png'), animations: 'disabled' });
+    await shot(options, 'store-login-trial');
     console.log('captured recipe-03-trial.png');
     await drawer.getByRole('button', { name: '添加', exact: true }).click();
     await drawer.waitFor({ state: 'detached' });
@@ -163,6 +164,7 @@ try {
       const data = await chrome.storage.local.get('devtools-account-switch');
       await chrome.storage.local.set({ 'devtools-account-switch': { ...data['devtools-account-switch'], envBadge: badge } });
     }, config.envBadge);
+    await pause(2600);
     await shot(options, 'account-config');
     console.log('Real options UI setup complete: environment, scanned recipe, trial, two accounts');
   }
@@ -270,7 +272,7 @@ try {
     await format.goto(`chrome-extension://${extensionId}/json-format.html`);
     await format.locator('.cm-content').first().waitFor();
     await setCodeMirror(format, 0, sample);
-    await pause(500);
+    await pause(2600);
     await shot(format, 'tool-json-format');
     await format.close();
 
@@ -282,7 +284,7 @@ try {
     const compare = diff.getByRole('button', { name: /对比/ }).first();
     if (await compare.count()) await compare.click();
     await diff.locator('.diff-stats').waitFor();
-    await pause(700);
+    await pause(2600);
     await shot(diff, 'tool-json-diff');
     await diff.close();
 
@@ -292,7 +294,7 @@ try {
     await mock.getByTitle('载入预设模板（覆盖当前字段）').selectOption('user');
     await mock.locator('.view-switch').getByRole('radio', { name: '表格', exact: true }).click();
     await mock.locator('.data-table tbody tr').first().waitFor();
-    await pause(500);
+    await pause(2600);
     await shot(mock, 'tool-mock-data');
     await mock.close();
   }
