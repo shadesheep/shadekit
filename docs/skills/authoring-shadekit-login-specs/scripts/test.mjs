@@ -14,7 +14,6 @@ import { simulateLoginSpec } from "./simulator.mjs";
 
 const skillRoot = fileURLToPath(new URL("../", import.meta.url));
 const readJson = async (relative) => JSON.parse(await readFile(new URL(`../${relative}`, import.meta.url), "utf8"));
-const clone = (value) => structuredClone(value);
 
 const invalidCases = [
   ["r1-success-after-write.json", "R1", 0],

@@ -71,6 +71,16 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "docs/skills/authoring-shadekit-login-specs/scripts/login-spec-validator.mjs",
+        "docs/skills/authoring-shadekit-login-specs/scripts/config-package.mjs",
+        "docs/skills/authoring-shadekit-login-specs/scripts/simulator-runtime.mjs"
+      ],
+      "linter": { "enabled": false },
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
     }
   ]
 }

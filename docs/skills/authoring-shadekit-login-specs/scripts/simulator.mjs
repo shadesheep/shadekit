@@ -5,7 +5,6 @@ import {
   runPayloadBuild,
   runMap,
   resolveTemplate,
-  resolveTemplateValue,
   readBindingPath,
 } from "./simulator-runtime.mjs";
 

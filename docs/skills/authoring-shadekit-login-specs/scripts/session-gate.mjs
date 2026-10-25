@@ -89,7 +89,9 @@ function checkWrites(auth, gated) {
   });
   for (const area of ["localStorageWrite", "sessionStorageWrite"]) {
     const writes = Array.isArray(auth[area]) ? auth[area] : [];
-    writes.forEach((write, index) => checkTemplate(write?.value, `auth.${area}[${index}].value`, gated, issues));
+    writes.forEach((write, index) => {
+      checkTemplate(write?.value, `auth.${area}[${index}].value`, gated, issues);
+    });
   }
   return issues;
 }
@@ -99,7 +101,7 @@ function checkWrites(auth, gated) {
  * business signal and no-default map gates, plus payload/map derived bindings.
  */
 export function findSessionGateIssues(spec) {
-  if (!spec || spec.auth?.mode !== "engine") return [];
+  if (spec?.auth?.mode !== "engine") return [];
   if (!Array.isArray(spec.ops)) return [issue("ops")];
   const success = directSuccessCases(spec);
   const gated = new Set();
