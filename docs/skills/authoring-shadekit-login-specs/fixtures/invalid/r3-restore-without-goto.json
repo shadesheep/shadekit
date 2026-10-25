@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "ops": [
+    { "op": "auth.capture", "cookies": "all", "as": "snapshot" },
+    { "op": "auth.restore", "snapshot": "snapshot" }
+  ],
+  "success": [{ "page": { "type": "urlChanged" } }],
+  "auth": { "mode": "page" }
+}

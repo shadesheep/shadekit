@@ -1,0 +1,56 @@
+{
+  "format": "dt-login-config/v1",
+  "specVersion": 2,
+  "requiredVars": [],
+  "environments": [
+    {
+      "name": "Example",
+      "url": "{origin}",
+      "requiredVars": [],
+      "spec": {
+        "version": 2,
+        "template": "fixture-api-gated",
+        "vars": [{ "name": "realm", "title": "Realm", "default": "example" }],
+        "ops": [
+          {
+            "op": "payload.build",
+            "parts": [
+              { "key": "username", "value": "{username}" },
+              { "key": "password", "value": "{password}" },
+              { "key": "realm", "value": "{realm}" }
+            ],
+            "as": "credentials"
+          },
+          {
+            "op": "http.execute",
+            "url": "{origin}/api/login",
+            "method": "POST",
+            "headers": { "Content-Type": "application/json" },
+            "body": { "ref": "credentials" },
+            "as": "login"
+          },
+          {
+            "op": "map",
+            "input": "$login.code",
+            "cases": [{ "equals": 0, "value": "$login.data" }],
+            "as": "accepted"
+          },
+          { "op": "auth.write" }
+        ],
+        "success": [{ "response": { "from": "login", "path": "code", "equals": 0 } }],
+        "auth": {
+          "mode": "engine",
+          "cookiesWrite": [
+            {
+              "name": "session",
+              "value": "$accepted.token",
+              "expiresFrom": { "from": "accepted", "path": "expires", "unit": "epochS" }
+            }
+          ],
+          "localStorageWrite": [{ "key": "session", "value": "$accepted.token" }],
+          "sessionStorageWrite": [{ "key": "realm", "value": "$accepted.realm" }]
+        }
+      }
+    }
+  ]
+}

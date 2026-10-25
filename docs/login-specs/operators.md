@@ -625,7 +625,7 @@ type SuccessSignal =
   | { anyOf:    SuccessSignal[] };                                  // 任一命中
 ```
 
-- `success[]` 至少一条（R7），任一命中即登录成功
+- `success[]` 至少一条（R7），**顶层所有信号都满足（AND）才登录成功**；`anyOf` 内任一子信号满足（OR）即该组满足
 - `failure[]` 是 `SettleCondition[]`，**失败优先**：任一命中即中止（如命中验证码特征报 `CAPTCHA_REQUIRED`）
 - `response.from` 引用绑定名，`response.path` 是点路径（`resp.data.success`），`equals` 为严格相等匹配
 
@@ -656,13 +656,14 @@ type SuccessSignal =
       "body": { "ref": "loginData" },
       "as": "resp"
     },
+    { "op": "map", "input": "$resp.code", "cases": [{ "equals": 0, "value": "$resp.data" }], "as": "accepted" },
     { "op": "auth.write" }
   ],
-  "success": [{ "response": { "from": "resp", "path": "success", "equals": true } }],
+  "success": [{ "response": { "from": "resp", "path": "code", "equals": 0 } }],
   "auth": {
     "mode": "engine",
-    "cookiesWrite": [{ "name": "auth", "value": "$resp.data", "expiresFrom": { "from": "resp", "path": "data.expiredTime", "unit": "epochMs" } }],
-    "localStorageWrite": [{ "key": "auth", "value": "$resp.data" }, { "key": "token", "value": "$resp.data.token" }]
+    "cookiesWrite": [{ "name": "auth", "value": "$accepted.token", "expiresFrom": { "from": "accepted", "path": "expiredTime", "unit": "epochMs" } }],
+    "localStorageWrite": [{ "key": "auth", "value": "$accepted" }, { "key": "token", "value": "$accepted.token" }]
   },
   "limits": { "requestMs": 15000, "stepMs": 5000, "settleMs": 10000 }
 }

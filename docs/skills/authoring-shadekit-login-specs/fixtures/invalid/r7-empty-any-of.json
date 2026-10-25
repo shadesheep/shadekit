@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "ops": [{ "op": "waitFor", "when": { "type": "fixed", "ms": 1 } }],
+  "success": [{ "anyOf": [{ "anyOf": [] }] }],
+  "auth": { "mode": "page" }
+}

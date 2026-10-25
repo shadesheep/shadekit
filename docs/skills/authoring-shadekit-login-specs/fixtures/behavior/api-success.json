@@ -1,0 +1,43 @@
+{
+  "inputs": {
+    "origin": "https://example.test",
+    "username": "fixture-user",
+    "password": "fixture-password",
+    "realm": "example"
+  },
+  "responses": [
+    {
+      "status": 200,
+      "body": {
+        "code": 0,
+        "data": { "token": "good", "expires": 2000000000, "realm": "example" }
+      }
+    }
+  ],
+  "expect": {
+    "success": true,
+    "requests": [
+      {
+        "url": "https://example.test/api/login",
+        "method": "POST",
+        "headers": { "Content-Type": "application/json" },
+        "body": "{\"username\":\"fixture-user\",\"password\":\"fixture-password\",\"realm\":\"example\"}"
+      }
+    ],
+    "session": {
+      "cookies": [
+        {
+          "name": "session",
+          "value": "good",
+          "path": "/",
+          "secure": true,
+          "httpOnly": false,
+          "sameSite": "unspecified",
+          "expirationDate": 2000000000
+        }
+      ],
+      "localStorage": { "session": "good" },
+      "sessionStorage": { "realm": "example" }
+    }
+  }
+}

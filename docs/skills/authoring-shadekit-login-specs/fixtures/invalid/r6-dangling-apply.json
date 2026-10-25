@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "ops": [{ "op": "apply.set", "target": "header", "key": "X-Test", "value": "x" }],
+  "success": [{ "page": { "type": "fixed", "ms": 1 } }],
+  "auth": { "mode": "page" }
+}

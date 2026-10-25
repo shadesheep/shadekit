@@ -11,6 +11,9 @@ node_modules/
 # IDE
 .idea/
 .vscode/
+
+# Git worktrees
+.worktrees/
 *.swp
 *.swo
 

@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "ops": [{ "op": "map", "input": "$missing.value", "cases": [{ "equals": 0, "value": "x" }], "default": "x", "as": "mapped" }],
+  "success": [{ "token": { "from": "mapped", "path": "token" } }],
+  "auth": { "mode": "engine" }
+}

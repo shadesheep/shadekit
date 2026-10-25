@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "ops": [
+    {
+      "op": "payload.build",
+      "parts": [{ "key": "username", "value": "{username}" }, { "key": "password", "value": "{password}" }],
+      "as": "credentials"
+    },
+    {
+      "op": "http.execute",
+      "url": "{origin}/api/login",
+      "method": "POST",
+      "body": { "ref": "credentials" },
+      "as": "login"
+    },
+    { "op": "auth.write" }
+  ],
+  "success": [{ "response": { "from": "login", "path": "code", "equals": 0 } }],
+  "auth": {
+    "mode": "engine",
+    "cookiesWrite": [{
+      "name": "session",
+      "value": "$login.data.token",
+      "expiresFrom": { "from": "login", "path": "data.expires", "unit": "epochS" }
+    }],
+    "localStorageWrite": [{ "key": "session", "value": "$login.data.token" }],
+    "sessionStorageWrite": [{ "key": "session", "value": "$login.data.token" }]
+  }
+}

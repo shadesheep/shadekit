@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "ops": [
+    { "op": "auth.write" },
+    { "op": "http.execute", "url": "{origin}/login", "as": "login" }
+  ],
+  "success": [{ "response": { "from": "login", "path": "code", "equals": 0 } }],
+  "auth": { "mode": "engine" }
+}

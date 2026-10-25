@@ -1,0 +1,9 @@
+{
+  "inputs": {
+    "origin": "https://example.test",
+    "username": "fixture-user",
+    "password": "fixture-password"
+  },
+  "responses": [],
+  "expect": { "success": true }
+}

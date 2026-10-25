@@ -1,0 +1,16 @@
+{
+  "format": "dt-login-config/v1",
+  "specVersion": 2,
+  "requiredVars": [],
+  "environments": [{
+    "name": "Script",
+    "url": "{origin}",
+    "requiredVars": [],
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "script", "code": "(bindings) => null", "as": "result" }],
+      "success": [{ "token": { "from": "result", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    }
+  }]
+}

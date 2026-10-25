@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "ops": [
+    { "op": "payload.build", "join": "", "parts": [{ "value": "a" }], "as": "same" },
+    { "op": "digest", "algorithm": "sha256", "input": "b", "as": "same" }
+  ],
+  "success": [{ "token": { "from": "same", "path": "value" } }],
+  "auth": { "mode": "engine" }
+}

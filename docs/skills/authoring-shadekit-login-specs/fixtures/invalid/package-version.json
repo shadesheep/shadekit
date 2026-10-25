@@ -1,0 +1,6 @@
+{
+  "format": "dt-login-config/v1",
+  "specVersion": 3,
+  "requiredVars": [],
+  "environments": [{ "name": "Bad", "url": "{origin}", "requiredVars": [], "spec": { "version": 3, "ops": [], "success": [], "auth": { "mode": "engine" } } }]
+}

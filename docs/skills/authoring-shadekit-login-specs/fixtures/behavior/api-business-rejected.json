@@ -1,0 +1,22 @@
+{
+  "inputs": {
+    "origin": "https://example.test",
+    "username": "fixture-user",
+    "password": "fixture-password",
+    "realm": "example"
+  },
+  "responses": [
+    {
+      "status": 200,
+      "body": {
+        "code": 1,
+        "data": { "token": "bad", "expires": 2000000000, "realm": "wrong" }
+      }
+    }
+  ],
+  "expect": {
+    "success": false,
+    "errorCode": "CONFIG_INVALID",
+    "session": { "cookies": [], "localStorage": {}, "sessionStorage": {} }
+  }
+}

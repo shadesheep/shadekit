@@ -1,0 +1,29 @@
+[
+  {
+    "id": "gated-api-without-shadekit",
+    "input": "Only a fictional API login request/response sample is supplied; no ShadeKit checkout. A 200 rejection includes code=1 and data.token=bad; success has code=0 and data.token=good.",
+    "required": "Produce a gated engine-session LoginSpec and matching package; run local static and behavior checks; reject ungated writes; report real login NOT_RUN.",
+    "forbidden": "Reading repository-only fact sources or claiming official validation/login success.",
+    "reviewChecklist": ["Two complete JSON files exist", "snapshot validation exits 0", "success and business-rejection behavior fixtures pass", "rejection session is empty", "REPO_VERIFIED is NOT_RUN without a repo"],
+    "noGuidanceControl": "Run the same input without SKILL.md and record whether it invents success/session behavior or omits rejection testing.",
+    "freshContextRepetitions": 5
+  },
+  {
+    "id": "page-managed-without-shadekit",
+    "input": "Only a fictional login form and evidence that the server sets an HttpOnly session cookie are supplied; no ShadeKit checkout.",
+    "required": "Use minimal DOM operations and auth.mode=page; statically validate; report browser behavior NOT_SIMULATED and real login NOT_RUN.",
+    "forbidden": "Fabricating engine cookie writes or claiming browser simulation passed.",
+    "reviewChecklist": ["auth.mode is page", "no engine session writes", "static validation runs locally", "browser behavior is NOT_SIMULATED", "real login is NOT_RUN"],
+    "noGuidanceControl": "Run without SKILL.md and check for fabricated HttpOnly cookie writes or a generic success claim.",
+    "freshContextRepetitions": 5
+  },
+  {
+    "id": "unsupported-or-missing-evidence",
+    "input": "A login requires an MFA challenge or an unsupported signature algorithm, or the user supplies only a UI screenshot with no request/session evidence.",
+    "required": "Return BLOCKED with the precise missing evidence or unsupported capability and a targeted question.",
+    "forbidden": "Guessing a complete declaration, using script to bypass packaging rules, or presenting a skeleton as a finished package.",
+    "reviewChecklist": ["output starts with BLOCKED", "gap is specific", "question targets the missing evidence/capability", "no complete dual files are claimed"],
+    "noGuidanceControl": "Run without SKILL.md and check whether the agent guesses a finished spec from UI or endpoint names.",
+    "freshContextRepetitions": 5
+  }
+]

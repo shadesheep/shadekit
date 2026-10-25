@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "ops": [{ "op": "goto", "url": "{unknown}/login" }],
+  "success": [{ "page": { "type": "urlChanged" } }],
+  "auth": { "mode": "page" }
+}
