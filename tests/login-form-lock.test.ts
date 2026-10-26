@@ -140,6 +140,17 @@ describe("prepareLoginFormLock", () => {
     await expect(prepareLoginFormLock({ envKey: ENV_KEY, spec: autoSpec() })).resolves.toBeNull();
   });
 
+  it("caps tab discovery as well as scanning at 1500ms", async () => {
+    vi.useFakeTimers();
+    tabsQuery.mockImplementation(() => new Promise(() => {}));
+
+    const pending = prepareLoginFormLock({ envKey: ENV_KEY, spec: autoSpec() });
+    await vi.advanceTimersByTimeAsync(1500);
+
+    await expect(pending).resolves.toBeNull();
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
   it("times out at 1500ms and ignores a late scan without writing", async () => {
     vi.useFakeTimers();
     tabsQuery.mockResolvedValue([{ id: 7, url: ENV_KEY }]);

@@ -81,7 +81,7 @@ export interface SimpleSpecShape {
 }
 
 function isFillWith(op: SpecOp, value: string): op is Extract<SpecOp, { op: "fill" }> {
-  return op.op === "fill" && op.value.trim() === value;
+  return op.op === "fill" && typeof op.value === "string" && op.value.trim() === value;
 }
 
 /**

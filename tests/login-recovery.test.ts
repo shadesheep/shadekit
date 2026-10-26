@@ -50,7 +50,7 @@ describe("showLoginRecoveryToast", () => {
   it("keeps retry, manual location and copy details as separate actions", async () => {
     const onRetry = vi.fn();
     showLoginRecoveryToast({
-      prefix: "未能自动登录",
+      prefix: "登录失败",
       error: "internal target detail",
       errorCode: ErrorCodes.LOGIN_FORM_NOT_FOUND,
       envKey: "https://example.test/login",
@@ -59,6 +59,7 @@ describe("showLoginRecoveryToast", () => {
     });
 
     const toast = useToast().toasts.value[0];
+    expect(toast.message).toContain("未能自动登录");
     expect(toast.message).toContain("未找到可用的登录表单。请确认页面已打开并完成加载后重试。");
     expect(toast.actions.map((action) => action.label)).toEqual(["重试", "手动定位", "复制详情"]);
 

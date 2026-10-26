@@ -746,6 +746,14 @@ describe("自动登录定位结构", () => {
     expect(issues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1)).toBe(true);
   });
 
+  it("异常自动 fill value 也返回校验问题而不抛异常", () => {
+    const ops = automaticOps();
+    ops[1] = { op: "fill", target: AUTO_LOGIN_TARGET, value: 42 as never };
+    let issues: SpecIssue[] = [];
+    expect(() => { issues = validateLoginSpec(spec({ ops })); }).not.toThrow();
+    expect(issues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1)).toBe(true);
+  });
+
   it("拒绝在 waitFor 和 DOM extract 中使用自动标记", () => {
     const waitIssues = validateLoginSpec(spec({
       ops: [{ op: "waitFor", when: { type: "selector", target: AUTO_LOGIN_TARGET as never } }],

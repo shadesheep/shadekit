@@ -81,7 +81,7 @@ var USERNAME_VALUE = "{username}";
 var PASSWORD_VALUE = "{password}";
 var SIMPLE_EXCLUDED = /* @__PURE__ */ new Set(["clear.cookies", "clear.storage", "auth.write"]);
 function isFillWith(op, value) {
-  return op.op === "fill" && op.value.trim() === value;
+  return op.op === "fill" && typeof op.value === "string" && op.value.trim() === value;
 }
 function simpleSpecShape(spec) {
   const kept = [];
@@ -114,7 +114,14 @@ function isAutoLoginTarget(value) {
   const keys = Object.keys(value);
   return keys.length === 1 && keys[0] === "auto" && value.auto === "login";
 }
-var LEGACY_EMPTY_DEFAULT_SPEC = {
+function deepFreeze(value) {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+var LEGACY_EMPTY_DEFAULT_SPEC = deepFreeze({
   version: LOGIN_SPEC_VERSION,
   template: "generic",
   ops: [
@@ -127,7 +134,7 @@ var LEGACY_EMPTY_DEFAULT_SPEC = {
   success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],
   auth: { ...DEFAULT_AUTH },
   limits: { ...DEFAULT_LIMITS }
-};
+});
 function deepEqual(left, right) {
   if (Object.is(left, right)) return true;
   if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {

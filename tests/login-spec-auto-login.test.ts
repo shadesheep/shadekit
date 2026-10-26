@@ -99,6 +99,13 @@ describe("legacy empty default projection", () => {
     expect(validateLoginSpec(custom).some((issue) => issue.code === "CONFIG_INVALID")).toBe(true);
   });
 
+  it("freezes the historical comparison template against accidental mutation", () => {
+    expect(Object.isFrozen(LEGACY_EMPTY_DEFAULT_SPEC)).toBe(true);
+    expect(Object.isFrozen(LEGACY_EMPTY_DEFAULT_SPEC.ops)).toBe(true);
+    expect(Object.isFrozen(LEGACY_EMPTY_DEFAULT_SPEC.ops[1])).toBe(true);
+    expect(Object.isFrozen(LEGACY_EMPTY_DEFAULT_SPEC.success)).toBe(true);
+  });
+
   it("accepts the untouched historical default without rewriting it", () => {
     const legacy = legacySpec();
     expect(validateLoginSpec(legacy)).toEqual([]);

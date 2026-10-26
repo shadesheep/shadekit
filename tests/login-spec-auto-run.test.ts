@@ -148,6 +148,21 @@ describe("runSpec automatic login form", () => {
     expect(result.trace.some((step) => step.op === "auto.prepare")).toBe(true);
   });
 
+  it("redacts query and hash secrets from automatic preparation frame URLs", async () => {
+    const sensitive = structuredClone(resolvedFrames);
+    sensitive[0].result.frameUrl = "https://example.test/frame?token=url-secret&password=url-password#session-secret";
+    scanQueue[0] = sensitive;
+
+    const result = await runSpec(automaticSpec(), ctx());
+
+    expect(result.success).toBe(true);
+    const trace = JSON.stringify(result.trace);
+    expect(trace).toContain("https://example.test/frame");
+    expect(trace).not.toContain("url-secret");
+    expect(trace).not.toContain("url-password");
+    expect(trace).not.toContain("session-secret");
+  });
+
   it("runs an untouched legacy default through runtime compatibility", async () => {
     const legacy = structuredClone(LEGACY_EMPTY_DEFAULT_SPEC as LoginSpec);
 

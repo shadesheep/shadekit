@@ -23,8 +23,16 @@ export function isAutoLoginTarget(value: unknown): value is AutoLoginTarget {
     (value as Record<string, unknown>).auto === "login";
 }
 
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /** 当前版本之前允许保存的原版默认模板；只用于精确兼容判断。 */
-export const LEGACY_EMPTY_DEFAULT_SPEC: Readonly<LoginSpec> = {
+export const LEGACY_EMPTY_DEFAULT_SPEC: Readonly<LoginSpec> = deepFreeze({
   version: LOGIN_SPEC_VERSION,
   template: "generic",
   ops: [
@@ -37,7 +45,7 @@ export const LEGACY_EMPTY_DEFAULT_SPEC: Readonly<LoginSpec> = {
   success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],
   auth: { ...DEFAULT_AUTH },
   limits: { ...DEFAULT_LIMITS },
-};
+});
 
 function deepEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;

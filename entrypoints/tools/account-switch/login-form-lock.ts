@@ -75,24 +75,23 @@ export async function prepareLoginFormLock(input: {
   const envUrl = environmentUrl(input.envKey);
   if (!envUrl) return null;
 
-  const own = await chrome.tabs.getCurrent().catch(() => undefined);
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  const candidates = rankPickerTabs(tabs, envUrl.origin, own?.id)
-    .filter((tab) => {
-      if (tab.id === undefined || (tab.status !== undefined && tab.status !== "complete")) return false;
-      const url = tab.url ? environmentUrl(tab.url) : null;
-      return url?.origin === envUrl.origin;
-    })
-    .sort((left, right) => {
-      const leftPath = left.url ? environmentUrl(left.url)?.pathname : undefined;
-      const rightPath = right.url ? environmentUrl(right.url)?.pathname : undefined;
-      return Number(rightPath === envUrl.pathname) - Number(leftPath === envUrl.pathname);
-    });
-  if (candidates.length === 0) return null;
+  const preparing = (async (): Promise<PreparedLoginFormLock | null> => {
+    const own = await chrome.tabs.getCurrent().catch(() => undefined);
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const candidates = rankPickerTabs(tabs, envUrl.origin, own?.id)
+      .filter((tab) => {
+        if (tab.id === undefined || (tab.status !== undefined && tab.status !== "complete")) return false;
+        const url = tab.url ? environmentUrl(tab.url) : null;
+        return url?.origin === envUrl.origin;
+      })
+      .sort((left, right) => {
+        const leftPath = left.url ? environmentUrl(left.url)?.pathname : undefined;
+        const rightPath = right.url ? environmentUrl(right.url)?.pathname : undefined;
+        return Number(rightPath === envUrl.pathname) - Number(leftPath === envUrl.pathname);
+      });
+    if (candidates.length === 0) return null;
 
-  const preparing = Promise.all(
-    candidates.map((tab) => scanCandidate(tab.id!)),
-  ).then((scanned) => {
+    const scanned = await Promise.all(candidates.map((tab) => scanCandidate(tab.id!)));
     const resolved = scanned.filter((item) => item.resolution.status === "resolved");
     if (resolved.length !== 1) return null;
     return {
@@ -101,7 +100,7 @@ export async function prepareLoginFormLock(input: {
       expectedSpec: cloneSpec(input.spec),
       tabId: resolved[0].tabId,
     };
-  });
+  })();
   return withTimeout(
     preparing,
     Math.max(1, Math.min(input.timeoutMs ?? LOGIN_FORM_PREPARE_TIMEOUT_MS, LOGIN_FORM_PREPARE_TIMEOUT_MS)),

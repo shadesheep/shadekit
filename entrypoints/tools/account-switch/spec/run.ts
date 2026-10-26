@@ -960,9 +960,18 @@ function automaticResolutionError(resolution: AutoLoginResolution): LoginError {
   }
 }
 
+function frameUrlForLog(frameUrl: string): string {
+  try {
+    const url = new URL(frameUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return frameUrl.split(/[?#]/, 1)[0];
+  }
+}
+
 function resolutionSummary(resolution: AutoLoginResolution): string {
   if (resolution.status === "resolved") {
-    return `自动定位成功：${resolution.status}，frame ${resolution.frameId}${resolution.frameUrl ? `（${resolution.frameUrl}）` : ""}`;
+    return `自动定位成功：${resolution.status}，frame ${resolution.frameId}${resolution.frameUrl ? `（${frameUrlForLog(resolution.frameUrl)}）` : ""}`;
   }
   if (resolution.status === "noPassword") return "自动定位：noPassword";
   if (resolution.status === "error") return `自动定位失败：${resolution.status}`;

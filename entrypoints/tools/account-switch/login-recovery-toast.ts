@@ -46,5 +46,6 @@ export function showLoginRecoveryToast(input: {
       });
     },
   });
-  showToast(`${input.prefix}：${message} [${code}]`, "error", 8000, actions);
+  const prefix = recovery.message ? "未能自动登录" : input.prefix;
+  showToast(`${prefix}：${message} [${code}]`, "error", 8000, actions);
 }
