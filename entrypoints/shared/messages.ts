@@ -12,7 +12,7 @@
  * 消息中不再有 toolId 字段——router 按 type 全局路由（见 message-router.ts）。
  */
 
-import type { FormScanFrame } from "../tools/account-switch/config/login-form-scan";
+import type { FormScanFrame } from "../tools/account-switch/strategies/login-form-scan";
 import type { DryRunStepResult } from "../tools/account-switch/strategies/generic-dry-run";
 import type { Recipe } from "../tools/account-switch/strategies/generic-recipe";
 import type { RecipeStepTrace } from "../tools/account-switch/spec/types";

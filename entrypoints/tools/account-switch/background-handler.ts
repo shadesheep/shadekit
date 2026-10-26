@@ -10,7 +10,7 @@
 
 import { authLog } from "../../shared/logger";
 import { runLoginSpec } from "./spec/login-run";
-import type { FormScanFrame } from "./config/login-form-scan";
+import type { FormScanFrame } from "./strategies/login-form-scan";
 import {
   injectAndNavigate,
   refreshAfterSwitch,
@@ -310,7 +310,7 @@ export async function handleScanLoginForm(
     };
   }
 
-  const { scanLoginForm } = await import("./config/login-form-scan");
+  const { scanLoginForm } = await import("./strategies/login-form-scan");
   const result = await scanLoginForm(targetTabId);
   switch (result.status) {
     case "found":

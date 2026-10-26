@@ -5,10 +5,13 @@ import {
   DEFAULT_LIMITS,
   LOGIN_SPEC_VERSION,
   type AutoLoginTarget,
+  type FrameScope,
   type LoginFormTarget,
   type LoginSpec,
+  type SpecOp,
   type Target,
 } from "./types";
+import type { FormScanFrame } from "../strategies/login-form-scan";
 
 export { AUTO_LOGIN_TARGET } from "./types";
 
@@ -78,6 +81,27 @@ function isNonEmptyConcreteTarget(target: LoginFormTarget): target is Target {
   if (typeof target !== "object" || target === null) return false;
   const values = Object.values(target);
   return values.length === 1 && typeof values[0] === "string" && values[0].trim() !== "";
+}
+
+/** 把用户选定的扫描 frame 无损投影到现有标准三步；不重排高级声明。 */
+export function applyLoginFormFrame(spec: LoginSpec, frame: FormScanFrame): LoginSpec | null {
+  const shape = simpleSpecShape(spec);
+  if (!shape) return null;
+  const scope: FrameScope = frame.frameId !== undefined && frame.frameId !== 0
+    ? { frameId: frame.frameId, ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}) }
+    : {};
+  const replacements = new Map<number, { target: Target | undefined }>([
+    [shape.usernameIndex, { target: frame.username?.target }],
+    [shape.passwordIndex, { target: frame.password?.target }],
+    [shape.submitIndex, { target: frame.submit?.target }],
+  ]);
+  const ops = spec.ops.map((op, index): SpecOp => {
+    const replacement = replacements.get(index);
+    if (!replacement || (op.op !== "fill" && op.op !== "click")) return op;
+    const { frameId: _frameId, frameUrl: _frameUrl, ...withoutScope } = op;
+    return { ...withoutScope, target: replacement.target ?? "", ...scope } as SpecOp;
+  });
+  return { ...spec, ops };
 }
 
 export function loginFormTargetMode(spec: LoginSpec): "auto" | "locked" | "custom" | "advanced" {
