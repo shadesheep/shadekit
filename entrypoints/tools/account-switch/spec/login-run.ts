@@ -176,5 +176,6 @@ function toCompat(trace: SpecOpTrace | undefined): RecipeStepTrace | undefined {
     duration: trace.duration,
     ...(trace.errorCode !== undefined ? { errorCode: trace.errorCode } : {}),
     ...(trace.error !== undefined ? { error: trace.error } : {}),
+    ...(trace.resolution !== undefined ? { resolution: trace.resolution } : {}),
   };
 }

@@ -337,6 +337,8 @@ export interface RecipeStepTrace {
   duration: number;
   errorCode?: string;
   error?: string;
+  /** 标准表单定位来源（自动解析或已锁定）。 */
+  resolution?: "auto" | "locked";
 }
 
 export const DEFAULT_LIMITS: Required<SpecLimits> = {
