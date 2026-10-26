@@ -18,6 +18,7 @@
  *   引用 `auth.capture`；`http.execute.body.ref` 引用对象模式 `payload.build`
  * - R7 成功信号至少一条
  */
+import { autoLoginSpecShape, isAutoLoginTarget, isLegacyEmptyDefaultSpec } from "./auto-login";
 import { buildInputNamespace } from "./namespace";
 import { collectTemplateRefs, TemplateError } from "./template";
 import {
@@ -63,6 +64,22 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
 
+function validateDomTarget(
+  target: unknown,
+  index: number,
+  issues: SpecIssue[],
+  allowLegacyEmpty: boolean,
+): void {
+  if (isAutoLoginTarget(target)) return;
+  if (isRecord(target) && "auto" in target) {
+    issues.push(issue(`第 ${index + 1} 步的自动定位标记无效，只接受 { auto: "login" }`, { opIndex: index }));
+    return;
+  }
+  if (!allowLegacyEmpty && typeof target === "string" && target.trim() === "") {
+    issues.push(issue(`第 ${index + 1} 步定位为空，请补全或明确选择自动（登录表单）`, { opIndex: index }));
+  }
+}
+
 /** 模板字段：收集引用；语法错误即报 CONFIG_INVALID */
 function refsOf(
   template: unknown,
@@ -99,6 +116,7 @@ function validateOpShape(
   raw: unknown,
   index: number,
   issues: SpecIssue[],
+  allowLegacyEmpty = false,
 ): raw is SpecOp {
   if (!isRecord(raw)) {
     issues.push(issue(`第 ${index + 1} 步不是对象`, { opIndex: index }));
@@ -371,9 +389,11 @@ function validateOpShape(
     case "fill":
       if (typeof raw.value !== "string") missing("value");
       if (raw.target === undefined) missing("target");
+      else validateDomTarget(raw.target, index, issues, allowLegacyEmpty);
       break;
     case "click":
       if (raw.target === undefined) missing("target");
+      else validateDomTarget(raw.target, index, issues, allowLegacyEmpty);
       if (
         raw.onNotFound !== undefined &&
         raw.onNotFound !== "fail" &&
@@ -857,8 +877,9 @@ export function validateLoginSpec(raw: unknown): SpecIssue[] {
   for (const message of namespace.errors) issues.push(issue(message));
 
   const ops: unknown[] = Array.isArray(raw.ops) ? raw.ops : [];
+  const legacyEmptyDefault = isLegacyEmptyDefaultSpec(raw);
   const shapeOk: boolean[] = ops.map((op, index) =>
-    validateOpShape(op, index, issues),
+    validateOpShape(op, index, issues, legacyEmptyDefault),
   );
 
   // —— 成功信号形状 ——
@@ -871,6 +892,12 @@ export function validateLoginSpec(raw: unknown): SpecIssue[] {
   }
 
   const spec = raw as unknown as LoginSpec;
+  const autoOpIndex = ops.findIndex((op) =>
+    isRecord(op) && (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target),
+  );
+  if (autoOpIndex >= 0 && !autoLoginSpecShape(spec)) {
+    issues.push(issue("自动定位只适用于连续的用户名、密码、登录按钮", { opIndex: autoOpIndex }));
+  }
   // auth 缺失时 validateAuthShape 已报错；后续规则按「未声明」处理，不抛异常
   const authMode = isRecord(spec.auth) ? spec.auth.mode : undefined;
 
@@ -1202,7 +1229,8 @@ function isSettleConditionShape(value: unknown): boolean {
     case "url":
       return nonEmptyString(value.glob);
     case "selector":
-      return value.target !== undefined;
+      return value.target !== undefined &&
+        !(isRecord(value.target) && "auto" in value.target);
     case "cookie":
       return nonEmptyString(value.name);
     case "storage":

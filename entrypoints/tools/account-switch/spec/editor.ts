@@ -10,6 +10,7 @@
  */
 
 import {
+  AUTO_LOGIN_TARGET,
   BUILTIN_INPUT_NAMES,
   DEFAULT_AUTH,
   DEFAULT_LIMITS,
@@ -50,9 +51,9 @@ export function defaultLoginSpec(): LoginSpec {
     template: "generic",
     ops: [
       { op: "clear.cookies", range: "all" },
-      { op: "fill", target: "", value: "{username}", clearFirst: true },
-      { op: "fill", target: "", value: "{password}", clearFirst: true },
-      { op: "click", target: "", onNotFound: "fail" },
+      { op: "fill", target: AUTO_LOGIN_TARGET, value: "{username}", clearFirst: true },
+      { op: "fill", target: AUTO_LOGIN_TARGET, value: "{password}", clearFirst: true },
+      { op: "click", target: AUTO_LOGIN_TARGET, onNotFound: "fail" },
       { op: "auth.write" },
     ],
     success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],

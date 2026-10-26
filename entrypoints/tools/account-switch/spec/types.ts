@@ -15,6 +15,11 @@ import type {
 
 export type { AuthRange, FrameScope, SettleCondition, Target };
 
+/** 标准登录表单的整组自动定位标记；不进入通用 Target。 */
+export const AUTO_LOGIN_TARGET = Object.freeze({ auto: "login" } as const);
+export type AutoLoginTarget = typeof AUTO_LOGIN_TARGET;
+export type LoginFormTarget = Target | AutoLoginTarget;
+
 /** 可含 `{name}` 与 `$binding` 的模板字符串 */
 export type Ref = string;
 
@@ -120,11 +125,11 @@ export type SpecOp =
   // —— DOM 子集（Recipe 的类型视图）——
   | ({
       op: "fill";
-      target: Target;
+      target: LoginFormTarget;
       value: Ref;
       clearFirst?: boolean;
     } & FrameScope)
-  | ({ op: "click"; target: Target; onNotFound?: "fail" | "skip" } & FrameScope)
+  | ({ op: "click"; target: LoginFormTarget; onNotFound?: "fail" | "skip" } & FrameScope)
   | { op: "waitFor"; when: SettleCondition; timeoutMs?: number }
   | {
       op: "extract";

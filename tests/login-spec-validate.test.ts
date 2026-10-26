@@ -5,6 +5,7 @@
  * 每条规则正反用例；错误定位到算子下标。
  */
 import { describe, expect, it } from "vitest";
+import { AUTO_LOGIN_TARGET } from "../entrypoints/tools/account-switch/spec/auto-login";
 import type {
   LoginSpec,
   SettleCondition,
@@ -695,5 +696,65 @@ describe("auth 声明形状", () => {
       }),
     );
     expect(codes(issues)).toContain("CONFIG_INVALID");
+  });
+});
+
+describe("自动登录定位结构", () => {
+  const automaticOps = (): SpecOp[] => [
+    { op: "goto", url: "{origin}/login" },
+    { op: "fill", target: AUTO_LOGIN_TARGET, value: "{username}" },
+    { op: "fill", target: AUTO_LOGIN_TARGET, value: "{password}" },
+    { op: "click", target: AUTO_LOGIN_TARGET, onNotFound: "fail" },
+  ];
+
+  it("接受完整标准三步自动组合", () => {
+    expect(validateLoginSpec(spec({ ops: automaticOps() }))).toEqual([]);
+  });
+
+  it("拒绝自定义三空定位，不把它猜成旧默认", () => {
+    const empty = automaticOps().map((op) =>
+      op.op === "fill" || op.op === "click" ? { ...op, target: "" } : op,
+    );
+    const issues = validateLoginSpec(spec({ template: "custom", ops: empty }));
+    expect(issues.filter((issue) => issue.code === "CONFIG_INVALID").map((issue) => issue.opIndex))
+      .toEqual(expect.arrayContaining([1, 2, 3]));
+  });
+
+  it("拒绝部分自动和错误顺序", () => {
+    const partial = automaticOps();
+    partial[1] = { op: "fill", target: "#u", value: "{username}" };
+    expect(validateLoginSpec(spec({ ops: partial })).some((issue) => issue.opIndex === 2)).toBe(true);
+
+    const wrongOrder = automaticOps();
+    wrongOrder[1] = { op: "fill", target: AUTO_LOGIN_TARGET, value: "{password}" };
+    wrongOrder[2] = { op: "fill", target: AUTO_LOGIN_TARGET, value: "{username}" };
+    expect(codes(validateLoginSpec(spec({ ops: wrongOrder })))).toContain("CONFIG_INVALID");
+  });
+
+  it("拒绝高级非标准声明中的自动组合", () => {
+    const ops = [...automaticOps(), { op: "waitFor", when: { type: "fixed", ms: 1 } } as SpecOp];
+    expect(codes(validateLoginSpec(spec({ ops })))).toContain("CONFIG_INVALID");
+  });
+
+  it.each([
+    { auto: "sso" },
+    { auto: "login", css: "#u" },
+  ])("拒绝非法自动标记 %j", (target) => {
+    const ops = automaticOps();
+    ops[1] = { op: "fill", target: target as never, value: "{username}" };
+    const issues = validateLoginSpec(spec({ ops }));
+    expect(issues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1)).toBe(true);
+  });
+
+  it("拒绝在 waitFor 和 DOM extract 中使用自动标记", () => {
+    const waitIssues = validateLoginSpec(spec({
+      ops: [{ op: "waitFor", when: { type: "selector", target: AUTO_LOGIN_TARGET as never } }],
+    }));
+    expect(waitIssues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0)).toBe(true);
+
+    const extractIssues = validateLoginSpec(spec({
+      ops: [{ op: "extract", source: "dom", key: AUTO_LOGIN_TARGET as never, as: "field" }],
+    }));
+    expect(extractIssues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0)).toBe(true);
   });
 });

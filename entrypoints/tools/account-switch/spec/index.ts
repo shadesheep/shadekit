@@ -14,6 +14,7 @@ export * from "./template";
 export * from "./types";
 export * from "./validate";
 export * from "./editor";
+export * from "./auto-login";
 export * from "./http";
 export * from "./transform";
 export * from "./strategy-library";
