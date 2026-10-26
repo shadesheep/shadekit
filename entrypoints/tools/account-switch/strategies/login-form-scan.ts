@@ -17,6 +17,9 @@ export interface FormScanPageResult {
   /** 是否找到可见密码框 */
   found: boolean;
   frameUrl?: string;
+  /** 同 frame 多个可见密码框，不能安全推断唯一登录表单。 */
+  ambiguous?: boolean;
+  reason?: string;
   username?: TargetCandidate;
   password?: TargetCandidate;
   submit?: TargetCandidate;
@@ -270,15 +273,16 @@ export function scanLoginFormInPage(): FormScanPageResult {
     return el ? preferred(candidatesOf(el)) : undefined;
   }
 
-  /** 密码框：可见的 `input[type=password]`，文档序第一个 */
-  function findPassword(): HTMLInputElement | null {
+  /** 所有可见密码框；同 frame 多个表单必须歧义收尾，不能取第一个。 */
+  function findPasswords(): HTMLInputElement[] {
+    const found: HTMLInputElement[] = [];
     const inputs = document.querySelectorAll("input");
     for (let i = 0; i < inputs.length; i++) {
       const input = inputs[i];
-      if (typeOf(input) !== "password") continue;
-      if (isVisible(input)) return input;
+      if (typeOf(input) !== "password" || !isVisible(input)) continue;
+      found.push(input);
     }
-    return null;
+    return found;
   }
 
   /**
@@ -342,8 +346,17 @@ export function scanLoginFormInPage(): FormScanPageResult {
     return byText ?? first;
   }
 
-  const password = findPassword();
-  if (!password) return { found: false, ...(frameUrl ? { frameUrl } : {}) };
+  const passwords = findPasswords();
+  if (passwords.length === 0) return { found: false, ...(frameUrl ? { frameUrl } : {}) };
+  if (passwords.length > 1) {
+    return {
+      found: true,
+      ambiguous: true,
+      reason: `同 frame 检测到 ${passwords.length} 个可见密码框`,
+      ...(frameUrl ? { frameUrl } : {}),
+    };
+  }
+  const password = passwords[0];
 
   const container = findContainer(password);
   const username = bestOf(findUsername(container, password));
@@ -399,6 +412,9 @@ export function resolveAutoLoginScan(result: ScanLoginFormResult): AutoLoginReso
     return { status: "ambiguous", reason: `检测到 ${result.frames.length} 个候选 frame，无法确定唯一登录表单` };
   }
   const frame = result.frames[0];
+  if (frame.ambiguous) {
+    return { status: "ambiguous", reason: frame.reason ?? "同 frame 存在多个登录表单" };
+  }
   if (!isCompleteScan(frame)) {
     return { status: "incomplete", reason: "未找到完整的用户名、密码和登录按钮" };
   }

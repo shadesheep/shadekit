@@ -88,6 +88,20 @@ describe('scanLoginFormInPage', () => {
     expect(result.username?.target).toEqual({ css: '#search' });
   });
 
+  it('同 frame 多个可见密码表单返回歧义而不是选第一个', () => {
+    mount(`
+      <form><input id="u1" /><input id="p1" type="password" /><button>登录</button></form>
+      <form><input id="u2" /><input id="p2" type="password" /><button>登录</button></form>
+    `);
+
+    const result = scanLoginFormInPage();
+    expect(result).toMatchObject({ found: true, ambiguous: true });
+    const resolved = resolveAutoLoginScan({
+      status: 'found', frames: [{ ...result, frameId: 0 }], matches: 1, complete: false,
+    });
+    expect(resolved.status).toBe('ambiguous');
+  });
+
   it('隐藏的密码框不参与识别', () => {
     mount(`
       <form>

@@ -53,6 +53,8 @@ type SuccessSignal =
 type AuthRange = "all" | "none" | string[];
 type Target = string | { css: string } | { ariaLabel: string } | { label: string }
   | { name: string } | { placeholder: string } | { text: string };
+type AutoLoginTarget = { auto: "login" };
+type LoginFormTarget = Target | AutoLoginTarget;
 type FrameScope = { frameId?: number; frameUrl?: string };
 type SettleCondition =
   | { type: "formGone" } | { type: "urlChanged" }
@@ -161,8 +163,8 @@ interface AuthSpec {
 ### DOM 与逃生舱
 
 ```ts
-{ op: "fill"; target: Target; value: Ref; clearFirst?: boolean; frameId?: number; frameUrl?: string }
-{ op: "click"; target: Target; onNotFound?: "fail" | "skip"; frameId?: number; frameUrl?: string }
+{ op: "fill"; target: LoginFormTarget; value: Ref; clearFirst?: boolean; frameId?: number; frameUrl?: string }
+{ op: "click"; target: LoginFormTarget; onNotFound?: "fail" | "skip"; frameId?: number; frameUrl?: string }
 { op: "waitFor"; when: SettleCondition; timeoutMs?: number }
 {
   op: "extract"; source: "local" | "session" | "dom" | "url" | "cookie";
@@ -172,6 +174,10 @@ interface AuthSpec {
 ```
 
 - fill 默认先清空；click 默认找不到即失败。
+- `{ auto: "login" }` 只允许出现在标准 `fill{username} → fill{password} → click` 的三项 target 上，可带一个 goto 和 clear/auth 辅助算子。缺项、混用、顺序错误、额外 auto 字段或用于 waitFor/extract 都是 `CONFIG_INVALID`。
+- 自动运行时复用同一表单扫描，只有同 frame 三项齐全、frame 唯一且三个推荐 Target 均唯一才执行；同 frame 多表单、多 frame、缺项和非唯一都不会猜第一个。扫描结果只在本运行缓存，不自动持久化。
+- 首个自动算子前仍无密码框时最多 `reloadTabAndWait(settleMs)` 一次；不完整、歧义、注入失败、填写/点击之后及成功条件失败都不刷新。
+- 历史原版默认模板的三个空 target 仅按完整模板精确兼容为自动；自定义/改过的三空定位仍拒绝。保存编辑结果时写显式 auto，不批量迁移 storage。
 - extract 的 local/session/cookie/dom 通常需要 key；url 的 key 是 query 参数，缺省取整个 URL。空值有 default 则回退，否则失败。
 - script 是不能进入策略包的逃生舱，不得用它规避可表达性或安全限制。
 

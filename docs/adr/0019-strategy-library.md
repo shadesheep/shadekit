@@ -81,3 +81,9 @@
 - UI：`config/StrategyLibrary.vue`（设置页策略卡：编辑 / 重置镜像 / 删除）、`config/DomainsPanel.vue`（环境表单的关联 / 解绑 / 存入 / 变量覆盖、导入向导的落地目标）
 - 测试：`tests/strategy-library.test.ts`（含「绑定不拷声明」「镜像环境删除库后未配置」「脱镜环境重置回镜像」的回归）、`tests/login-spec-migrate.test.ts`（镜像回落）
 - 术语：`docs/glossary.md`「登录策略库」「环境级变量覆盖」
+
+## 后续修订（2026-10-26）：识别锁定只脱镜当前环境
+
+- 新建保存的识别回写和手动锁定都只在当前环境形成私有 `strategyConfig.spec`，保留 `strategyId`；绝不更新 `strategies[id]` 或其它镜像。
+- 后台先重读并只读重扫，存储锁内再次检查环境与期望自动 spec 未变化后才写最小 domains patch。迟到结果、删除、改 URL 和并发编辑均跳过。
+- UI 明确提示脱镜影响；「重置镜像」仍沿用 D4 恢复共享声明。

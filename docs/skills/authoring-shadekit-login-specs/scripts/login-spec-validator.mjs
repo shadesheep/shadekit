@@ -1,4 +1,5 @@
 // entrypoints/tools/account-switch/spec/types.ts
+var AUTO_LOGIN_TARGET = Object.freeze({ auto: "login" });
 var LOGIN_SPEC_VERSION = 2;
 var SPEC_OP_NAMES = [
   "clear.cookies",
@@ -19,6 +20,25 @@ var SPEC_OP_NAMES = [
   "extract",
   "script"
 ];
+var SPEC_OP_LABELS = {
+  "clear.cookies": "\u6E05\u7406 Cookie",
+  "clear.storage": "\u6E05\u7406\u5B58\u50A8",
+  goto: "\u5BFC\u822A",
+  "http.execute": "\u8BF7\u6C42",
+  digest: "\u6458\u8981",
+  "crypto.encrypt": "\u52A0\u5BC6",
+  "payload.build": "\u6784\u9020\u8F7D\u8377",
+  map: "\u6620\u5C04",
+  "apply.set": "\u6539\u5199\u8BF7\u6C42",
+  "auth.write": "\u5199\u4F1A\u8BDD",
+  "auth.capture": "\u6355\u83B7\u4F1A\u8BDD",
+  "auth.restore": "\u6062\u590D\u4F1A\u8BDD",
+  fill: "\u586B\u5145",
+  click: "\u70B9\u51FB",
+  waitFor: "\u7B49\u5F85",
+  extract: "\u63D0\u53D6",
+  script: "\u811A\u672C"
+};
 var BINDING_PRODUCER_OPS = /* @__PURE__ */ new Set([
   "http.execute",
   "digest",
@@ -42,6 +62,12 @@ var DOM_INTERACTION_OPS = /* @__PURE__ */ new Set([
 function isDomInteraction(op) {
   return DOM_INTERACTION_OPS.has(op.op);
 }
+var DEFAULT_LIMITS = {
+  requestMs: 15e3,
+  stepMs: 5e3,
+  settleMs: 1e4
+};
+var DEFAULT_AUTH = { mode: "engine" };
 var BUILTIN_INPUT_NAMES = [
   "username",
   "password",
@@ -49,6 +75,85 @@ var BUILTIN_INPUT_NAMES = [
   "targetUrl",
   "debugRedirect"
 ];
+
+// entrypoints/tools/account-switch/spec/editor.ts
+var USERNAME_VALUE = "{username}";
+var PASSWORD_VALUE = "{password}";
+var SIMPLE_EXCLUDED = /* @__PURE__ */ new Set(["clear.cookies", "clear.storage", "auth.write"]);
+function isFillWith(op, value) {
+  return op.op === "fill" && op.value.trim() === value;
+}
+function simpleSpecShape(spec) {
+  const kept = [];
+  for (let i = 0; i < spec.ops.length; i++) {
+    const op = spec.ops[i];
+    if (!SIMPLE_EXCLUDED.has(op.op)) kept.push({ op, index: i });
+  }
+  if (kept.length < 3 || kept.length > 4) return null;
+  const hasGoto = kept[0].op.op === "goto";
+  const offset = hasGoto ? 1 : 0;
+  if (kept.length !== offset + 3) return null;
+  const username = kept[offset];
+  const password = kept[offset + 1];
+  const submit = kept[offset + 2];
+  if (!isFillWith(username.op, USERNAME_VALUE)) return null;
+  if (!isFillWith(password.op, PASSWORD_VALUE)) return null;
+  if (submit.op.op !== "click") return null;
+  return {
+    ...hasGoto ? { gotoIndex: kept[0].index } : {},
+    usernameIndex: username.index,
+    passwordIndex: password.index,
+    submitIndex: submit.index
+  };
+}
+var SPEC_OP_OPTIONS = SPEC_OP_NAMES.map((name) => ({ label: SPEC_OP_LABELS[name], value: name }));
+
+// entrypoints/tools/account-switch/spec/auto-login.ts
+function isAutoLoginTarget(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === 1 && keys[0] === "auto" && value.auto === "login";
+}
+var LEGACY_EMPTY_DEFAULT_SPEC = {
+  version: LOGIN_SPEC_VERSION,
+  template: "generic",
+  ops: [
+    { op: "clear.cookies", range: "all" },
+    { op: "fill", target: "", value: "{username}", clearFirst: true },
+    { op: "fill", target: "", value: "{password}", clearFirst: true },
+    { op: "click", target: "", onNotFound: "fail" },
+    { op: "auth.write" }
+  ],
+  success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],
+  auth: { ...DEFAULT_AUTH },
+  limits: { ...DEFAULT_LIMITS }
+};
+function deepEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((item, index) => deepEqual(item, right[index]));
+  }
+  const a = left;
+  const b = right;
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  return deepEqual(aKeys, bKeys) && aKeys.every((key) => deepEqual(a[key], b[key]));
+}
+function isLegacyEmptyDefaultSpec(value) {
+  return deepEqual(value, LEGACY_EMPTY_DEFAULT_SPEC);
+}
+function autoLoginSpecShape(spec) {
+  const shape = simpleSpecShape(spec);
+  if (!shape) return null;
+  const targets = [shape.usernameIndex, shape.passwordIndex, shape.submitIndex].map((index) => {
+    const op = spec.ops[index];
+    return op && (op.op === "fill" || op.op === "click") ? op.target : void 0;
+  });
+  return targets.every(isAutoLoginTarget) ? shape : null;
+}
 
 // entrypoints/tools/account-switch/spec/namespace.ts
 var AUX_NAMES = ["nonce", "timestamp"];
@@ -201,6 +306,16 @@ function isRecord(value) {
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim() !== "";
 }
+function validateDomTarget(target, index, issues, allowLegacyEmpty) {
+  if (isAutoLoginTarget(target)) return;
+  if (isRecord(target) && "auto" in target) {
+    issues.push(issue(`\u7B2C ${index + 1} \u6B65\u7684\u81EA\u52A8\u5B9A\u4F4D\u6807\u8BB0\u65E0\u6548\uFF0C\u53EA\u63A5\u53D7 { auto: "login" }`, { opIndex: index }));
+    return;
+  }
+  if (!allowLegacyEmpty && typeof target === "string" && target.trim() === "") {
+    issues.push(issue(`\u7B2C ${index + 1} \u6B65\u5B9A\u4F4D\u4E3A\u7A7A\uFF0C\u8BF7\u8865\u5168\u6216\u660E\u786E\u9009\u62E9\u81EA\u52A8\uFF08\u767B\u5F55\u8868\u5355\uFF09`, { opIndex: index }));
+  }
+}
 function refsOf(template, issues, opIndex, field) {
   if (typeof template !== "string") return { inputs: [], bindings: [] };
   try {
@@ -221,7 +336,7 @@ var NORMALIZE_RULES = /* @__PURE__ */ new Set([
   "base64",
   "base64url"
 ]);
-function validateOpShape(raw, index, issues) {
+function validateOpShape(raw, index, issues, allowLegacyEmpty = false) {
   if (!isRecord(raw)) {
     issues.push(issue(`\u7B2C ${index + 1} \u6B65\u4E0D\u662F\u5BF9\u8C61`, { opIndex: index }));
     return false;
@@ -473,9 +588,11 @@ function validateOpShape(raw, index, issues) {
     case "fill":
       if (typeof raw.value !== "string") missing("value");
       if (raw.target === void 0) missing("target");
+      else validateDomTarget(raw.target, index, issues, allowLegacyEmpty);
       break;
     case "click":
       if (raw.target === void 0) missing("target");
+      else validateDomTarget(raw.target, index, issues, allowLegacyEmpty);
       if (raw.onNotFound !== void 0 && raw.onNotFound !== "fail" && raw.onNotFound !== "skip") {
         issues.push(
           issue(`\u7B2C ${index + 1} \u6B65\uFF08click\uFF09onNotFound \u65E0\u6548`, {
@@ -854,8 +971,9 @@ function validateLoginSpec(raw) {
   });
   for (const message of namespace.errors) issues.push(issue(message));
   const ops = Array.isArray(raw.ops) ? raw.ops : [];
+  const legacyEmptyDefault = isLegacyEmptyDefaultSpec(raw);
   const shapeOk = ops.map(
-    (op, index) => validateOpShape(op, index, issues)
+    (op, index) => validateOpShape(op, index, issues, legacyEmptyDefault)
   );
   const successSignals = [];
   if (Array.isArray(raw.success)) {
@@ -865,6 +983,12 @@ function validateLoginSpec(raw) {
     }
   }
   const spec = raw;
+  const autoOpIndex = ops.findIndex(
+    (op) => isRecord(op) && (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target)
+  );
+  if (autoOpIndex >= 0 && !autoLoginSpecShape(spec)) {
+    issues.push(issue("\u81EA\u52A8\u5B9A\u4F4D\u53EA\u9002\u7528\u4E8E\u8FDE\u7EED\u7684\u7528\u6237\u540D\u3001\u5BC6\u7801\u3001\u767B\u5F55\u6309\u94AE", { opIndex: autoOpIndex }));
+  }
   const authMode = isRecord(spec.auth) ? spec.auth.mode : void 0;
   if (raw.failure !== void 0 && raw.failure !== null) {
     if (!Array.isArray(raw.failure)) {
@@ -1133,7 +1257,7 @@ function isSettleConditionShape(value) {
     case "url":
       return nonEmptyString(value.glob);
     case "selector":
-      return value.target !== void 0;
+      return value.target !== void 0 && !(isRecord(value.target) && "auto" in value.target);
     case "cookie":
       return nonEmptyString(value.name);
     case "storage":
@@ -1155,4 +1279,5 @@ export {
   BUILTIN_INPUT_NAMES,
   validateLoginSpec
 };
+
 export { validateLoginSpec as validateLoginSpecSnapshot };

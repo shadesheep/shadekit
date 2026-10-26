@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "template": "generic",
+  "ops": [
+    { "op": "clear.cookies", "range": "all" },
+    { "op": "fill", "target": "", "value": "{username}", "clearFirst": true },
+    { "op": "fill", "target": "", "value": "{password}", "clearFirst": true },
+    { "op": "click", "target": "", "onNotFound": "fail" },
+    { "op": "auth.write" }
+  ],
+  "success": [
+    { "page": { "type": "any", "of": [{ "type": "formGone" }, { "type": "urlChanged" }] } }
+  ],
+  "auth": { "mode": "engine" },
+  "limits": { "requestMs": 15000, "stepMs": 5000, "settleMs": 10000 }
+}

@@ -247,3 +247,9 @@
 | F9 | 旧 API 策略在 UI 中 DEV_ONLY，默认 `loginMethod` 为 `generic`；但已存 domain 仍在用它 | `DomainsPanel.vue` |
 | F10 | `setCookie` 仅 host-only、无 `domain` / `sameSite` 参数 | `auth-storage.ts:52-83` |
 | F11 | `generic-steps.ts` 的步骤引擎已是死代码，仅 `interpolate` 在生产被引用 | `strategies/generic.ts:28` |
+
+## 后续修订（2026-10-26）：自动定位仍属 LoginSpec
+
+- 自动、锁定和手动定位继续由同一份 `LoginSpec.ops` 表达，不新增定位存储或第二执行路径。版本保持 2，配置包格式不变。
+- `runSpec` 在首个自动算子前把整组 auto 解析成具体 Target + FrameScope，后续仍逐步调用既有 `runDomAction`；trace 记录实际 Target 与 `resolution`，不记录填充值。
+- 历史空 Target 仅对完整原版默认模板做只读兼容，不把任意三空步骤猜成自动。

@@ -476,3 +476,9 @@ runSpec(spec: LoginSpec, ctx: AuthContext, options?: RunSpecOptions): Promise<Ru
 - 删除：`tests/stateless-login-strategies.test.ts`、`tests/generic-steps.test.ts` 的步骤引擎部分。
 - 账号切换尾部：`tests/switch-account-tail.test.ts`（成功必刷新 / `?redirect=` 走导航 / 刷新失败不判失败）。
 - 其余既有测试原样保绿；`npm run check` + `npm test` 同 PR 保绿。
+
+## 后续修订（2026-10-26）：自动标记校验与刷新上限
+
+- `fill/click.target` 类型为 `Target | { auto: "login" }`；未知 auto、额外字段、组合缺项和非标准声明均为 `CONFIG_INVALID`，其它 Target 位置不接受 auto。
+- 只有标准三步整组自动时启用运行时解析。`noPassword` 可在任何填写/点击之前触发一次 `reloadTabAndWait(settleMs)`；incomplete、ambiguous、注入错误、goto 失败和成功条件失败均不触发。
+- 独立 authoring validator 由官方校验器生成并保留 `validateLoginSpecSnapshot` 导出别名；自动与旧默认 fixtures 做 parity，版本号不变。

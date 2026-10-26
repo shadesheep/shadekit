@@ -30,6 +30,20 @@ test("valid gated API LoginSpec passes snapshot validation", async () => {
   assert.deepEqual(validateLoginSpecSnapshot(spec), []);
 });
 
+test("automatic and exact legacy defaults pass, while auto misuse fails closed", async () => {
+  for (const file of ["auto-login.json", "legacy-empty-default.json"]) {
+    assert.deepEqual(validateLoginSpecSnapshot(await readJson(`fixtures/valid/${file}`)), [], file);
+  }
+  const misuse = await readJson("fixtures/invalid/auto-login-misuse.json");
+  assert.ok(validateLoginSpecSnapshot(misuse).some((issue) => issue.code === "CONFIG_INVALID"));
+
+  const spec = await readJson("fixtures/valid/auto-login.json");
+  const built = buildConfigPackageSnapshot({ spec, name: "Auto", url: "{origin}" });
+  assert.deepEqual(built.issues, []);
+  assert.equal(built.package.format, "dt-login-config/v1");
+  assert.equal(built.package.specVersion, 2);
+});
+
 for (const [file, rule, opIndex] of invalidCases) {
   test(`invalid fixture ${file} reports ${rule}`, async () => {
     const issues = validateLoginSpecSnapshot(await readJson(`fixtures/invalid/${file}`));

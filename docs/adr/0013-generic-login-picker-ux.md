@@ -149,3 +149,9 @@ type PickResult =
 - 单元：`tests/target-picker.test.ts`（状态机、浮层、`startTargetPicker` 编排与回切）
 - 手工：按 `docs/generic-login-picker-ux.md` §7.2 准备本地虚构页面验收
 - 全程 `npm run check` + `npm test` + `npm run lint` 保绿
+
+## 后续修订（2026-10-26）：识别成为可选锁定
+
+- 「识别并锁定登录表单」移到环境 URL 下方，不再是保存或展开高级配置的前置步骤。状态由当前标准三项 Target 推导，不另存定位状态。
+- 唯一完整候选可直接锁定；多 frame 仍由用户确认，已有自定义定位需确认替换。高级编辑器可显式切换自动与具体 Target，清除定位不隐式切自动。
+- 登录失败后提供重试、手动定位与复制详情；手动定位仅通过 `editEnv` query 打开对应环境，不传账号凭据。
