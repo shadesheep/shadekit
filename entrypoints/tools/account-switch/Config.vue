@@ -1675,25 +1675,43 @@ select[multiple] option {
   font-size: 12px;
 }
 
-/* Role pill with color — 颜色由 roleColorStyle() 注入的 CSS 变量驱动，按角色名哈希取 10 色池 */
+/* 表格行内角色：中性 chip + 角色色小圆点。
+   每行都出现的元素不能用填色——色块连成一片会盖过账号名本身；
+   颜色缩成 5px 点（取自 roleColorStyle 注入的 fg token）保留跨行识别，
+   填色只留给筛选栏选中态与表单已选角色这类「表达状态、单点出现」的位置。 */
 .role-pill {
-  display: inline-block;
-  font-size: 12px;
-  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
   border-radius: 9999px;
-  font-weight: 500;
+  font-weight: 400;
   white-space: nowrap;
   /* 同一单元格多个角色 pill 之间留白，避免粘连 */
   margin: 0 4px 2px 0;
-  background: var(--role-light-bg);
-  color: var(--role-light-fg);
-  border: 1px solid color-mix(in srgb, var(--role-light-fg) 30%, transparent);
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.role-pill::before {
+  content: '';
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--role-light-fg);
 }
 
 [data-dt-dark] .role-pill {
-  background: var(--role-dark-bg);
-  color: var(--role-dark-fg);
-  border-color: color-mix(in srgb, var(--role-dark-fg) 30%, transparent);
+  background: #21262d;
+  color: #8b949e;
+  border-color: var(--dt-dark-border, #30363d);
+}
+
+[data-dt-dark] .role-pill::before {
+  background: var(--role-dark-fg);
 }
 
 /* Role selector */
@@ -2251,7 +2269,7 @@ select[multiple] option {
   font-weight: 600;
   line-height: 1;
   user-select: none;
-  /* 头像固定中性色，不参与 10 色池（色池只用于角色 pill，避免字面花） */
+  /* 头像固定中性色，不参与 10 色池（色池只用于角色 pill 的色点，避免字面花） */
   background: #f1f5f9;
   color: #475569;
 }

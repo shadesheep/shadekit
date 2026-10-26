@@ -481,7 +481,7 @@ const quickLoginPreview = computed(() => {
             <div class="as-meta">
               <span class="as-account-username">
                 <div class="i-lucide-at-sign w-3 h-3" />
-                {{ acc.username }}
+                <span class="as-username-text">{{ acc.username }}</span>
               </span>
               <span class="as-roles">
                 <span v-for="r in acc.roles" :key="r" class="as-role-tag" :style="roleColorStyle(r)">{{ r }}</span>
@@ -920,7 +920,7 @@ const quickLoginPreview = computed(() => {
   bottom: 8px;
 }
 
-/* 账号头像：固定中性色，不参与 10 色池（色池只用于角色 pill，避免字面花） */
+/* 账号头像：固定中性色，不参与 10 色池（色池只用于角色 tag 的色点，避免字面花） */
 .as-avatar {
   flex-shrink: 0;
   display: flex;
@@ -960,6 +960,7 @@ const quickLoginPreview = computed(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
 }
 
 .as-account-username {
@@ -967,29 +968,57 @@ const quickLoginPreview = computed(() => {
   color: #94a3b8;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
-.as-role-tag {
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  font-weight: 500;
+/* 用户名过长时省略，给右侧角色 tag 让位（否则会压在 tag 上） */
+.as-username-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  background-color: var(--role-light-bg);
-  color: var(--role-light-fg);
-  border: 1px solid color-mix(in srgb, var(--role-light-fg) 30%, transparent);
+}
+
+/* 角色 tag：中性 chip + 角色色小圆点。
+   卡片列表里每张卡都挂 tag，填色会盖过账号名；颜色收成 5px 点即可跨卡识别，
+   填色只保留在角色筛选 chip 的选中态。 */
+.as-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-weight: 400;
+  white-space: nowrap;
+  background-color: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.as-role-tag::before {
+  content: '';
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--role-light-fg);
 }
 
 [data-dt-dark] .as-role-tag {
-  background-color: var(--role-dark-bg);
-  color: var(--role-dark-fg);
-  border-color: color-mix(in srgb, var(--role-dark-fg) 30%, transparent);
+  background-color: #21262d;
+  color: #8b949e;
+  border-color: var(--dt-dark-border, #30363d);
+}
+
+[data-dt-dark] .as-role-tag::before {
+  background-color: var(--role-dark-fg);
 }
 
 .as-roles {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .as-no-role {
