@@ -8,6 +8,7 @@ import { buildEnvGroups, normalizeEnvTag, tagColor } from './account-env-view';
 import { sendBgMessage } from '../../shared/messages';
 import { validateLoginSpec } from './spec/validate';
 import { readSpecFromConfig } from './spec/migrate';
+import { finalizeNewEnvironmentSave, newEnvironmentSaveMessage } from './login-form-lock';
 import { LOGIN_BUSY_ERROR } from './utils/error-codes';
 import type {
   Account,
@@ -193,8 +194,6 @@ async function onDomainsSave(
  *   往已有账号的 domains 里追加/移除 envKey（编辑改名时同时按 previousEnvKey 清老 key）。
  */
 async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
-  config.value.domains = payload.domains;
-
   const { envKey, previousEnvKey } = payload;
   const keysToUnbind = new Set<string>(
     previousEnvKey && previousEnvKey !== envKey
@@ -215,15 +214,23 @@ async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
     if (domains === a.domains) return a;
     return { ...a, domains };
   });
-
-  // 追加本次新建的账号
   nextAccounts.push(...payload.addedAccounts);
 
-  config.value.accounts = nextAccounts;
-  await saveWithFeedback(
-    { domains: payload.domains, accounts: nextAccounts },
-    payload.message,
-  );
+  const saveBase = () => saveFields({ domains: payload.domains, accounts: nextAccounts });
+  if (previousEnvKey === null) {
+    const result = await finalizeNewEnvironmentSave({
+      candidate: payload.lockCandidate,
+      saveBase,
+      reload: loadConfig,
+    });
+    if (result.saved) showToast(newEnvironmentSaveMessage(result.lockStatus), 'success');
+    return;
+  }
+
+  if (await saveBase()) {
+    await loadConfig();
+    showToast(payload.message, 'success');
+  }
 }
 
 /** DomainsPanel 的多字段落盘（导入策略库 + 环境一次写入，ADR-0019） */

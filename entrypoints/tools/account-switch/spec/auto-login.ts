@@ -59,6 +59,11 @@ export function isLegacyEmptyDefaultSpec(value: unknown): value is LoginSpec {
   return deepEqual(value, LEGACY_EMPTY_DEFAULT_SPEC);
 }
 
+/** 条件回写使用的键顺序无关 spec 修订比较。 */
+export function loginSpecEquals(left: LoginSpec, right: LoginSpec): boolean {
+  return deepEqual(left, right);
+}
+
 /** 编辑器与运行时共用的只读兼容投影；不改写传入对象或 storage。 */
 export function projectLegacyDefaultSpec(spec: LoginSpec): LoginSpec {
   return isLegacyEmptyDefaultSpec(spec) ? defaultLoginSpec() : spec;

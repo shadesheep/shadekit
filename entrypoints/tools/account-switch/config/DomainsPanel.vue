@@ -4,6 +4,7 @@ import { validateDomainUrl, isDuplicateDomain } from '../utils/validate-domain';
 import SpecEditor from './SpecEditor.vue';
 import LoginFormLocator from './LoginFormLocator.vue';
 import { projectLegacyDefaultSpec } from '../spec/auto-login';
+import { prepareLoginFormLock, type PreparedLoginFormLock } from '../login-form-lock';
 import { defaultLoginSpec, type LoginSpec } from '../spec';
 import { readSpecFromConfig } from '../spec/migrate';
 import {
@@ -72,6 +73,8 @@ export interface EnvSavePayload {
   previousEnvKey: string | null;
   /** 成功 toast 文案（含「新增 N 个账号 / 绑定 M 个」等后缀） */
   message: string;
+  /** 仅新建自动标准表单携带；基础 domains 始终保持自动 spec。 */
+  lockCandidate?: PreparedLoginFormLock;
 }
 
 const emit = defineEmits<{
@@ -114,6 +117,7 @@ const newDomain = ref({
   vars: {} as Record<string, string>,
 });
 const editingDomain = ref<string | null>(null);
+const savingDomain = ref(false);
 
 // ============================================================
 // 关联账号（环境抽屉底部「关联账号」区块）
@@ -564,22 +568,39 @@ function cloneDomain(url: string) {
   }, 2000);
 }
 
-function addDomain() {
+async function addDomain() {
   urlTouched.value = true;
-  if (!trimmedUrl.value || !newDomain.value.name || urlError.value) return;
+  if (savingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
   if (recipeInvalid()) return;
-  const entry = buildDomainEntry();
-  const addedName = newDomain.value.name || trimmedUrl.value;
-  const next = { ...props.domains, [trimmedUrl.value]: entry };
-  const payload = buildSavePayload({
-    domains: next,
-    envKey: trimmedUrl.value,
-    previousEnvKey: null,
-    baseMessage: `环境「${addedName}」已添加`,
-  });
-  resetDomainForm();
-  showDomainForm.value = false;
-  emit('saveWithAccounts', payload);
+  savingDomain.value = true;
+  try {
+    const entry = buildDomainEntry();
+    const envKey = trimmedUrl.value;
+    const addedName = newDomain.value.name || envKey;
+    const next = { ...props.domains, [envKey]: entry };
+    let lockCandidate: PreparedLoginFormLock | undefined;
+    try {
+      lockCandidate = (await prepareLoginFormLock({
+        envKey,
+        spec: entry.strategyConfig?.spec ?? newDomain.value.spec,
+      })) ?? undefined;
+    } catch {
+      // 识别只是保存后的优化；任何准备异常都不阻断基础环境与账号保存。
+      lockCandidate = undefined;
+    }
+    const payload = buildSavePayload({
+      domains: next,
+      envKey,
+      previousEnvKey: null,
+      baseMessage: `环境「${addedName}」已添加`,
+    });
+    if (lockCandidate) payload.lockCandidate = lockCandidate;
+    resetDomainForm();
+    showDomainForm.value = false;
+    emit('saveWithAccounts', payload);
+  } finally {
+    savingDomain.value = false;
+  }
 }
 
 function editDomain(url: string) {
@@ -1261,8 +1282,8 @@ async function runTrialLogin(): Promise<void> {
         </div>
       </div>
       <div class="form-actions">
-        <DtButton v-if="!editingDomain" variant="primary" @click="addDomain">
-          <div class="i-lucide-plus w-4 h-4 mr-1" />添加
+        <DtButton v-if="!editingDomain" variant="primary" :disabled="savingDomain" @click="addDomain">
+          <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : '添加' }}
         </DtButton>
         <template v-else>
           <DtButton variant="primary" @click="saveEditDomain">保存</DtButton>

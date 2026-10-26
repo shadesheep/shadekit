@@ -67,6 +67,17 @@ export const allTools: ToolDefinition[] = [
         // origin 保留在协议里（发送方按目标环境挑 tab），处理器不需要它
         return handleScanLoginForm(sender, msg.tabId);
       },
+      LOCK_LOGIN_FORM: async (msg) => {
+        const { handleLockLoginForm } = await import(
+          "../tools/account-switch/background-handler"
+        );
+        return handleLockLoginForm({
+          operationId: msg.operationId,
+          envKey: msg.envKey,
+          expectedSpec: msg.expectedSpec,
+          tabId: msg.tabId,
+        });
+      },
       TRIAL_LOGIN: async (msg) => {
         const { handleTrialLogin } = await import(
           "../tools/account-switch/background-handler"

@@ -27,6 +27,7 @@ import { ErrorCodes, errorCodeOf } from "./utils/error-codes";
 import { runTrialLogin } from "./spec/trial";
 import type { TrialSignalState } from "./spec/run";
 import type { LoginSpec } from "./spec/types";
+import type { PreparedLoginFormLock } from "./login-form-lock";
 
 type LoginResponse = {
   success: boolean;
@@ -328,6 +329,12 @@ export async function handleScanLoginForm(
         frames: [],
       };
   }
+}
+
+/** 新建环境保存后的当前环境条件回写入口。 */
+export async function handleLockLoginForm(input: PreparedLoginFormLock) {
+  const { lockPreparedLoginForm } = await import("./login-form-lock");
+  return lockPreparedLoginForm(input);
 }
 
 /**
