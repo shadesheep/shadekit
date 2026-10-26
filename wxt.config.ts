@@ -8,7 +8,11 @@ export default defineConfig({
   webExt: {
     disabled: true, // 不自动拉起浏览器，手动加载
   },
-  manifest: {
+  // 源码包会公开上传到 AMO，必须剔除本地密钥
+  zip: {
+    excludeSources: ["keys/**"],
+  },
+  manifest: ({ browser }) => ({
     name: "ShadeKit",
     description: "开发者工具集合：账号切换、JSON 格式化、代码美化、模拟数据、环境指示等",
     homepage_url: "https://github.com/shadesheep/shadekit",
@@ -41,7 +45,16 @@ export default defineConfig({
         description: "快速切换账号",
       },
     },
-  },
+    // Firefox 专属：AMO 要求固定 ID，且新扩展必须声明数据收集策略
+    ...(browser === "firefox" && {
+      browser_specific_settings: {
+        gecko: {
+          id: "shadekit@shadesheep.github.io",
+          data_collection_permissions: { required: ["none"] },
+        },
+      },
+    }),
+  }),
   hooks: {
     'vite:build:extendConfig': (_entrypoints, viteConfig) => {
       // WXT uses lib mode (IIFE format) for background scripts,
