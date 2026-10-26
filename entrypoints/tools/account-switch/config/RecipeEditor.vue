@@ -6,6 +6,8 @@ import type {
   SettleCondition,
   Target,
 } from '../strategies/generic-recipe';
+import { isAutoLoginTarget } from '../spec/auto-login';
+import type { LoginFormTarget } from '../spec/types';
 import {
   authToForm,
   changeStepOp,
@@ -360,8 +362,9 @@ const simpleForm = computed<SimpleForm | null>(() => toSimpleForm(recipe.value))
 /** 三行表单的定位写入对应步骤（值固定为变量，不可编辑） */
 function setSimpleTarget(
   key: 'username' | 'password' | 'submit',
-  target: Target,
+  target: LoginFormTarget,
 ): void {
+  if (isAutoLoginTarget(target)) return;
   const shape = simpleShape.value;
   if (!shape) return;
   const index =
@@ -551,7 +554,8 @@ function settleKey(kind: 'settle' | 'fail'): string {
   return `settle:${kind}`;
 }
 
-function setStepTarget(index: number, target: Target): void {
+function setStepTarget(index: number, target: LoginFormTarget): void {
+  if (isAutoLoginTarget(target)) return;
   updateStep(index, { target });
 }
 
@@ -599,7 +603,8 @@ function settleTargetOf(kind: 'settle' | 'fail'): Target | null {
   return form.kind === 'selector' ? (form.target ?? form.value) : null;
 }
 
-function updateSettleTarget(kind: 'settle' | 'fail', target: Target): void {
+function updateSettleTarget(kind: 'settle' | 'fail', target: LoginFormTarget): void {
+  if (isAutoLoginTarget(target)) return;
   const form = kind === 'settle' ? settleForm.value : failForm.value;
   const next: SettleForm = {
     kind: 'selector',
@@ -617,7 +622,8 @@ function waitTargetOf(index: number): Target | null {
   return step.when.target;
 }
 
-function updateWaitTarget(index: number, target: Target): void {
+function updateWaitTarget(index: number, target: LoginFormTarget): void {
+  if (isAutoLoginTarget(target)) return;
   const step = steps.value[index];
   if (step?.op !== 'waitFor') return;
   updateStep(index, { when: { type: 'selector', target } });
@@ -639,7 +645,8 @@ function targetToKey(target: Target): string {
   return describeTargetForUi(target);
 }
 
-function updateExtractTarget(index: number, target: Target): void {
+function updateExtractTarget(index: number, target: LoginFormTarget): void {
+  if (isAutoLoginTarget(target)) return;
   updateStep(index, { key: targetToKey(target) });
 }
 

@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue';
 import { validateDomainUrl, isDuplicateDomain } from '../utils/validate-domain';
 import SpecEditor from './SpecEditor.vue';
+import LoginFormLocator from './LoginFormLocator.vue';
+import { projectLegacyDefaultSpec } from '../spec/auto-login';
 import { defaultLoginSpec, type LoginSpec } from '../spec';
 import { readSpecFromConfig } from '../spec/migrate';
 import {
@@ -350,6 +352,11 @@ function saveToLibrary(): void {
 
 // 高级配置展开状态
 const showAdvanced = ref(false);
+const loginFormLocatorRef = ref<{ focus: () => void } | null>(null);
+
+function focusLoginForm(): void {
+  loginFormLocatorRef.value?.focus();
+}
 
 function resetDomainForm() {
   urlTouched.value = false;
@@ -450,6 +457,8 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
     newDomain.value.specInvalid = read.invalid && hadStrategy ? read.invalid : '';
     if (read.invalid) newDomain.value.loginMethod = BUILTIN_GENERIC;
   }
+  // 历史原版默认模板只在编辑器投影；原始 storage 不发生批量改写。
+  newDomain.value.spec = projectLegacyDefaultSpec(newDomain.value.spec);
   // 父域清理开关以声明为准（execution 只认 clear.cookies.includeParent）
   newDomain.value.cookieClearIncludeParent = hasCookieIncludeParent(d);
 }
@@ -690,6 +699,7 @@ defineExpose({
   openCreate,
   openEdit: editDomain,
   openClone: cloneDomain,
+  focusLoginForm,
   exportPackage: exportConfigPackage,
   openImport: importConfigPackage,
 });
@@ -1048,6 +1058,13 @@ async function runTrialLogin(): Promise<void> {
         <input class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
         <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
       </div>
+      <LoginFormLocator
+        ref="loginFormLocatorRef"
+        :spec="newDomain.spec"
+        :origin="formOrigin"
+        :mirrored="!!newDomain.strategyId"
+        @change="onSpecChange"
+      />
       <!-- Bug 复现地址：测试反馈里附带的页面地址，登录成功后自动进入该页，省去手工粘贴 -->
       <div class="form-row">
         <label>Bug 复现地址 <span class="optional">（选填，登录成功后自动进入该页面）</span></label>

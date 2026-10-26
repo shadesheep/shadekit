@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Target } from '../strategies/generic-recipe';
+import { AUTO_LOGIN_TARGET, isAutoLoginTarget } from '../spec/auto-login';
+import type { LoginFormTarget } from '../spec/types';
 import {
   describeTargetForUi,
   insertAtCursor as insertTextAt,
@@ -30,7 +32,9 @@ import DtButton from '../../../shared/components/DtButton.vue';
 
 const props = withDefaults(
   defineProps<{
-    modelValue: Target | null;
+    modelValue: LoginFormTarget | null;
+    /** 仅 DOM fill/click 开启；其它 Target 输入点不显示自动类型。 */
+    allowAuto?: boolean;
     /** 决定类型提示的语义：填充 / 点击 / 仅定位 */
     context: TargetContext;
     /** 目标环境 origin（拾取时用于挑选标签页） */
@@ -43,12 +47,13 @@ const props = withDefaults(
   {
     placeholder: '例: #username 或 用户名',
     disabled: false,
+    allowAuto: false,
     candidates: () => [],
   },
 );
 
 const emit = defineEmits<{
-  'update:modelValue': [target: Target];
+  'update:modelValue': [target: LoginFormTarget];
   'update:frameScope': [scope: { frameId?: number; frameUrl?: string }];
   /** 拾取成功：父组件据此建议填充值、保存候选 */
   picked: [payload: { meta: TargetMeta; candidates: TargetCandidate[] }];
@@ -75,13 +80,15 @@ watch(
   },
 );
 
-function emitValue(target: Target): void {
+function emitValue(target: LoginFormTarget): void {
   selfValue = JSON.stringify(target);
   emit("update:modelValue", target);
 }
 
-const value = computed(() => targetValue(props.modelValue));
-const kind = computed(() => targetKind(props.modelValue));
+type FieldKind = TargetKind | 'auto';
+const isAuto = computed(() => props.allowAuto && isAutoLoginTarget(props.modelValue));
+const value = computed(() => isAuto.value ? '' : targetValue(props.modelValue as Target | null));
+const kind = computed<FieldKind>(() => isAuto.value ? 'auto' : targetKind(props.modelValue as Target | null));
 
 /** 值输入框光标位置：变量胶囊插入到光标处（ADR-0013 D10） */
 const valueInput = ref<HTMLInputElement | null>(null);
@@ -115,18 +122,19 @@ defineExpose({ insertToken });
 
 /** 展示用候选：首个与当前值相同的不重复成胶囊 */
 const pills = computed(() =>
-  props.candidates.filter(
+  isAuto.value ? [] : props.candidates.filter(
     (candidate) => targetValue(candidate.target) !== value.value ||
       targetKind(candidate.target) !== kind.value,
   ),
 );
 
-function updateKind(next: TargetKind): void {
-  emitValue(makeTarget(next, value.value));
+function updateKind(next: FieldKind): void {
+  emitValue(next === 'auto' ? AUTO_LOGIN_TARGET : makeTarget(next, value.value));
   typeWarning.value = null;
 }
 
 function updateValue(next: string): void {
+  if (kind.value === 'auto') return;
   emitValue(makeTarget(kind.value, next));
   typeWarning.value = null;
 }
@@ -201,13 +209,15 @@ async function pick(): Promise<void> {
         class="dt-input target-kind"
         :value="kind"
         :disabled="disabled"
-        @change="updateKind(($event.target as HTMLSelectElement).value as TargetKind)"
+        @change="updateKind(($event.target as HTMLSelectElement).value as FieldKind)"
       >
+        <option v-if="allowAuto" value="auto">自动（登录表单）</option>
         <option v-for="opt in TARGET_KIND_OPTIONS" :key="opt.value" :value="opt.value">
           {{ opt.label }}
         </option>
       </select>
       <input
+        v-if="!isAuto"
         ref="valueInput"
         class="dt-input target-value"
         :value="value"
@@ -220,6 +230,7 @@ async function pick(): Promise<void> {
         @select="rememberCursor"
       />
       <DtButton
+        v-if="!isAuto"
         size="sm"
         class="pick-btn"
         :disabled="disabled || pickerBusy"
@@ -229,7 +240,7 @@ async function pick(): Promise<void> {
         {{ pickerBusy ? '拾取中…' : '拾取' }}
       </DtButton>
       <button
-        v-if="value"
+        v-if="value || isAuto"
         type="button"
         class="icon-btn"
         title="清除定位"
@@ -259,7 +270,7 @@ async function pick(): Promise<void> {
       </button>
     </div>
 
-    <p v-if="value" class="target-hint">当前定位：{{ describeTargetForUi(modelValue) }}</p>
+    <p v-if="value || isAuto" class="target-hint">当前定位：{{ isAuto ? '自动（登录表单）' : describeTargetForUi(modelValue) }}</p>
 
     <p
       v-if="localNotice"
