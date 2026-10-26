@@ -14,7 +14,7 @@
  * 配置包走环境编辑区。
  */
 
-import type { DomainConfig } from "../types";
+import type { DomainConfig, StrategyEntry } from "../types";
 import { LOGIN_SPEC_VERSION, type LoginSpec, type SpecOp } from "./types";
 
 /** 配置包格式标识 */
@@ -119,13 +119,21 @@ export function checkRequiredVars(
  * @param environment 绑定的环境（DomainConfig）
  * @param origin 环境地址（即 DomainConfig 的 key）；包内 `environments[].url` 由此给出
  * @param requiredVars 该环境导出时希望接收方填写的变量名（不含 `{}`）
+ * @param strategies 登录策略库：镜像环境（ADR-0019）不持私有声明，
+ *   需从 `strategyId` 指向的库条目回落读取
  */
 export function buildConfigPackage(
   environment: DomainConfig,
   origin: string,
   requiredVars: string[],
+  strategies?: Record<string, StrategyEntry | undefined>,
 ): { package?: ConfigPackage; issues: PackageIssue[] } {
-  const spec = environment.strategyConfig?.spec;
+  // 与 `readSpecFromConfig` 同一条读取链：私有声明优先，其次镜像库条目
+  const spec =
+    environment.strategyConfig?.spec ??
+    (environment.strategyId
+      ? strategies?.[environment.strategyId]?.spec
+      : undefined);
   if (!spec) {
     return {
       issues: [{ message: "该环境没有可导出的登录声明（spec）" }],

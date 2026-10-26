@@ -764,7 +764,7 @@ function exportConfigPackage(url: string) {
     toast(`环境「${d.name}」的登录声明存在校验错误，无法导出登录策略包`, 'error');
     return;
   }
-  const result = buildConfigPackage(d, url, availableRequiredVars(spec));
+  const result = buildConfigPackage(d, url, availableRequiredVars(spec), props.strategies);
   if (result.issues.length > 0 || !result.package) {
     const first = result.issues[0]?.message ?? '未知错误';
     toast(`无法导出登录策略包：${first}`, 'error');

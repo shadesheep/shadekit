@@ -148,6 +148,28 @@ describe("buildConfigPackage — 导出", () => {
     const { issues } = buildConfigPackage(d, "https://example.com", []);
     expect(issues.some((i) => i.message.includes("spec"))).toBe(true);
   });
+
+  it("镜像环境（ADR-0019）→ 从策略库回落导出，不要求环境私有声明", () => {
+    const mirrored = spec({
+      vars: [{ name: "publicKey", title: "公钥" }],
+    });
+    const d = domain({ strategyConfig: undefined, strategyId: "custom:ebs-v6" });
+    const { package: pkg, issues } = buildConfigPackage(
+      d,
+      "https://example.com",
+      ["publicKey"],
+      { "custom:ebs-v6": { name: "ebs-v6", spec: mirrored, createdAt: 1, updatedAt: 1 } },
+    );
+    expect(issues).toEqual([]);
+    expect(pkg!.environments[0].spec).toEqual(mirrored);
+  });
+
+  it("镜像环境但库条目缺失 → 仍拒绝并提示无 spec", () => {
+    const d = domain({ strategyConfig: undefined, strategyId: "custom:gone" });
+    const { package: pkg, issues } = buildConfigPackage(d, "https://example.com", []);
+    expect(pkg).toBeUndefined();
+    expect(issues.some((i) => i.message.includes("spec"))).toBe(true);
+  });
 });
 
 describe("validateConfigPackage — 导入", () => {
