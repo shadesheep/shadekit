@@ -105,6 +105,11 @@ export interface BackgroundMessageMap {
     response: LoginFormLockResult;
   };
 
+  OPEN_ACCOUNT_ENVIRONMENT: {
+    payload: { envKey: string };
+    response: { success: boolean; error?: string };
+  };
+
   /**
    * 试登录：在后台以单算子模式试跑一次登录请求，默认零副作用。
    * 只发请求 + 判定数据成功信号；不执行 `auth.write` / `goto` / 页面算子，

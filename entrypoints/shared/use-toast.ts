@@ -12,7 +12,9 @@ export interface Toast {
   id: number;
   message: string;
   type: ToastType;
+  /** 旧单操作兼容字段，指向首个操作。 */
   action?: ToastAction;
+  actions: ToastAction[];
 }
 
 const toasts = ref<Toast[]>([]);
@@ -30,10 +32,11 @@ export function showToast(
   message: string,
   type: ToastType = 'info',
   duration = 2000,
-  action?: ToastAction,
+  action?: ToastAction | ToastAction[],
 ) {
   const id = ++nextId;
-  toasts.value.push({ id, message, type, action });
+  const actions = Array.isArray(action) ? action : action ? [action] : [];
+  toasts.value.push({ id, message, type, actions, ...(actions[0] ? { action: actions[0] } : {}) });
   if (duration > 0) {
     setTimeout(() => {
       dismissToast(id);

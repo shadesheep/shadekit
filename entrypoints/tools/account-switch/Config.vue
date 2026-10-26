@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getConfig, updateConfig } from '../../shared/tool-config';
 import { showToast } from '../../shared/use-toast';
 import { collectRoleFilterOptions, collectRoles, ROLE_NAMES, roleColorStyle } from './account-view';
@@ -9,6 +9,8 @@ import { sendBgMessage } from '../../shared/messages';
 import { validateLoginSpec } from './spec/validate';
 import { readSpecFromConfig } from './spec/migrate';
 import { finalizeNewEnvironmentSave, newEnvironmentSaveMessage } from './login-form-lock';
+import { showLoginRecoveryToast } from './login-recovery-toast';
+import { resolveRequestedEnv } from '../../options/options-route';
 import { LOGIN_BUSY_ERROR } from './utils/error-codes';
 import type {
   Account,
@@ -30,6 +32,9 @@ import DomainsPanel, { type EnvSavePayload } from './config/DomainsPanel.vue';
 import StrategyLibrary from './config/StrategyLibrary.vue';
 import DtButton from '../../shared/components/DtButton.vue';
 import DtDrawer from '../../shared/components/DtDrawer.vue';
+
+const props = defineProps<{ editEnv?: string }>();
+const emit = defineEmits<{ editEnvConsumed: [] }>();
 
 const TOOL_ID = 'account-switch';
 
@@ -512,8 +517,30 @@ interface DomainsPanelExpose {
   openClone: (url: string) => void;
   exportPackage: (url: string) => void;
   openImport: () => void;
+  focusLoginForm: () => void;
 }
 const domainsPanelRef = ref<DomainsPanelExpose | null>(null);
+const configReady = ref(false);
+
+async function openRequestedEnvironment(editEnv: string): Promise<void> {
+  const envKey = resolveRequestedEnv(config.value.domains, editEnv);
+  if (!envKey) {
+    showToast('未找到要编辑的环境，可能已被删除或地址已修改', 'error');
+  } else {
+    activeTab.value = 'main';
+    domainsPanelRef.value?.openEdit(envKey);
+    await nextTick();
+    domainsPanelRef.value?.focusLoginForm();
+  }
+  emit('editEnvConsumed');
+}
+
+watch(
+  [() => props.editEnv, configReady],
+  ([editEnv, ready]) => {
+    if (ready && editEnv) void openRequestedEnvironment(editEnv);
+  },
+);
 
 async function deleteEnv(key: string) {
   const env = config.value.domains[key];
@@ -783,11 +810,22 @@ async function loginAccount(envKey: string, acc: Account) {
       if (err === LOGIN_BUSY_ERROR) {
         showToast(err, 'info');
       } else {
-        showToast(
-          `登录失败：${err}${response?.errorCode ? ` [${response.errorCode}]` : ''}`,
-          'error',
-          8000,
-        );
+        showLoginRecoveryToast({
+          prefix: '登录失败',
+          error: err,
+          errorCode: response?.errorCode,
+          envKey,
+          onRetry: () => loginAccount(envKey, acc),
+          detail: {
+            action: 'SWITCH_ACCOUNT',
+            envName: config.value.domains[envKey]?.name,
+            origin: envKey,
+            strategy: config.value.domains[envKey]?.loginMethod,
+            accountName: acc.name,
+            username: acc.username,
+            recipeSteps: response?.recipeSteps,
+          },
+        });
       }
     }
   } finally {
@@ -797,6 +835,7 @@ async function loginAccount(envKey: string, acc: Account) {
 
 onMounted(async () => {
   await loadConfig();
+  configReady.value = true;
   void refresh();
   // 「⋯」菜单：点页面任意处关闭（⋯ 按钮自身 @click.stop 除外）
   document.addEventListener('click', closeMenu);

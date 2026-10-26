@@ -27,11 +27,12 @@ function iconForType(type: Toast['type']): string {
         <div :class="[iconForType(toast.type), 'toast-icon']" />
         <span class="toast-message">{{ toast.message }}</span>
         <button
-          v-if="toast.action"
+          v-for="action in toast.actions"
+          :key="action.label"
           class="toast-action"
-          @click="toast.action?.onClick()"
+          @click="action.onClick()"
         >
-          {{ toast.action.label }}
+          {{ action.label }}
         </button>
         <button class="toast-close" @click="dismissToast(toast.id)" title="关闭">
           <div class="i-lucide-x w-3 h-3" />

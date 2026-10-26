@@ -78,6 +78,12 @@ export const allTools: ToolDefinition[] = [
           tabId: msg.tabId,
         });
       },
+      OPEN_ACCOUNT_ENVIRONMENT: async (msg) => {
+        const { handleOpenAccountEnvironment } = await import(
+          "../tools/account-switch/background-handler"
+        );
+        return handleOpenAccountEnvironment(msg.envKey);
+      },
       TRIAL_LOGIN: async (msg) => {
         const { handleTrialLogin } = await import(
           "../tools/account-switch/background-handler"
