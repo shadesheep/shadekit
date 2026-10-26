@@ -1558,8 +1558,9 @@ async function runTrialLogin(): Promise<void> {
 }
 
 [data-dt-dark] .import-dialog-card {
-  background: var(--dt-dark-surface);
+  background: var(--dt-dark-surface-1, #161b22);
   border-color: var(--dt-dark-border);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 .import-dialog-title {
