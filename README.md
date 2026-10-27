@@ -37,6 +37,7 @@
 
 - [Chrome Web Store](https://chromewebstore.google.com/detail/mpjleclhdlfhdcimphbcbcikklhgkimm)
 - [Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/devtools/lgoakbbkpmkpcpmkkcmolgommccofkgn)
+- [Firefox Add-ons](https://addons.mozilla.org/zh-CN/firefox/addon/shadekit/)
 
 也可从源码构建后手动加载（见下文「快速开始」）。
 
@@ -64,7 +65,7 @@
 
 *配置页与元素拾取均为真实界面；截图中的站点和身份均为虚构。*
 
-快捷键未生效时，打开 `chrome://extensions/shortcuts` 或 `edge://extensions/shortcuts`，为 ShadeKit 的「快速切换账号」设置 `Alt+Shift+A`。
+快捷键未生效时，打开 `chrome://extensions/shortcuts` 或 `edge://extensions/shortcuts`，为 ShadeKit 的「快速切换账号」设置 `Alt+Shift+A`。Firefox 用户可打开 `about:addons`，点击齿轮图标并选择「管理扩展快捷键」进行设置。
 
 ![账号切换：从验收测试切换为交付管理员](docs/images/account-switch.gif)
 
