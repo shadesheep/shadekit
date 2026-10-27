@@ -21,13 +21,15 @@ import {
 } from './account-view';
 import { accountInitial } from './account-palette';
 import { closePanel, getCurrentOrigin } from './utils/env';
-import { buildErrorDetail, copyToClipboard, ErrorCodes, type ErrorDetailContext } from './utils/error-codes';
+import { ErrorCodes, type ErrorCode, type ErrorDetailContext } from './utils/error-codes';
+import { showLoginRecoveryToast } from './login-recovery-toast';
 import { LOGIN_BUSY_ERROR } from './utils/error-codes';
 import { parseLoginText, type ParsedLogin } from './utils/parse-text';
 
 const accounts = ref<Account[]>([]);
 const origin = ref('');
 const matchedEnv = ref<DomainConfig | null>(null);
+const matchedEnvKey = ref('');
 
 // 搜索 & 筛选
 const searchQuery = ref('');
@@ -68,7 +70,9 @@ onMounted(async () => {
     const cfg = await getConfig<AccountSwitchConfig>('account-switch', ACCOUNT_SWITCH_CONFIG_DEFAULTS);
 
     // 环境匹配链收口于 account-view(resolveEnvironment)
-    matchedEnv.value = resolveEnvironment(origin.value, cfg?.domains ?? {})?.env ?? null;
+    const resolved = resolveEnvironment(origin.value, cfg?.domains ?? {});
+    matchedEnvKey.value = resolved?.domain ?? '';
+    matchedEnv.value = resolved?.env ?? null;
     // role? 兼容归一化下沉至 account-view(ADR-0004 D6)
     accounts.value = (cfg?.accounts ?? []).map(normalizeAccount);
     // 读取 tab 顺序配置
@@ -106,22 +110,21 @@ const switchingAccountId = ref<string | null>(null);
 const showLoginErrorToast = (
   prefix: string,
   err: string,
-  errorCode: string | undefined,
+  errorCode: ErrorCode | undefined,
   ctx: ErrorDetailContext,
+  recovery: { envKey?: string; onRetry: () => void },
 ) => {
-  const code = errorCode ?? ErrorCodes.UNKNOWN;
-  showToast(`${prefix}：${err} [${code}]`, 'error', 8000, {
-    label: '复制详情',
-    onClick: () => {
-      const detail = buildErrorDetail(code, err, {
-        envName: matchedEnv.value?.name,
-        origin: origin.value,
-        strategy: matchedEnv.value?.loginMethod,
-        ...ctx,
-      });
-      void copyToClipboard(detail).then((ok) => {
-        showToast(ok ? '错误详情已复制' : '复制失败，请查看控制台日志', ok ? 'success' : 'info');
-      });
+  showLoginRecoveryToast({
+    prefix,
+    error: err,
+    errorCode,
+    envKey: recovery.envKey,
+    onRetry: recovery.onRetry,
+    detail: {
+      envName: matchedEnv.value?.name,
+      origin: origin.value,
+      strategy: matchedEnv.value?.loginMethod,
+      ...ctx,
     },
   });
 };
@@ -150,6 +153,9 @@ const switchAccount = async (account: Account) => {
           accountName: account.name,
           username: account.username,
           recipeSteps: response?.recipeSteps,
+        }, {
+          envKey: matchedEnvKey.value || origin.value,
+          onRetry: () => switchAccount(account),
         });
       }
     }
@@ -227,6 +233,7 @@ const quickLoginDefaultDomain = ref('');
 const globalDefaultPassword = ref('');
 const redirectEnabled = ref(false);
 const quickLoginMatchedEnv = ref<DomainConfig | null>(null);
+const quickLoginMatchedEnvKey = ref('');
 
 /** 从粘贴的快速登录文本中提取域名（仅 URL） */
 function extractOriginFromText(text: string): string | null {
@@ -299,6 +306,9 @@ const handleQuickLogin = async () => {
             quickLoginMatchedEnv.value?.loginMethod ??
             matchedEnv.value?.loginMethod,
           recipeSteps: response?.recipeSteps,
+        }, {
+          envKey: isPureAccount ? matchedEnvKey.value : quickLoginMatchedEnvKey.value,
+          onRetry: handleQuickLogin,
         });
       }
     }
@@ -307,6 +317,9 @@ const handleQuickLogin = async () => {
     showLoginErrorToast('登录失败', '请求发送失败', ErrorCodes.UNKNOWN, {
       action: 'QUICK_LOGIN',
       username: parsed.username,
+    }, {
+      envKey: isPureAccount ? matchedEnvKey.value : quickLoginMatchedEnvKey.value,
+      onRetry: handleQuickLogin,
     });
   } finally {
     quickLoginLoading.value = false;
@@ -325,6 +338,7 @@ watch(quickLoginText, async () => {
   const textOrigin = extractOriginFromText(quickLoginText.value);
   if (!textOrigin || !accounts.value.length) {
     quickLoginMatchedEnv.value = null;
+    quickLoginMatchedEnvKey.value = '';
     redirectEnabled.value = false;
     return;
   }
@@ -333,6 +347,7 @@ watch(quickLoginText, async () => {
     const cfg = await getConfig<AccountSwitchConfig>('account-switch', ACCOUNT_SWITCH_CONFIG_DEFAULTS);
     const resolved = resolveEnvironment(textOrigin, cfg?.domains ?? {});
     if (resolved) {
+      quickLoginMatchedEnvKey.value = resolved.domain;
       quickLoginMatchedEnv.value = resolved.env;
       redirectEnabled.value = resolved.env.debugRedirectEnabled ?? false;
       return;
@@ -341,6 +356,7 @@ watch(quickLoginText, async () => {
     console.warn('[account-switch] Failed to match environment:', e);
   }
   quickLoginMatchedEnv.value = null;
+  quickLoginMatchedEnvKey.value = '';
   redirectEnabled.value = false;
 });
 

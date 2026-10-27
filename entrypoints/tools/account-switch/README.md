@@ -150,6 +150,9 @@ interface LoginSpec {
 | `spec/validate.ts` | 保存期静态校验 R1–R7（未解析模板、绑定顺序、算子白名单…） |
 | `spec/migrate.ts` | v1 recipe / 旧扁平 `strategyParams` → v2 登录声明 |
 | `spec/run.ts` | `runSpec()`：唯一执行器（算子编排、轨迹、成功/失败信号） |
+| `spec/auto-login.ts` | 自动 Target、标准形状、旧默认精确投影与无损锁定 |
+| `strategies/login-form-scan.ts` | 手动识别与运行时共用的只读扫描、唯一解析 |
+| `login-form-lock.ts` | 新建保存的 1500ms 只读准备与后台条件回写 |
 | `spec/login-run.ts` | 生产接线：`runSpec` + 调试缓冲 + 会话日志信封 |
 | `spec/trial.ts` | 试登录：默认零副作用，仅 `writeSession` 时执行 `auth.write` |
 | `spec/strategy-presets.ts` | 登录方式下拉：内置 generic + 策略库条目 + 未入库的存量环境声明（纯函数） |
@@ -184,7 +187,9 @@ interface LoginSpec {
 
 **验证码识别**：`/验证码|captcha|slider/i` 扫描**可见叶子文本**，排除可点击入口（tab / 按钮 / `cursor:pointer`）与隐藏面板。命中 → `CAPTCHA_REQUIRED`。
 
-**识别登录表单**：编辑器「识别 <环境 URL> 页面上的登录表单」经 `SCAN_LOGIN_FORM`（只读）扫描**该环境 URL 所在标签页**（不是选项页本身）的所有 frame 的可见密码框、其前面的文本输入与同容器提交控件；确认后才回填为 `fill / fill / click`。
+**自动定位与可选锁定**：默认标准三步使用 `{ auto: "login" }`，登录时由 `runSpec` 复用同一扫描器解析，无需先打开高级配置。只有同 frame 三项齐全且 Target 全唯一才执行；同 frame 多表单、多 frame、缺项或歧义均不猜测。首个自动算子前 `noPassword` 最多刷新重试一次，运行结果只存于本次 `RunState`。
+
+环境 URL 下的「识别并锁定登录表单」是可选优化；新建保存先在 1500ms 内只读准备，基础保存成功后才由后台重读配置、重扫页面并条件回写当前环境。镜像只脱镜当前环境，不改策略库或其它镜像。trace 以 `auto → Target` / `resolution` 记录来源，不记录填充值、Cookie 或 token。
 
 ---
 
@@ -402,7 +407,8 @@ entrypoints/tools/account-switch/
 │   ├── SpecEditor.vue            # 登录声明编辑器（算子 / 校验 / 试跑 / 拾取入口）
 │   ├── TargetField.vue           # 定位输入组件（kind + 拾取 + 候选胶囊 + 命中提示）
 │   ├── recipe-editor-model.ts    # 旧配方编辑器纯函数模型（TargetField 复用）
-│   ├── login-form-scan.ts        # 一键识别登录表单（只读扫描，跨 frame 归并）
+│   ├── login-form-scan.ts        # 配置层兼容出口（实现归 strategies/login-form-scan.ts）
+│   ├── LoginFormLocator.vue      # URL 下可选识别锁定与状态展示
 │   └── target-picker.ts          # 定位拾取器（候选列表 + 元素元信息 / 交互四态）
 ├── EnvIndicator.ts               # 环境指示器 (页面右下角标签)
 ├── spec/
@@ -410,6 +416,7 @@ entrypoints/tools/account-switch/
 │   ├── validate.ts               # 保存期静态校验 R1–R7
 │   ├── migrate.ts                # v1 recipe / 旧扁平参数 → v2 声明
 │   ├── run.ts                    # runSpec()：唯一执行器
+│   ├── auto-login.ts             # 自动形状 / 旧默认兼容 / 无损锁定
 │   ├── login-run.ts              # 生产接线：runSpec + 调试缓冲 + 日志信封
 │   ├── trial.ts                  # 试登录（默认零副作用）
 │   ├── session.ts                # clear.* / auth.* 会话算子
@@ -420,6 +427,7 @@ entrypoints/tools/account-switch/
 │   ├── editor.ts                 # 编辑器纯逻辑（默认模板 / 投影 / 算子工厂）
 │   └── redact.ts                 # 日志脱敏（白名单 / 黑名单）
 ├── strategies/
+│   ├── login-form-scan.ts        # 手动与运行时共用的只读扫描 / 唯一解析
 │   ├── generic-recipe.ts         # DOM 子集类型（Target / FrameScope / SettleCondition）与旧配方模型
 │   ├── generic-runner.ts         # 仅保留 interpolateTemplate（旧配方试跑用）
 │   ├── generic-dom.ts            # 跨 frame DOM 动作 / shadow root 深查询

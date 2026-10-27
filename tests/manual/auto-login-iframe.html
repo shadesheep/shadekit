@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8" /><title>iframe 登录</title></head>
+<body>
+  <form id="login">
+    <label>用户名 <input id="frame-username" name="account" /></label>
+    <label>密码 <input id="frame-password" name="password" type="password" /></label>
+    <button id="frame-submit" type="submit">登录</button>
+  </form>
+  <p id="success" hidden>iframe 本地登录成功</p>
+  <script>
+    document.querySelector('#login').addEventListener('submit', (event) => {
+      event.preventDefault();
+      document.querySelector('#login').hidden = true;
+      document.querySelector('#success').hidden = false;
+      history.replaceState(null, '', '#logged-in');
+    });
+  </script>
+</body>
+</html>

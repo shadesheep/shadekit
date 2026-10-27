@@ -111,6 +111,21 @@ export async function updateConfig<T extends object>(
   });
 }
 
+/** 在同一工具锁内读取最新值并同步决定是否生成最小 patch；mutate 返回 null 时不写。 */
+export async function updateConfigTransaction<T extends object>(
+  toolId: string,
+  mutate: (latest: T | undefined) => Partial<T> | null,
+): Promise<{ ok: boolean; changed: boolean }> {
+  return withStorageLock(`devtools-lock-${keyFor(toolId)}`, async () => {
+    const latest = await getConfig<T>(toolId);
+    const patch = mutate(latest);
+    if (patch === null) return { ok: true, changed: false };
+    const merged = { ...(latest ?? {}), ...patch } as T;
+    const result = await safeStorageSet({ [keyFor(toolId)]: merged });
+    return { ok: result.ok, changed: result.ok };
+  });
+}
+
 /**
  * 配置迁移函数（导入路径）：按 `__version` 逐级执行迁移链。
  *

@@ -17,6 +17,7 @@ import {
   type FormScanFrame,
 } from '../entrypoints/tools/account-switch/config/login-form-scan';
 import { pickCandidates } from '../entrypoints/tools/account-switch/config/target-picker';
+import { resolveAutoLoginScan } from '../entrypoints/tools/account-switch/strategies/login-form-scan';
 
 function mount(html: string): void {
   document.body.innerHTML = html;
@@ -87,6 +88,20 @@ describe('scanLoginFormInPage', () => {
     expect(result.username?.target).toEqual({ css: '#search' });
   });
 
+  it('同 frame 多个可见密码表单返回歧义而不是选第一个', () => {
+    mount(`
+      <form><input id="u1" /><input id="p1" type="password" /><button>登录</button></form>
+      <form><input id="u2" /><input id="p2" type="password" /><button>登录</button></form>
+    `);
+
+    const result = scanLoginFormInPage();
+    expect(result).toMatchObject({ found: true, ambiguous: true });
+    const resolved = resolveAutoLoginScan({
+      status: 'found', frames: [{ ...result, frameId: 0 }], matches: 1, complete: false,
+    });
+    expect(resolved.status).toBe('ambiguous');
+  });
+
   it('隐藏的密码框不参与识别', () => {
     mount(`
       <form>
@@ -135,6 +150,21 @@ describe('scanLoginFormInPage', () => {
 
     expect(result.username).toEqual(expectedUser);
     expect(result.password).toEqual(expectedPwd);
+
+    const resolved = resolveAutoLoginScan({
+      status: 'found',
+      frames: [{ ...result, frameId: 0 }],
+      matches: 1,
+      complete: true,
+    });
+    expect(resolved).toMatchObject({
+      status: 'resolved',
+      targets: {
+        username: expectedUser.target,
+        password: expectedPwd.target,
+        submit: result.submit!.target,
+      },
+    });
   });
 
   it('提交按钮可用文本定位时优先文本（交互元素）', () => {
@@ -209,6 +239,22 @@ describe('scanLoginForm — 扩展侧编排', () => {
     expect(result.matches).toBe(2);
     expect(result.frames.map((f) => f.frameId)).toEqual([1, 3]);
     expect(result.complete).toBe(true);
+  });
+
+  it('多个完整 frame 不静默选择第一个', () => {
+    const complete = {
+      found: true as const,
+      username: { target: '#u', count: 1, rank: 0, note: '' },
+      password: { target: '#p', count: 1, rank: 0, note: '' },
+      submit: { target: '#go', count: 1, rank: 0, note: '' },
+    };
+    const result = resolveAutoLoginScan({
+      status: 'found',
+      frames: [{ ...complete, frameId: 0 }, { ...complete, frameId: 2 }],
+      matches: 2,
+      complete: true,
+    });
+    expect(result.status).toBe('ambiguous');
   });
 
   it('未命中任何 frame → notFound', async () => {

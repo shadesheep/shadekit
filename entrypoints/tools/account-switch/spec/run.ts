@@ -22,7 +22,7 @@ import {
   errorCodeOf,
   type ErrorCode,
 } from "../utils/error-codes";
-import { waitForTabLoaded } from "../utils/tab-load";
+import { reloadTabAndWait, waitForTabLoaded } from "../utils/tab-load";
 import {
   runDomAction,
   runDomRead,
@@ -39,7 +39,19 @@ import {
   type SettleContext,
 } from "../strategies/generic-settle";
 import { describeTarget } from "../strategies/generic-target";
+import {
+  resolveAutoLoginScan,
+  scanLoginForm,
+  type AutoLoginResolution,
+} from "../strategies/login-form-scan";
 import { applyNavigationIntent } from "../login-tab-flow";
+import {
+  autoLoginSpecShape,
+  isAutoLoginTarget,
+  loginFormTargetMode,
+  projectLegacyDefaultSpec,
+} from "./auto-login";
+import { simpleSpecShape, type SimpleSpecShape } from "./editor";
 import { buildInputNamespace } from "./namespace";
 import {
   readBindingPath,
@@ -88,13 +100,15 @@ import {
 /** 单个算子的执行轨迹（与 D12 的日志 `ops` 同形） */
 export interface SpecOpTrace {
   index: number;
-  op: SpecOpName;
+  op: SpecOpName | "auto.prepare";
   /** 目标描述（选择器 / URL / 条件），不含填充值等敏感内容 */
   target?: string;
   status: "success" | "error" | "skipped";
   duration: number;
   errorCode?: string;
   error?: string;
+  /** 标准表单定位来源；高级自定义步骤缺省。 */
+  resolution?: "auto" | "locked";
 }
 
 /**
@@ -168,7 +182,7 @@ export interface TrialOptions {
 export interface RunSpecOpEvent {
   phase: "start" | "end";
   index: number;
-  op: SpecOpName;
+  op: SpecOpName | "auto.prepare";
   trace?: SpecOpTrace;
 }
 
@@ -795,7 +809,7 @@ function describeOp(op: SpecOp): string | undefined {
       return op.url;
     case "fill":
     case "click":
-      return describeTarget(op.target);
+      return isAutoLoginTarget(op.target) ? "自动（登录表单）" : describeTarget(op.target);
     case "waitFor":
       return describeCondition(op.when);
     case "extract":
@@ -848,6 +862,11 @@ interface RunState {
   logView?: RunSpecLogView;
   /** 试登录：为 true 时按缺省白名单执行，默认零副作用 */
   trial: boolean;
+  /** 标准表单下标与本次唯一的自动解析结果。 */
+  formShape: SimpleSpecShape | null;
+  autoShape: SimpleSpecShape | null;
+  autoResolution?: Extract<AutoLoginResolution, { status: "resolved" }>;
+  autoRefreshAttempts: 0 | 1;
 }
 
 /** 试登录模式下：算子是否被拒（被拒返回原因；允许返回 null）。 */
@@ -924,6 +943,76 @@ async function refreshSettleBaseline(state: RunState): Promise<void> {
     state.ctx.tabId,
   );
   state.baseline.initialUrl = await currentUrl(state.ctx.tabId);
+}
+
+function automaticResolutionError(resolution: AutoLoginResolution): LoginError {
+  switch (resolution.status) {
+    case "noPassword":
+      return new LoginError(ErrorCodes.LOGIN_FORM_NOT_FOUND, "未找到可用的登录表单");
+    case "incomplete":
+      return new LoginError(ErrorCodes.LOGIN_FORM_INCOMPLETE, `未找到完整登录表单：${resolution.reason}`);
+    case "ambiguous":
+      return new LoginError(ErrorCodes.LOGIN_FORM_AMBIGUOUS, `检测到多个候选，无法确定：${resolution.reason}`);
+    case "error":
+      return new LoginError(ErrorCodes.TAB_RESTRICTED, `无法扫描登录表单：${resolution.message}`);
+    default:
+      throw new Error("resolved 不是定位失败");
+  }
+}
+
+function frameUrlForLog(frameUrl: string): string {
+  try {
+    const url = new URL(frameUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return frameUrl.split(/[?#]/, 1)[0];
+  }
+}
+
+function resolutionSummary(resolution: AutoLoginResolution): string {
+  if (resolution.status === "resolved") {
+    return `自动定位成功：${resolution.status}，frame ${resolution.frameId}${resolution.frameUrl ? `（${frameUrlForLog(resolution.frameUrl)}）` : ""}`;
+  }
+  if (resolution.status === "noPassword") return "自动定位：noPassword";
+  if (resolution.status === "error") return `自动定位失败：${resolution.status}`;
+  return `自动定位失败：${resolution.status}（${resolution.reason}）`;
+}
+
+/** 首个自动算子前解析一次；后续三个算子只复用本次 RunState。 */
+async function resolveAutomaticOp(
+  state: RunState,
+  op: Extract<SpecOp, { op: "fill" | "click" }>,
+  index: number,
+  recordPreparation: (message: string) => Promise<void>,
+): Promise<SpecOp> {
+  if (!state.autoShape) {
+    throw new LoginError(ErrorCodes.CONFIG_INVALID, "自动定位只适用于连续的用户名、密码、登录按钮");
+  }
+  if (!state.autoResolution) {
+    let resolution = resolveAutoLoginScan(await scanLoginForm(state.ctx.tabId));
+    await recordPreparation(resolutionSummary(resolution));
+    if (resolution.status === "noPassword" && state.autoRefreshAttempts === 0) {
+      state.autoRefreshAttempts = 1;
+      await recordPreparation("未发现密码框，刷新后重试（1/1）");
+      await reloadTabAndWait(state.ctx.tabId, state.limits.settleMs);
+      resolution = resolveAutoLoginScan(await scanLoginForm(state.ctx.tabId));
+      await recordPreparation(resolutionSummary(resolution));
+    }
+    if (resolution.status !== "resolved") throw automaticResolutionError(resolution);
+    state.autoResolution = resolution;
+  }
+  const role = index === state.autoShape.usernameIndex
+    ? "username"
+    : index === state.autoShape.passwordIndex
+      ? "password"
+      : "submit";
+  const resolved = state.autoResolution;
+  const { frameId: _frameId, frameUrl: _frameUrl, ...withoutScope } = op;
+  return {
+    ...withoutScope,
+    target: resolved.targets[role],
+    ...resolved.scope,
+  } as SpecOp;
 }
 
 /** 执行一个算子；返回 `skipped` 表示未执行（轨迹不记 error） */
@@ -1007,6 +1096,9 @@ async function executeOp(
     }
 
     case "fill": {
+      if (isAutoLoginTarget(op.target)) {
+        throw new LoginError(ErrorCodes.CONFIG_INVALID, "自动登录表单尚未解析");
+      }
       const value = resolveRef(state, op.value);
       const outcome = await withStepTimeout(
         state,
@@ -1028,6 +1120,9 @@ async function executeOp(
     }
 
     case "click": {
+      if (isAutoLoginTarget(op.target)) {
+        throw new LoginError(ErrorCodes.CONFIG_INVALID, "自动登录表单尚未解析");
+      }
       // 点击可能触发表单提交跳转：先把 settle 基准刷新到「提交前一刻」
       await refreshSettleBaseline(state);
       const outcome = await withStepTimeout(
@@ -1216,10 +1311,11 @@ async function executeOp(
  * （D12 的结果形状）；调用方（`GenericStrategy` / 试登录）据此落日志。
  */
 export async function runSpec(
-  spec: LoginSpec,
+  inputSpec: LoginSpec,
   ctx: AuthContext,
   options: RunSpecOptions = {},
 ): Promise<RunSpecResult> {
+  const spec = projectLegacyDefaultSpec(inputSpec);
   const limits: Required<SpecLimits> = { ...DEFAULT_LIMITS, ...(spec.limits ?? {}) };
   const aux = options.aux ?? generateAuxInputs();
   const state: RunState = {
@@ -1231,8 +1327,40 @@ export async function runSpec(
     applySet: [],
     baseline: { passwordFieldPresent: false },
     trial: options.trial !== undefined,
+    formShape: simpleSpecShape(spec),
+    autoShape: autoLoginSpecShape(spec),
+    autoRefreshAttempts: 0,
   };
   const trace: SpecOpTrace[] = [];
+
+  const invalidAutoIndex = spec.ops.findIndex((op) =>
+    (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target),
+  );
+  if (invalidAutoIndex >= 0 && !state.autoShape) {
+    const op = spec.ops[invalidAutoIndex];
+    const error = new LoginError(ErrorCodes.CONFIG_INVALID, "自动定位只适用于连续的用户名、密码、登录按钮");
+    const entry: SpecOpTrace = {
+      index: invalidAutoIndex,
+      op: op.op,
+      target: describeOp(op),
+      status: "error",
+      duration: 0,
+      errorCode: error.code,
+      error: error.message,
+      resolution: "auto",
+    };
+    trace.push(entry);
+    await options.onOp?.({ phase: "start", index: invalidAutoIndex, op: op.op });
+    await options.onOp?.({ phase: "end", index: invalidAutoIndex, op: op.op, trace: entry });
+    return {
+      success: false,
+      bindings: {},
+      trace,
+      error: `第 ${invalidAutoIndex + 1} 步（${SPEC_OP_LABELS[op.op]}）：${error.message}`,
+      errorCode: error.code,
+      ...(state.trial ? { trialSignals: evaluateTrialSignals(spec, {}).signals } : {}),
+    };
+  }
 
   // 起步基准：非试登录时先采一次兜底基准（快捷登录可从任意页选中起步）。
   // 试登录不假设目标 tab，也不碰当前标签页——跳过口令框基准采样。
@@ -1259,20 +1387,56 @@ export async function runSpec(
     await options.onOp?.({ phase: "end", index, op: op.op, trace: entry });
   };
 
+  const recordPreparation = async (message: string): Promise<void> => {
+    const index = state.autoShape?.usernameIndex ?? 0;
+    const entry: SpecOpTrace = {
+      index,
+      op: "auto.prepare",
+      target: message,
+      status: "success",
+      duration: 0,
+      resolution: "auto",
+    };
+    trace.push(entry);
+    await options.onOp?.({ phase: "end", index, op: "auto.prepare", trace: entry });
+  };
+
   for (let index = 0; index < spec.ops.length; index++) {
     const op = spec.ops[index];
+    let effectiveOp = op;
+    let resolution: "auto" | "locked" | undefined;
     const startedAt = Date.now();
     await options.onOp?.({ phase: "start", index, op: op.op });
     try {
       const deny = trialRejectsOp(op, options);
-      const status = await executeOp(state, op, deny);
+      if (deny === null && (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target)) {
+        effectiveOp = await resolveAutomaticOp(state, op, index, recordPreparation);
+        resolution = "auto";
+      } else if (
+        state.formShape &&
+        [state.formShape.usernameIndex, state.formShape.passwordIndex, state.formShape.submitIndex].includes(index) &&
+        loginFormTargetMode(state.spec) === "locked"
+      ) {
+        resolution = "locked";
+      }
+      const status = await executeOp(state, effectiveOp, deny);
+      const actualTarget = describeOp(effectiveOp);
       await record(index, op, status === "done" ? "success" : "skipped", {
         duration: Date.now() - startedAt,
+        ...(actualTarget !== undefined
+          ? { target: resolution === "auto" ? `auto → ${actualTarget}` : actualTarget }
+          : {}),
+        ...(resolution ? { resolution } : {}),
       });
     } catch (e: unknown) {
       const error = wrapTemplateError(e);
+      const actualTarget = describeOp(effectiveOp);
       await record(index, op, "error", {
         duration: Date.now() - startedAt,
+        ...(actualTarget !== undefined
+          ? { target: resolution === "auto" ? `auto → ${actualTarget}` : actualTarget }
+          : {}),
+        ...(resolution ? { resolution } : {}),
         errorCode: error.code,
         error: error.message,
       });

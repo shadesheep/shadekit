@@ -27,11 +27,15 @@ import type { Account } from '../entrypoints/tools/account-switch/types';
 import {
   handleSwitchAccount,
   handleQuickLogin,
+  handleLockLoginForm,
+  handleOpenAccountEnvironment,
 } from '../entrypoints/tools/account-switch/background-handler';
 
 vi.mock('../entrypoints/tools/account-switch/background-handler', () => ({
   handleSwitchAccount: vi.fn(),
   handleQuickLogin: vi.fn(),
+  handleLockLoginForm: vi.fn(),
+  handleOpenAccountEnvironment: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -144,6 +148,31 @@ describe('Background Router round-trip', () => {
     expect(res).toEqual({ success: false, error: 'x', errorCode: 'E_X' });
   });
 
+  it('LOCK_LOGIN_FORM 只携带环境锁定候选并回传后台结果', async () => {
+    const candidate = {
+      operationId: 'op-1',
+      envKey: 'https://demo.example.com/login',
+      expectedSpec: { version: 2 as const, ops: [], success: [], auth: { mode: 'page' as const } },
+      tabId: 7,
+    };
+    mocked(handleLockLoginForm).mockResolvedValue({ status: 'locked' });
+
+    const res = await sendBgMessage('LOCK_LOGIN_FORM', candidate);
+
+    expect(handleLockLoginForm).toHaveBeenCalledWith(candidate);
+    expect(res).toEqual({ status: 'locked' });
+    expect(JSON.stringify(candidate)).not.toMatch(/password|cookie|token/i);
+  });
+
+  it('OPEN_ACCOUNT_ENVIRONMENT 只传环境 key 并打开对应 options 编辑入口', async () => {
+    mocked(handleOpenAccountEnvironment).mockResolvedValue({ success: true });
+
+    const res = await sendBgMessage('OPEN_ACCOUNT_ENVIRONMENT', { envKey: 'https://demo.example.com/login' });
+
+    expect(handleOpenAccountEnvironment).toHaveBeenCalledWith('https://demo.example.com/login');
+    expect(res).toEqual({ success: true });
+  });
+
   it('OPEN_TOOL_TAB 核心消息不落路由表，走注入的核心 handler', async () => {
     const res = await sendBgMessage('OPEN_TOOL_TAB', {
       tool: 'json-formatter',
@@ -193,7 +222,7 @@ describe('Background Router round-trip', () => {
     // 协议与注册表的漂移守护：BackgroundMessageMap 中每个工具消息 type
     // 必须真实存在于路由表（防止「协议声明了但 registry 忘了挂 handler」）。
     const routeTable = buildMessageRouteTable(allTools);
-    for (const type of ['SWITCH_ACCOUNT', 'QUICK_LOGIN']) {
+    for (const type of ['SWITCH_ACCOUNT', 'QUICK_LOGIN', 'LOCK_LOGIN_FORM', 'OPEN_ACCOUNT_ENVIRONMENT']) {
       expect(routeTable.has(type), `协议 type 未注册 handler: ${type}`).toBe(
         true,
       );

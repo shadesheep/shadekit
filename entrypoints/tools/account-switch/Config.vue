@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { getConfig, updateConfig } from '../../shared/tool-config';
 import { showToast } from '../../shared/use-toast';
 import { collectRoleFilterOptions, collectRoles, ROLE_NAMES, roleColorStyle } from './account-view';
@@ -8,6 +8,9 @@ import { buildEnvGroups, normalizeEnvTag, tagColor } from './account-env-view';
 import { sendBgMessage } from '../../shared/messages';
 import { validateLoginSpec } from './spec/validate';
 import { readSpecFromConfig } from './spec/migrate';
+import { finalizeNewEnvironmentSave, newEnvironmentSaveMessage } from './login-form-lock';
+import { showLoginRecoveryToast } from './login-recovery-toast';
+import { resolveRequestedEnv } from '../../options/options-route';
 import { LOGIN_BUSY_ERROR } from './utils/error-codes';
 import type {
   Account,
@@ -29,6 +32,9 @@ import DomainsPanel, { type EnvSavePayload } from './config/DomainsPanel.vue';
 import StrategyLibrary from './config/StrategyLibrary.vue';
 import DtButton from '../../shared/components/DtButton.vue';
 import DtDrawer from '../../shared/components/DtDrawer.vue';
+
+const props = defineProps<{ editEnv?: string }>();
+const emit = defineEmits<{ editEnvConsumed: [] }>();
 
 const TOOL_ID = 'account-switch';
 
@@ -193,8 +199,6 @@ async function onDomainsSave(
  *   往已有账号的 domains 里追加/移除 envKey（编辑改名时同时按 previousEnvKey 清老 key）。
  */
 async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
-  config.value.domains = payload.domains;
-
   const { envKey, previousEnvKey } = payload;
   const keysToUnbind = new Set<string>(
     previousEnvKey && previousEnvKey !== envKey
@@ -215,15 +219,23 @@ async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
     if (domains === a.domains) return a;
     return { ...a, domains };
   });
-
-  // 追加本次新建的账号
   nextAccounts.push(...payload.addedAccounts);
 
-  config.value.accounts = nextAccounts;
-  await saveWithFeedback(
-    { domains: payload.domains, accounts: nextAccounts },
-    payload.message,
-  );
+  const saveBase = () => saveFields({ domains: payload.domains, accounts: nextAccounts });
+  if (previousEnvKey === null) {
+    const result = await finalizeNewEnvironmentSave({
+      candidate: payload.lockCandidate,
+      saveBase,
+      reload: loadConfig,
+    });
+    if (result.saved) showToast(newEnvironmentSaveMessage(result.lockStatus), 'success');
+    return;
+  }
+
+  if (await saveBase()) {
+    await loadConfig();
+    showToast(payload.message, 'success');
+  }
 }
 
 /** DomainsPanel 的多字段落盘（导入策略库 + 环境一次写入，ADR-0019） */
@@ -505,8 +517,30 @@ interface DomainsPanelExpose {
   openClone: (url: string) => void;
   exportPackage: (url: string) => void;
   openImport: () => void;
+  focusLoginForm: () => void;
 }
 const domainsPanelRef = ref<DomainsPanelExpose | null>(null);
+const configReady = ref(false);
+
+async function openRequestedEnvironment(editEnv: string): Promise<void> {
+  const envKey = resolveRequestedEnv(config.value.domains, editEnv);
+  if (!envKey) {
+    showToast('未找到要编辑的环境，可能已被删除或地址已修改', 'error');
+  } else {
+    activeTab.value = 'main';
+    domainsPanelRef.value?.openEdit(envKey);
+    await nextTick();
+    domainsPanelRef.value?.focusLoginForm();
+  }
+  emit('editEnvConsumed');
+}
+
+watch(
+  [() => props.editEnv, configReady],
+  ([editEnv, ready]) => {
+    if (ready && editEnv) void openRequestedEnvironment(editEnv);
+  },
+);
 
 async function deleteEnv(key: string) {
   const env = config.value.domains[key];
@@ -776,11 +810,22 @@ async function loginAccount(envKey: string, acc: Account) {
       if (err === LOGIN_BUSY_ERROR) {
         showToast(err, 'info');
       } else {
-        showToast(
-          `登录失败：${err}${response?.errorCode ? ` [${response.errorCode}]` : ''}`,
-          'error',
-          8000,
-        );
+        showLoginRecoveryToast({
+          prefix: '登录失败',
+          error: err,
+          errorCode: response?.errorCode,
+          envKey,
+          onRetry: () => loginAccount(envKey, acc),
+          detail: {
+            action: 'SWITCH_ACCOUNT',
+            envName: config.value.domains[envKey]?.name,
+            origin: envKey,
+            strategy: config.value.domains[envKey]?.loginMethod,
+            accountName: acc.name,
+            username: acc.username,
+            recipeSteps: response?.recipeSteps,
+          },
+        });
       }
     }
   } finally {
@@ -790,6 +835,7 @@ async function loginAccount(envKey: string, acc: Account) {
 
 onMounted(async () => {
   await loadConfig();
+  configReady.value = true;
   void refresh();
   // 「⋯」菜单：点页面任意处关闭（⋯ 按钮自身 @click.stop 除外）
   document.addEventListener('click', closeMenu);

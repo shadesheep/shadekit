@@ -21,6 +21,7 @@ interface ConfigPackage {
 - 默认 requiredVars 是无 default 且非 secret 的 vars；显式列表会去重。
 - 每个 `environments[].spec` 必须与独立交付 LoginSpec 深度相等；对象 key 顺序不影响相等。
 - 包不包含账号绑定、明文密码、真实 token、secret 变量或 script 算子。
+- 标准表单可携带 `{ auto: "login" }`，`dt-login-config/v1` 与 `specVersion: 2` 均不变。页面识别出的环境专属具体 Target 不得由后台写回共享策略库。
 - `specVersion` 高于接收方支持版本会被拒绝；包格式校验不能替代内层 LoginSpec 校验。
 - 地址未知时使用字面量 `{origin}`，由导入 UI 收集真实地址。
 

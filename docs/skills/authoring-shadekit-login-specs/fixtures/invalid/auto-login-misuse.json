@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "template": "custom-auto-misuse",
+  "ops": [
+    { "op": "fill", "target": { "auto": "sso", "css": "#u" }, "value": "{username}" },
+    { "op": "fill", "target": { "auto": "login" }, "value": "{password}" },
+    { "op": "click", "target": { "auto": "login" } },
+    { "op": "waitFor", "when": { "type": "fixed", "ms": 1 } }
+  ],
+  "success": [{ "page": { "type": "urlChanged" } }],
+  "auth": { "mode": "page" }
+}

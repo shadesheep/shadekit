@@ -12,11 +12,12 @@
  * 消息中不再有 toolId 字段——router 按 type 全局路由（见 message-router.ts）。
  */
 
-import type { FormScanFrame } from "../tools/account-switch/config/login-form-scan";
+import type { FormScanFrame } from "../tools/account-switch/strategies/login-form-scan";
 import type { DryRunStepResult } from "../tools/account-switch/strategies/generic-dry-run";
 import type { Recipe } from "../tools/account-switch/strategies/generic-recipe";
 import type { RecipeStepTrace } from "../tools/account-switch/spec/types";
 import type { Account } from "../tools/account-switch/types";
+import type { LoginFormLockResult, PreparedLoginFormLock } from "../tools/account-switch/login-form-lock";
 import type { ErrorCode } from "../tools/account-switch/utils/error-codes";
 import type { TrialSignalState } from "../tools/account-switch/spec/run";
 
@@ -96,6 +97,17 @@ export interface BackgroundMessageMap {
       /** 命中密码框的 frame（主 frame 在前）；多 frame 时由 UI 选择 */
       frames: FormScanFrame[];
     };
+  };
+
+  /** 新建环境基础保存成功后，按最新配置条件回写当前环境的表单定位。 */
+  LOCK_LOGIN_FORM: {
+    payload: PreparedLoginFormLock;
+    response: LoginFormLockResult;
+  };
+
+  OPEN_ACCOUNT_ENVIRONMENT: {
+    payload: { envKey: string };
+    response: { success: boolean; error?: string };
   };
 
   /**

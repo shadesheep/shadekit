@@ -17,6 +17,7 @@ import ToastContainer from '../shared/ToastContainer.vue';
 import {DevModeClickCounter, isDevModeEnabled, onDevModeChange, setDevModeEnabled} from '../shared/dev-mode';
 import ToolMarket from './components/ToolMarket.vue';
 import {getConfigSections} from './tool-registry';
+import {subscribeOptionsRoute} from './options-route';
 
 type View = 'market' | string;
 
@@ -34,6 +35,8 @@ interface ConfigSectionItem {
 
 const sections = ref<ConfigSectionItem[]>([]);
 const activeView = ref<View>('market');
+const editEnv = ref<string | undefined>(undefined);
+let unsubscribeOptionsRoute: (() => void) | undefined;
 
 const activeComponent = computed(() => {
   if (activeView.value === 'market') return null;
@@ -41,6 +44,19 @@ const activeComponent = computed(() => {
   const section = sections.value.find((s) => s.id === activeView.value);
   return section?.component ?? null;
 });
+
+const activeComponentProps = computed(() =>
+  activeView.value === 'account-switch'
+    ? { editEnv: editEnv.value, onEditEnvConsumed: clearEditEnv }
+    : {},
+);
+
+function clearEditEnv(): void {
+  editEnv.value = undefined;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('editEnv');
+  window.history.replaceState({}, '', url);
+}
 
 // 开发者模式
 const devMode = ref(false);
@@ -167,14 +183,18 @@ onMounted(async () => {
     component: markRaw(defineAsyncComponent(s.component)),
   }));
 
-  // 支持 ?section=xxx 直达指定配置区（如首次安装引导定位到账号切换）
-  const target = new URLSearchParams(window.location.search).get('section');
-  if (target && sections.value.some((s) => s.id === target)) {
-    activeView.value = target;
-  }
+  // 支持 ?section=xxx 与账号失败恢复 ?editEnv=<envKey>，初次及后续 query 均解析。
+  unsubscribeOptionsRoute = subscribeOptionsRoute((route) => {
+    if (route.section && sections.value.some((s) => s.id === route.section)) {
+      activeView.value = route.section;
+    }
+    editEnv.value = activeView.value === 'account-switch' ? route.editEnv : undefined;
+  });
 });
 
 onUnmounted(() => {
+  unsubscribeOptionsRoute?.();
+  unsubscribeOptionsRoute = undefined;
   if (unsubscribeDevMode) {
     unsubscribeDevMode();
     unsubscribeDevMode = null;
@@ -283,7 +303,7 @@ onUnmounted(() => {
       <!-- Content area -->
       <div class="content-area">
         <ToolMarket v-if="activeView === 'market'"/>
-        <component v-else-if="activeComponent" :is="activeComponent"/>
+        <component v-else-if="activeComponent" :is="activeComponent" v-bind="activeComponentProps"/>
       </div>
     </div>
 

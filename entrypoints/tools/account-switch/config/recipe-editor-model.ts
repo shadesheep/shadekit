@@ -21,6 +21,8 @@ import {
   type Target,
   validateRecipe,
 } from "../strategies/generic-recipe";
+import { isAutoLoginTarget } from "../spec/auto-login";
+import type { LoginFormTarget } from "../spec/types";
 import { validateStrategyParams } from "../utils/validate-strategy";
 import { containsVolatileId } from "./volatile-id";
 
@@ -456,8 +458,9 @@ export function targetTypeWarning(
 }
 
 /** 结构化 Target 的可读描述（与执行器日志一致） */
-export function describeTargetForUi(target: Target | null | undefined): string {
+export function describeTargetForUi(target: LoginFormTarget | null | undefined): string {
   if (!target) return "";
+  if (isAutoLoginTarget(target)) return "自动（登录表单）";
   if (typeof target === "string") return target;
   if ("css" in target) return target.css;
   if ("ariaLabel" in target) return `aria-label「${target.ariaLabel}」`;

@@ -205,3 +205,9 @@ type ExecTarget = { kind: "existing"; tabId: number } | { kind: "new"; url: stri
 - 单元：`tests/generic-recipe.test.ts`（迁移矩阵）、`tests/generic-target.test.ts`、`tests/auth-snapshot.test.ts`、`tests/generic-strategy.test.ts`（重写为配方执行）、`tests/login-session.test.ts`（execTarget 两态）、`tests/login-tab-flow.test.ts`（复用 tab + 失败关闭）、`tests/auth-flow.test.ts`（runAfterLogin 开关）。
 - 手测：使用本地虚构页面覆盖三条登录入口、会话恢复与失败反馈。
 - 全程 `npm run check` + `npm test` 保绿。
+
+## 后续修订（2026-10-26）：标准表单自动定位
+
+- 通用 `Target` 保持不变；仅 LoginSpec DOM `fill/click` 额外接受 `{ auto: "login" }`。三项自动定位属于同一次表单解析，不是三次独立猜测。
+- 手动识别与 `runSpec` 共用 `strategies/login-form-scan.ts`。同 frame 多密码表单、多 frame、缺项和非唯一 Target 都拒绝自动选择。
+- 自动运行只缓存于本次 RunState；首个自动算子前 `noPassword` 最多额外刷新一次，已锁定 Target 不做隐式回退。

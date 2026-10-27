@@ -35,6 +35,32 @@ describe("standalone LoginSpec snapshot parity", () => {
     expect(rules(validateLoginSpecSnapshot(spec))).toEqual(rules(validateLoginSpec(spec)));
   });
 
+  it("accepts automatic and exact legacy defaults in both validators", async () => {
+    for (const file of ["auto-login.json", "legacy-empty-default.json"]) {
+      const spec = await fixture(`fixtures/valid/${file}`);
+      expect(validateLoginSpecSnapshot(spec), file).toEqual([]);
+      expect(validateLoginSpec(spec), file).toEqual([]);
+    }
+  });
+
+  it("matches official automatic-target misuse rejection", async () => {
+    const spec = await fixture("fixtures/invalid/auto-login-misuse.json");
+    expect(rules(validateLoginSpecSnapshot(spec))).toEqual(rules(validateLoginSpec(spec)));
+    expect(validateLoginSpecSnapshot(spec).length).toBeGreaterThan(0);
+  });
+
+  it("keeps automatic specs in dt-login-config/v1 without a version bump", async () => {
+    const spec = await fixture("fixtures/valid/auto-login.json");
+    const snapshot = buildConfigPackageSnapshot({ spec, name: "Auto", url: "{origin}" });
+    const official = buildConfigPackage({ name: "Auto", tags: [], strategyConfig: { spec } }, "{origin}", []);
+    expect(snapshot.issues).toEqual([]);
+    expect(snapshot.package).toEqual(official.package);
+    expect(snapshot.package?.format).toBe("dt-login-config/v1");
+    expect(snapshot.package?.specVersion).toBe(2);
+    expect(validateConfigPackageSnapshot(snapshot.package)).toEqual([]);
+    expect(validateConfigPackage(official.package)).toEqual([]);
+  });
+
   it("matches the official package builder including requiredVars", async () => {
     const spec = await fixture("fixtures/valid/api-gated.json");
     spec.vars.push({ name: "tenant", title: "Tenant" });

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type {
+  LoginFormTarget,
   LoginSpec,
   SpecOp,
   SpecOpName,
@@ -28,6 +29,7 @@ import {
   type SpecAuxEdit,
   type SpecVarEdit,
 } from '../spec';
+import { applyLoginFormFrame, isAutoLoginTarget, projectLegacyDefaultSpec } from '../spec/auto-login';
 import { validateLoginSpec } from '../spec/validate';
 import { sendBgMessage } from '../../../shared/messages';
 import { SCAN_ERROR_TEXT, type FormScanFrame } from './login-form-scan';
@@ -73,16 +75,17 @@ const emit = defineEmits<{ change: [spec: LoginSpec] }>();
 // 内部可变状态
 // ============================================================
 
-const ops = ref<SpecOp[]>(cloneSpecOps(props.spec.ops));
-const vars = ref<SpecVarEdit[]>(specVarsToEdit(props.spec));
-const aux = ref<SpecAuxEdit>(specAuxToEdit(props.spec));
+const initialSpec = projectLegacyDefaultSpec(props.spec);
+const ops = ref<SpecOp[]>(cloneSpecOps(initialSpec.ops));
+const vars = ref<SpecVarEdit[]>(specVarsToEdit(initialSpec));
+const aux = ref<SpecAuxEdit>(specAuxToEdit(initialSpec));
 const showVars = ref(false);
 const jsonText = ref('');
 const jsonError = ref('');
 
 /** 简易 / 高级 / JSON 视图切换；只显式由用户触发，绝不自动回落 */
 const mode = ref<'simple' | 'advanced' | 'json'>(
-  simpleSpecShape(props.spec) ? 'simple' : 'advanced',
+  simpleSpecShape(initialSpec) ? 'simple' : 'advanced',
 );
 
 /** 简易形态的算子下标（指向原始 ops 数组）；漂移时为 null */
@@ -126,12 +129,13 @@ watch(
 watch(
   () => props.spec,
   (next) => {
-    if (JSON.stringify(next) === lastEmitted) return;
-    ops.value = cloneSpecOps(next.ops);
-    vars.value = specVarsToEdit(next);
-    aux.value = specAuxToEdit(next);
+    const projected = projectLegacyDefaultSpec(next);
+    if (JSON.stringify(projected) === lastEmitted) return;
+    ops.value = cloneSpecOps(projected.ops);
+    vars.value = specVarsToEdit(projected);
+    aux.value = specAuxToEdit(projected);
     selectedOp.value = null;
-    mode.value = simpleSpecShape(next) ? 'simple' : 'advanced';
+    mode.value = simpleSpecShape(projected) ? 'simple' : 'advanced';
   },
   { deep: true },
 );
@@ -252,19 +256,21 @@ function closeScan(): void {
 function applyScan(): void {
   const frame = scanFrame.value;
   if (!frame) return;
-  const scope =
-    frame.frameId !== undefined && frame.frameId !== 0
-      ? {
-          frameId: frame.frameId,
-          ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}),
-        }
-      : {};
-  const formOps: SpecOp[] = [
-    { op: 'fill', target: frame.username?.target ?? '', value: '{username}', ...scope },
-    { op: 'fill', target: frame.password?.target ?? '', value: '{password}', ...scope },
-    { op: 'click', target: frame.submit?.target ?? '', onNotFound: 'fail', ...scope },
-  ];
-  ops.value = reorderOpsAroundForm(ops.value, formOps);
+  if (simpleSpecShape(currentSpec.value)) {
+    const next = applyLoginFormFrame(currentSpec.value, frame);
+    if (next) ops.value = cloneSpecOps(next.ops);
+  } else {
+    const scope =
+      frame.frameId !== undefined && frame.frameId !== 0
+        ? { frameId: frame.frameId, ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}) }
+        : {};
+    const formOps: SpecOp[] = [
+      { op: 'fill', target: frame.username?.target ?? '', value: '{username}', ...scope },
+      { op: 'fill', target: frame.password?.target ?? '', value: '{password}', ...scope },
+      { op: 'click', target: frame.submit?.target ?? '', onNotFound: 'fail', ...scope },
+    ];
+    ops.value = reorderOpsAroundForm(ops.value, formOps);
+  }
   selectedOp.value = null;
   if (simpleSpecShape(currentSpec.value)) mode.value = 'simple';
   closeScan();
@@ -280,7 +286,7 @@ function update(index: number, patch: Record<string, unknown>): void {
 
 function setSimpleField(
   key: 'username' | 'password' | 'submit',
-  target: Target,
+  target: LoginFormTarget,
 ): void {
   const shape = simpleShape.value;
   if (!shape) return;
@@ -293,7 +299,7 @@ function setSimpleField(
   update(index, { target });
 }
 
-function simpleTarget(key: 'username' | 'password' | 'submit'): Target {
+function simpleTarget(key: 'username' | 'password' | 'submit'): LoginFormTarget {
   const shape = simpleShape.value;
   if (!shape) return '';
   const index =
@@ -385,7 +391,7 @@ function selectOp(index: number): void {
 // 参数表单：按算子类型分发
 // ============================================================
 
-function targetOf(op: SpecOp): Target {
+function targetOf(op: SpecOp): LoginFormTarget {
   if ((op.op === 'fill' || op.op === 'click') && op.target !== undefined) {
     return op.target;
   }
@@ -396,11 +402,13 @@ function targetOf(op: SpecOp): Target {
   return '';
 }
 
-function setTarget(index: number, target: Target): void {
+function setTarget(index: number, target: LoginFormTarget): void {
   const op = ops.value[index];
   if (!op) return;
   if (op.op === 'fill' || op.op === 'click') {
     update(index, { target });
+  } else if (isAutoLoginTarget(target)) {
+    return;
   } else if (op.op === 'waitFor' && op.when.type === 'selector') {
     update(index, { when: { ...op.when, target } });
   } else if (op.op === 'extract' && op.source === 'dom') {
@@ -557,6 +565,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
           <TargetField
             :model-value="simpleTarget('username')"
             context="fill"
+            allow-auto
             :origin="origin"
             placeholder="用户名输入框, 如 #username"
             @update:model-value="setSimpleField('username', $event)"
@@ -571,6 +580,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
           <TargetField
             :model-value="simpleTarget('password')"
             context="fill"
+            allow-auto
             :origin="origin"
             placeholder="密码输入框, 如 #password"
             @update:model-value="setSimpleField('password', $event)"
@@ -585,6 +595,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
           <TargetField
             :model-value="simpleTarget('submit')"
             context="click"
+            allow-auto
             :origin="origin"
             placeholder="登录按钮, 如 button[type=submit]"
             @update:model-value="setSimpleField('submit', $event)"
@@ -669,6 +680,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
               <TargetField
                 :model-value="targetOf(op)"
                 context="fill"
+                allow-auto
                 :origin="origin"
                 placeholder="例: #username 或 用户名"
                 :candidates="candidatesOf(index)"
@@ -689,6 +701,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
               <TargetField
                 :model-value="targetOf(op)"
                 context="click"
+                allow-auto
                 :origin="origin"
                 placeholder="例: button[type=submit] 或 登录"
                 :candidates="candidatesOf(index)"

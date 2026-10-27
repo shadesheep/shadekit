@@ -2,6 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import { validateDomainUrl, isDuplicateDomain } from '../utils/validate-domain';
 import SpecEditor from './SpecEditor.vue';
+import LoginFormLocator from './LoginFormLocator.vue';
+import { projectLegacyDefaultSpec } from '../spec/auto-login';
+import { prepareLoginFormLock, type PreparedLoginFormLock } from '../login-form-lock';
 import { defaultLoginSpec, type LoginSpec } from '../spec';
 import { readSpecFromConfig } from '../spec/migrate';
 import {
@@ -70,6 +73,8 @@ export interface EnvSavePayload {
   previousEnvKey: string | null;
   /** 成功 toast 文案（含「新增 N 个账号 / 绑定 M 个」等后缀） */
   message: string;
+  /** 仅新建自动标准表单携带；基础 domains 始终保持自动 spec。 */
+  lockCandidate?: PreparedLoginFormLock;
 }
 
 const emit = defineEmits<{
@@ -112,6 +117,7 @@ const newDomain = ref({
   vars: {} as Record<string, string>,
 });
 const editingDomain = ref<string | null>(null);
+const savingDomain = ref(false);
 
 // ============================================================
 // 关联账号（环境抽屉底部「关联账号」区块）
@@ -350,6 +356,11 @@ function saveToLibrary(): void {
 
 // 高级配置展开状态
 const showAdvanced = ref(false);
+const loginFormLocatorRef = ref<{ focus: () => void } | null>(null);
+
+function focusLoginForm(): void {
+  loginFormLocatorRef.value?.focus();
+}
 
 function resetDomainForm() {
   urlTouched.value = false;
@@ -450,6 +461,8 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
     newDomain.value.specInvalid = read.invalid && hadStrategy ? read.invalid : '';
     if (read.invalid) newDomain.value.loginMethod = BUILTIN_GENERIC;
   }
+  // 历史原版默认模板只在编辑器投影；原始 storage 不发生批量改写。
+  newDomain.value.spec = projectLegacyDefaultSpec(newDomain.value.spec);
   // 父域清理开关以声明为准（execution 只认 clear.cookies.includeParent）
   newDomain.value.cookieClearIncludeParent = hasCookieIncludeParent(d);
 }
@@ -555,22 +568,39 @@ function cloneDomain(url: string) {
   }, 2000);
 }
 
-function addDomain() {
+async function addDomain() {
   urlTouched.value = true;
-  if (!trimmedUrl.value || !newDomain.value.name || urlError.value) return;
+  if (savingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
   if (recipeInvalid()) return;
-  const entry = buildDomainEntry();
-  const addedName = newDomain.value.name || trimmedUrl.value;
-  const next = { ...props.domains, [trimmedUrl.value]: entry };
-  const payload = buildSavePayload({
-    domains: next,
-    envKey: trimmedUrl.value,
-    previousEnvKey: null,
-    baseMessage: `环境「${addedName}」已添加`,
-  });
-  resetDomainForm();
-  showDomainForm.value = false;
-  emit('saveWithAccounts', payload);
+  savingDomain.value = true;
+  try {
+    const entry = buildDomainEntry();
+    const envKey = trimmedUrl.value;
+    const addedName = newDomain.value.name || envKey;
+    const next = { ...props.domains, [envKey]: entry };
+    let lockCandidate: PreparedLoginFormLock | undefined;
+    try {
+      lockCandidate = (await prepareLoginFormLock({
+        envKey,
+        spec: entry.strategyConfig?.spec ?? newDomain.value.spec,
+      })) ?? undefined;
+    } catch {
+      // 识别只是保存后的优化；任何准备异常都不阻断基础环境与账号保存。
+      lockCandidate = undefined;
+    }
+    const payload = buildSavePayload({
+      domains: next,
+      envKey,
+      previousEnvKey: null,
+      baseMessage: `环境「${addedName}」已添加`,
+    });
+    if (lockCandidate) payload.lockCandidate = lockCandidate;
+    resetDomainForm();
+    showDomainForm.value = false;
+    emit('saveWithAccounts', payload);
+  } finally {
+    savingDomain.value = false;
+  }
 }
 
 function editDomain(url: string) {
@@ -690,6 +720,7 @@ defineExpose({
   openCreate,
   openEdit: editDomain,
   openClone: cloneDomain,
+  focusLoginForm,
   exportPackage: exportConfigPackage,
   openImport: importConfigPackage,
 });
@@ -1048,6 +1079,13 @@ async function runTrialLogin(): Promise<void> {
         <input class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
         <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
       </div>
+      <LoginFormLocator
+        ref="loginFormLocatorRef"
+        :spec="newDomain.spec"
+        :origin="formOrigin"
+        :mirrored="!!newDomain.strategyId"
+        @change="onSpecChange"
+      />
       <!-- Bug 复现地址：测试反馈里附带的页面地址，登录成功后自动进入该页，省去手工粘贴 -->
       <div class="form-row">
         <label>Bug 复现地址 <span class="optional">（选填，登录成功后自动进入该页面）</span></label>
@@ -1244,8 +1282,8 @@ async function runTrialLogin(): Promise<void> {
         </div>
       </div>
       <div class="form-actions">
-        <DtButton v-if="!editingDomain" variant="primary" @click="addDomain">
-          <div class="i-lucide-plus w-4 h-4 mr-1" />添加
+        <DtButton v-if="!editingDomain" variant="primary" :disabled="savingDomain" @click="addDomain">
+          <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : '添加' }}
         </DtButton>
         <template v-else>
           <DtButton variant="primary" @click="saveEditDomain">保存</DtButton>

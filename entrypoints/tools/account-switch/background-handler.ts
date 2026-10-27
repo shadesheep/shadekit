@@ -10,7 +10,7 @@
 
 import { authLog } from "../../shared/logger";
 import { runLoginSpec } from "./spec/login-run";
-import type { FormScanFrame } from "./config/login-form-scan";
+import type { FormScanFrame } from "./strategies/login-form-scan";
 import {
   injectAndNavigate,
   refreshAfterSwitch,
@@ -27,6 +27,8 @@ import { ErrorCodes, errorCodeOf } from "./utils/error-codes";
 import { runTrialLogin } from "./spec/trial";
 import type { TrialSignalState } from "./spec/run";
 import type { LoginSpec } from "./spec/types";
+import type { PreparedLoginFormLock } from "./login-form-lock";
+import { accountEnvironmentOptionsQuery } from "../../options/options-route";
 
 type LoginResponse = {
   success: boolean;
@@ -310,7 +312,7 @@ export async function handleScanLoginForm(
     };
   }
 
-  const { scanLoginForm } = await import("./config/login-form-scan");
+  const { scanLoginForm } = await import("./strategies/login-form-scan");
   const result = await scanLoginForm(targetTabId);
   switch (result.status) {
     case "found":
@@ -327,6 +329,36 @@ export async function handleScanLoginForm(
             : ErrorCodes.TAB_RESTRICTED,
         frames: [],
       };
+  }
+}
+
+/** 新建环境保存后的当前环境条件回写入口。 */
+export async function handleLockLoginForm(input: PreparedLoginFormLock) {
+  const { lockPreparedLoginForm } = await import("./login-form-lock");
+  return lockPreparedLoginForm(input);
+}
+
+/** 打开或聚焦 options，并只通过 query 传环境 key。 */
+export async function handleOpenAccountEnvironment(
+  envKey: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!envKey) return { success: false, error: "缺少环境 key" };
+  try {
+    const base = chrome.runtime.getURL("options.html");
+    const url = `${base}?${accountEnvironmentOptionsQuery(envKey)}`;
+    const tabs = await chrome.tabs.query({});
+    const existing = tabs.find((tab) => tab.url?.startsWith(base));
+    if (existing?.id !== undefined) {
+      await chrome.tabs.update(existing.id, { active: true, url });
+      if (existing.windowId !== undefined) {
+        await chrome.windows.update(existing.windowId, { focused: true }).catch(() => undefined);
+      }
+    } else {
+      await chrome.tabs.create({ url });
+    }
+    return { success: true };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
