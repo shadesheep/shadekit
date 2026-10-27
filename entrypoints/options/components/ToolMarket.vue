@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { allTools } from '../../shared/tool-definitions';
-import { toolIconGradient } from '../../shared/tool-icon-colors';
 import { isToolEnabled, setToolEnabled } from '../../shared/tool-state';
 
 interface ToolCard {
@@ -56,7 +55,7 @@ async function toggleTool(tool: ToolCard) {
         :class="{ disabled: !tool.enabled }"
       >
         <div class="card-header">
-          <div class="card-icon-wrapper" :style="{ background: toolIconGradient(tool.id) }">
+          <div class="card-icon-wrapper">
             <div :class="[tool.icon, 'card-icon']" />
           </div>
           <label class="toggle-switch">
@@ -102,7 +101,7 @@ async function toggleTool(tool: ToolCard) {
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .tool-card {
@@ -153,7 +152,7 @@ async function toggleTool(tool: ToolCard) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .card-icon-wrapper {
@@ -163,12 +162,22 @@ async function toggleTool(tool: ToolCard) {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  /* 背景渐变由 :style 按 tool.id 动态注入（tool-icon-colors.ts） */
+  background: var(--gradient-header-bg);
+}
+
+[data-dt-dark] .card-icon-wrapper {
+  background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(59,130,246,0.2));
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15),
+              var(--dt-dark-shadow-inset);
 }
 
 .card-icon {
   font-size: 20px;
-  color: #fff;
+  color: var(--primary-start);
+}
+
+[data-dt-dark] .card-icon {
+  color: #818cf8;
 }
 
 .card-name {

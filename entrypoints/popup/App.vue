@@ -5,7 +5,6 @@ import { listNavKeydown } from '../shared/list-nav';
 import { sendBgMessage } from '../shared/messages';
 import ToastContainer from '../shared/ToastContainer.vue';
 import { allTools } from '../shared/tool-definitions';
-import { toolIconGradient } from '../shared/tool-icon-colors';
 import { isToolEnabled } from '../shared/tool-state';
 import {
   formatShortcut,
@@ -217,7 +216,7 @@ const goBack = () => {
         @mouseenter="selectedIndex = index"
         @mouseleave="selectedIndex = -1"
       >
-        <div class="tool-icon-wrapper" :style="{ background: toolIconGradient(tool.id) }">
+        <div class="tool-icon-wrapper">
           <div :class="[tool.icon, 'tool-icon']" />
         </div>
         <div class="tool-text">
@@ -283,7 +282,7 @@ const goBack = () => {
 @use '../shared/component-styles.scss' as *;
 
 .popup-container {
-  padding: 10px;
+  padding: 10px 0px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   width: 100%;
   min-width: 280px;
@@ -297,8 +296,8 @@ const goBack = () => {
   @extend .dt-flex;
   @extend .dt-items-center;
   @extend .dt-justify-between;
-  margin-bottom: 8px;
-  padding: 6px 8px;
+  margin: 0 4px 6px;
+  padding: 6px 12px;
   background: rgba(99, 102, 241, 0.06);
   border-radius: var(--radius-lg);
 }
@@ -356,14 +355,15 @@ const goBack = () => {
 /* Tool list */
 .tool-list {
   @extend .dt-flex-col;
-  gap: 4px;
+  gap: 6px;
+  padding: 0 4px;
 }
 
 .tool-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: all var(--transition-normal);
@@ -407,13 +407,21 @@ const goBack = () => {
   @extend .dt-items-center;
   @extend .dt-justify-center;
   border-radius: var(--radius-lg);
-  /* 背景渐变由 :style 按 tool.id 动态注入（tool-icon-colors.ts） */
+  background: var(--gradient-header-bg);
   flex-shrink: 0;
+}
+
+[data-dt-dark] .tool-icon-wrapper {
+  background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(59,130,246,0.15));
 }
 
 .tool-icon {
   font-size: 18px;
-  color: #fff;
+  color: var(--primary-start);
+}
+
+[data-dt-dark] .tool-icon {
+  color: #818cf8;
 }
 
 .tool-name {
@@ -425,7 +433,7 @@ const goBack = () => {
 .tool-text {
   flex: 1;
   @extend .dt-flex-col;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -453,7 +461,7 @@ const goBack = () => {
   @extend .dt-items-center;
   @extend .dt-justify-center;
   gap: 5px;
-  margin-top: 6px;
+  margin-top: 2px;
   padding: 6px;
   font-size: var(--text-xs);
   color: var(--text-muted);
@@ -475,8 +483,9 @@ const goBack = () => {
 .shortcut-missing-hint {
   @extend .dt-flex;
   @extend .dt-items-center;
+  @extend .dt-justify-center;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 2px;
   padding: 7px 10px;
   font-size: var(--text-xs);
   color: var(--warning);
