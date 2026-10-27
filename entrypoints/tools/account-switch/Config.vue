@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { getConfig, updateConfig } from '../../shared/tool-config';
-import { showToast } from '../../shared/use-toast';
-import { collectRoleFilterOptions, collectRoles, ROLE_NAMES, roleColorStyle } from './account-view';
-import { accountInitial } from './account-palette';
-import { buildEnvGroups, normalizeEnvTag, tagColor } from './account-env-view';
-import { sendBgMessage } from '../../shared/messages';
-import { validateLoginSpec } from './spec/validate';
-import { readSpecFromConfig } from './spec/migrate';
-import { finalizeNewEnvironmentSave, newEnvironmentSaveMessage } from './login-form-lock';
-import { showLoginRecoveryToast } from './login-recovery-toast';
-import { resolveRequestedEnv } from '../../options/options-route';
-import { LOGIN_BUSY_ERROR } from './utils/error-codes';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { getConfig, updateConfig } from "../../shared/tool-config";
+import { showToast } from "../../shared/use-toast";
+import {
+  collectRoleFilterOptions,
+  collectRoles,
+  ROLE_NAMES,
+  roleColorStyle,
+} from "./account-view";
+import { accountInitial } from "./account-palette";
+import { buildEnvGroups, normalizeEnvTag, tagColor } from "./account-env-view";
+import { sendBgMessage } from "../../shared/messages";
+import { validateLoginSpec } from "./spec/validate";
+import { readSpecFromConfig } from "./spec/migrate";
+import {
+  finalizeNewEnvironmentSave,
+  newEnvironmentSaveMessage,
+} from "./login-form-lock";
+import { showLoginRecoveryToast } from "./login-recovery-toast";
+import { resolveRequestedEnv } from "../../options/options-route";
+import { LOGIN_BUSY_ERROR } from "./utils/error-codes";
 import type {
   Account,
   AccountSwitchConfig,
@@ -19,48 +27,48 @@ import type {
   EnvBadgeConfig,
   EnvBadgePosition,
   StrategyEntry,
-} from './types';
-import DtConfigItem from '../../shared/config/DtConfigItem.vue';
-import DtToggle from '../../shared/config/DtToggle.vue';
-import DtSegmented from '../../shared/config/DtSegmented.vue';
+} from "./types";
+import DtConfigItem from "../../shared/config/DtConfigItem.vue";
+import DtToggle from "../../shared/config/DtToggle.vue";
+import DtSegmented from "../../shared/config/DtSegmented.vue";
 import {
   formatShortcut,
   SHORTCUT_SUGGESTED,
   useCommandShortcut,
-} from '../../shared/use-command-shortcut';
-import DomainsPanel, { type EnvSavePayload } from './config/DomainsPanel.vue';
-import StrategyLibrary from './config/StrategyLibrary.vue';
-import DtButton from '../../shared/components/DtButton.vue';
-import DtDrawer from '../../shared/components/DtDrawer.vue';
+} from "../../shared/use-command-shortcut";
+import DomainsPanel, { type EnvSavePayload } from "./config/DomainsPanel.vue";
+import StrategyLibrary from "./config/StrategyLibrary.vue";
+import DtButton from "../../shared/components/DtButton.vue";
+import DtDrawer from "../../shared/components/DtDrawer.vue";
 
 const props = defineProps<{ editEnv?: string }>();
 const emit = defineEmits<{ editEnvConsumed: [] }>();
 
-const TOOL_ID = 'account-switch';
+const TOOL_ID = "account-switch";
 
 // 主视图（环境卡片）为默认视图；设置页承载环境指示器等次级配置
-const activeTab = ref<'main' | 'settings'>('main');
+const activeTab = ref<"main" | "settings">("main");
 const config = ref<AccountSwitchConfig>({
   accounts: [],
   domains: {},
   strategies: {},
 });
-const quickLoginDefaultDomain = ref('');
-const globalDefaultPassword = ref('');
+const quickLoginDefaultDomain = ref("");
+const globalDefaultPassword = ref("");
 
 const formHighlight = ref(false);
 
 // 快捷键状态（ADR-0001 D4 可见性底线：安装时被占用会静默注册失败，此处检测并引导）
 const { shortcut, updating, updateSupported, refresh, enableSuggested } =
   useCommandShortcut();
-const shortcutUpdateError = ref('');
+const shortcutUpdateError = ref("");
 
 async function handleEnableShortcut() {
-  shortcutUpdateError.value = '';
+  shortcutUpdateError.value = "";
   try {
     await enableSuggested();
   } catch (e) {
-    shortcutUpdateError.value = e instanceof Error ? e.message : '设置失败';
+    shortcutUpdateError.value = e instanceof Error ? e.message : "设置失败";
   }
 }
 
@@ -69,13 +77,14 @@ const showAccountForm = ref(false);
 
 // 账号表单
 const newAccount = ref({
-  name: '',
-  username: '',
-  password: '',
+  name: "",
+  username: "",
+  password: "",
   roles: [] as string[],
   domains: [] as string[],
-});const editingAccount = ref<string | null>(null);
-const customRoleInput = ref('');
+});
+const editingAccount = ref<string | null>(null);
+const customRoleInput = ref("");
 // 角色自由文本收进「更多」：默认只展示 3 个预设 chip
 const showCustomRole = ref(false);
 const showAccountPassword = ref(false);
@@ -92,14 +101,16 @@ function cloneAccount(id: string) {
   showAccountPassword.value = false;
   showAccountForm.value = true;
   newAccount.value = {
-    name: acc.name + ' (副本)',
+    name: acc.name + " (副本)",
     username: acc.username,
     password: acc.password,
     roles: [...acc.roles],
     domains: [...acc.domains],
   };
   formHighlight.value = true;
-  setTimeout(() => { formHighlight.value = false; }, 2000);
+  setTimeout(() => {
+    formHighlight.value = false;
+  }, 2000);
 }
 
 function toggleDomain(domainUrl: string) {
@@ -110,9 +121,9 @@ function toggleDomain(domainUrl: string) {
 
 const domainOptions = computed(() => {
   const domains =
-      config.value.domains && typeof config.value.domains === 'object'
-          ? config.value.domains
-          : {};
+    config.value.domains && typeof config.value.domains === "object"
+      ? config.value.domains
+      : {};
   return Object.entries(domains).map(([url, d]) => ({
     url,
     name: (d as any).name || url,
@@ -124,23 +135,23 @@ async function loadConfig() {
   config.value = {
     accounts: Array.isArray(data?.accounts) ? data.accounts : [],
     domains:
-        data?.domains && typeof data.domains === 'object' ? data.domains : {},
+      data?.domains && typeof data.domains === "object" ? data.domains : {},
     // 策略库（ADR-0019）：与账户/环境同住一个 key，备份与同步天然覆盖
     strategies:
-        data?.strategies && typeof data.strategies === 'object'
-            ? data.strategies
-            : {},
+      data?.strategies && typeof data.strategies === "object"
+        ? data.strategies
+        : {},
     // 指示器配置入响应式：设置页与主视图卡头开关共写 envBadge
     envBadge: data?.envBadge,
   };
 
   // tabOrder 存储字段保留（SwitcherPanel 仍读取），本页不再提供配置 UI
-  quickLoginDefaultDomain.value = data?.quickLoginDefaultDomain || '';
-  globalDefaultPassword.value = data?.globalDefaultPassword || '';
+  quickLoginDefaultDomain.value = data?.quickLoginDefaultDomain || "";
+  globalDefaultPassword.value = data?.globalDefaultPassword || "";
 }
 
 /** 深拷贝当前账号列表（避免把响应式对象交给 storage / 后续内存修改污染已写数据） */
-function accountsPatch(): Pick<AccountSwitchConfig, 'accounts'> {
+function accountsPatch(): Pick<AccountSwitchConfig, "accounts"> {
   return { accounts: JSON.parse(JSON.stringify(config.value.accounts)) };
 }
 
@@ -155,17 +166,17 @@ function accountsPatch(): Pick<AccountSwitchConfig, 'accounts'> {
  *          调用方不应再展示「已保存」类假反馈
  */
 async function saveFields(
-    patch: Partial<AccountSwitchConfig>,
+  patch: Partial<AccountSwitchConfig>,
 ): Promise<boolean> {
   try {
     // JSON 深拷贝：patch 中的值来自响应式状态，需先剥离 Proxy
     return await updateConfig<AccountSwitchConfig>(
-        TOOL_ID,
-        JSON.parse(JSON.stringify(patch)),
+      TOOL_ID,
+      JSON.parse(JSON.stringify(patch)),
     );
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : '未知错误';
-    console.error('[account-switch] 保存配置失败:', msg);
+    const msg = error instanceof Error ? error.message : "未知错误";
+    console.error("[account-switch] 保存配置失败:", msg);
     return false;
   }
 }
@@ -175,18 +186,18 @@ async function saveFields(
  * （失败提示由 updateConfig 统一弹出，此处不重复、不出现假成功）
  */
 async function saveWithFeedback(
-    patch: Partial<AccountSwitchConfig>,
-    successMessage: string,
+  patch: Partial<AccountSwitchConfig>,
+  successMessage: string,
 ): Promise<void> {
   if (await saveFields(patch)) {
-    showToast(successMessage, 'success');
+    showToast(successMessage, "success");
   }
 }
 
 // 环境增删改查由 DomainsPanel 承载，这里只负责落盘（只覆盖 domains 字段）
 async function onDomainsSave(
-    domains: Record<string, DomainConfig>,
-    message: string,
+  domains: Record<string, DomainConfig>,
+  message: string,
 ): Promise<void> {
   config.value.domains = domains;
   await saveWithFeedback({ domains }, message);
@@ -221,27 +232,29 @@ async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
   });
   nextAccounts.push(...payload.addedAccounts);
 
-  const saveBase = () => saveFields({ domains: payload.domains, accounts: nextAccounts });
+  const saveBase = () =>
+    saveFields({ domains: payload.domains, accounts: nextAccounts });
   if (previousEnvKey === null) {
     const result = await finalizeNewEnvironmentSave({
       candidate: payload.lockCandidate,
       saveBase,
       reload: loadConfig,
     });
-    if (result.saved) showToast(newEnvironmentSaveMessage(result.lockStatus), 'success');
+    if (result.saved)
+      showToast(newEnvironmentSaveMessage(result.lockStatus), "success");
     return;
   }
 
   if (await saveBase()) {
     await loadConfig();
-    showToast(payload.message, 'success');
+    showToast(payload.message, "success");
   }
 }
 
 /** DomainsPanel 的多字段落盘（导入策略库 + 环境一次写入，ADR-0019） */
 async function onDomainsPatch(
-    patch: Partial<AccountSwitchConfig>,
-    message: string,
+  patch: Partial<AccountSwitchConfig>,
+  message: string,
 ): Promise<void> {
   if (patch.domains) config.value.domains = patch.domains;
   if (patch.strategies) config.value.strategies = patch.strategies;
@@ -250,8 +263,8 @@ async function onDomainsPatch(
 
 /** 策略库变更（设置页策略卡：编辑 / 删除 / 同步） */
 async function onStrategiesSave(
-    strategies: Record<string, StrategyEntry>,
-    message: string,
+  strategies: Record<string, StrategyEntry>,
+  message: string,
 ): Promise<void> {
   config.value.strategies = strategies;
   await saveWithFeedback({ strategies }, message);
@@ -268,7 +281,7 @@ function addCustomRole() {
   const role = customRoleInput.value.trim();
   if (role && !newAccount.value.roles.includes(role)) {
     newAccount.value.roles.push(role);
-    customRoleInput.value = '';
+    customRoleInput.value = "";
   }
 }
 
@@ -290,7 +303,7 @@ async function addAccount() {
   const values = accountFormValues();
   if (!values) return;
   config.value.accounts.push({
-    id: 'acc_' + Date.now(),
+    id: "acc_" + Date.now(),
     name: values.name,
     username: values.username,
     password: newAccount.value.password,
@@ -299,13 +312,13 @@ async function addAccount() {
   });
   const addedName = values.name;
   newAccount.value = {
-    name: '',
-    username: '',
-    password: '',
+    name: "",
+    username: "",
+    password: "",
     roles: [],
     domains: [],
   };
-  customRoleInput.value = '';
+  customRoleInput.value = "";
   showAccountForm.value = false;
   await saveWithFeedback(accountsPatch(), `账号「${addedName}」已添加`);
 }
@@ -339,13 +352,13 @@ async function saveEditAccount() {
   editingAccount.value = null;
   const savedAccountName = values.name;
   newAccount.value = {
-    name: '',
-    username: '',
-    password: '',
+    name: "",
+    username: "",
+    password: "",
     roles: [],
     domains: [],
   };
-  customRoleInput.value = '';
+  customRoleInput.value = "";
   showAccountForm.value = false;
   await saveWithFeedback(accountsPatch(), `账号「${savedAccountName}」已保存`);
 }
@@ -354,19 +367,24 @@ function cancelEditAccount() {
   editingAccount.value = null;
   showAccountPassword.value = false;
   newAccount.value = {
-    name: '',
-    username: '',
-    password: '',
+    name: "",
+    username: "",
+    password: "",
     roles: [],
     domains: [],
   };
-  customRoleInput.value = '';
+  customRoleInput.value = "";
 }
 
 async function deleteAccount(id: string) {
   const acc = config.value.accounts.find((a) => a.id === id);
   if (!acc) return;
-  if (!confirm(`确定删除账号「${acc.name}」（用户名 ${acc.username}）？该账号在所有环境下的绑定会一并移除。`)) return;
+  if (
+    !confirm(
+      `确定删除账号「${acc.name}」（用户名 ${acc.username}）？该账号在所有环境下的绑定会一并移除。`,
+    )
+  )
+    return;
   config.value.accounts = config.value.accounts.filter((a) => a.id !== id);
   await saveWithFeedback(accountsPatch(), `账号「${acc.name}」已删除`);
 }
@@ -379,20 +397,28 @@ const envGroups = computed(() => buildEnvGroups(config.value));
 const envCount = computed(() => envGroups.value.groups.length);
 const accountCount = computed(() => config.value.accounts.length);
 // 初次进入（0 环境 0 账号）：只显示空态引导卡，不渲染空的轨道+表格骨架
-const isEmptyState = computed(() => envCount.value === 0 && accountCount.value === 0);
+const isEmptyState = computed(
+  () => envCount.value === 0 && accountCount.value === 0,
+);
 
 // ----- 主视图：表格 + 环境轨道（原型 ?variant=B / ADR-0017 决策见 spec） -----
 // 状态：环境过滤（'all' | envKey | 'unbound'）、搜索、角色、上手卡折叠
-type EnvFilter = 'all' | 'unbound' | string;
-const envFilter = ref<EnvFilter>('all');
-const query = ref('');
-const roleFilter = ref('');
+type EnvFilter = "all" | "unbound" | string;
+const envFilter = ref<EnvFilter>("all");
+const query = ref("");
+const roleFilter = ref("");
 
 /** 账号当前生效的环境 key：编辑表单的预填用「首个绑定」，验证/登录取对应环境 */
-function accFallbackEnv(acc: Account): { key: string; env: DomainConfig } | null {
+function accFallbackEnv(
+  acc: Account,
+): { key: string; env: DomainConfig } | null {
   // 若处于具体环境过滤中，优先用该环境；
   // 否则用账号首个绑定（多对多取第一个做 fallback；未绑定返回 null）
-  if (envFilter.value && envFilter.value !== 'all' && envFilter.value !== 'unbound') {
+  if (
+    envFilter.value &&
+    envFilter.value !== "all" &&
+    envFilter.value !== "unbound"
+  ) {
     const f = config.value.domains[envFilter.value];
     if (f && acc.domains.includes(envFilter.value)) {
       return { key: envFilter.value, env: f };
@@ -406,9 +432,9 @@ function accFallbackEnv(acc: Account): { key: string; env: DomainConfig } | null
 const filteredAccounts = computed(() => {
   const q = query.value.trim().toLowerCase();
   return config.value.accounts.filter((acc) => {
-    if (envFilter.value === 'unbound') {
+    if (envFilter.value === "unbound") {
       if (acc.domains.some((d) => config.value.domains[d])) return false;
-    } else if (envFilter.value !== 'all') {
+    } else if (envFilter.value !== "all") {
       if (!acc.domains.includes(envFilter.value as string)) return false;
     }
     if (roleFilter.value && !acc.roles.includes(roleFilter.value)) return false;
@@ -432,7 +458,9 @@ function accEnvList(acc: Account): Array<{ key: string; env: DomainConfig }> {
 }
 
 /** 角色筛选选项：按现有账号数据中实际出现的角色展示（预设角色在前，自定义角色在后） */
-const roleFilterOptions = computed(() => collectRoleFilterOptions(config.value.accounts));
+const roleFilterOptions = computed(() =>
+  collectRoleFilterOptions(config.value.accounts),
+);
 
 /**
  * 新增账号表单的角色 chip 候选：预设 3 个 + 已用自定义角色（去重，预设在前）。
@@ -447,7 +475,8 @@ const roleChipOptions = computed(() => {
 
 // 角色数据变化后（编辑/删除账号）当前筛选角色可能已不存在，自动清除避免表格永久为空
 watch(roleFilterOptions, (roles) => {
-  if (roleFilter.value && !roles.includes(roleFilter.value)) roleFilter.value = '';
+  if (roleFilter.value && !roles.includes(roleFilter.value))
+    roleFilter.value = "";
 });
 
 /** ⋯ 菜单「验证」：落到账号第一个绑定的环境（未绑定账号不出此菜单项，见模板 v-if） */
@@ -489,7 +518,7 @@ const badgeEnabledCount = computed(() => {
 
 /** 轨道项到对应「＋账号」/菜单环境 key 的统一入口（用当前过滤） */
 function railEnvKey(): string | null {
-  if (envFilter.value === 'all' || envFilter.value === 'unbound') return null;
+  if (envFilter.value === "all" || envFilter.value === "unbound") return null;
   return envFilter.value as string;
 }
 
@@ -525,22 +554,19 @@ const configReady = ref(false);
 async function openRequestedEnvironment(editEnv: string): Promise<void> {
   const envKey = resolveRequestedEnv(config.value.domains, editEnv);
   if (!envKey) {
-    showToast('未找到要编辑的环境，可能已被删除或地址已修改', 'error');
+    showToast("未找到要编辑的环境，可能已被删除或地址已修改", "error");
   } else {
-    activeTab.value = 'main';
+    activeTab.value = "main";
     domainsPanelRef.value?.openEdit(envKey);
     await nextTick();
     domainsPanelRef.value?.focusLoginForm();
   }
-  emit('editEnvConsumed');
+  emit("editEnvConsumed");
 }
 
-watch(
-  [() => props.editEnv, configReady],
-  ([editEnv, ready]) => {
-    if (ready && editEnv) void openRequestedEnvironment(editEnv);
-  },
-);
+watch([() => props.editEnv, configReady], ([editEnv, ready]) => {
+  if (ready && editEnv) void openRequestedEnvironment(editEnv);
+});
 
 async function deleteEnv(key: string) {
   const env = config.value.domains[key];
@@ -600,7 +626,7 @@ function closeMenu() {
 // ----- 指示器开关（per-env，落地为 envBadge.whitelist 增删） -----
 const DEFAULT_ENV_BADGE: EnvBadgeConfig = {
   enabled: false,
-  position: 'bottom-right',
+  position: "bottom-right",
   whitelist: [],
 };
 const envBadge = computed<EnvBadgeConfig>(
@@ -627,26 +653,26 @@ async function toggleEnvBadge(key: string) {
   }
   const next: EnvBadgeConfig = { ...current, whitelist };
   config.value.envBadge = next;
-  await saveWithFeedback({ envBadge: next }, '角标显示范围已保存');
+  await saveWithFeedback({ envBadge: next }, "角标显示范围已保存");
 }
 
 // ----- 设置页：环境指示器区块（Config Kit / ADR-0007 Auto-save 范式） -----
 // whitelist 与主视图卡头开关共写同一字段，语义不变：空 = 全部已配置环境
 const POSITION_OPTIONS: Array<{ value: EnvBadgePosition; label: string }> = [
-  { value: 'top-left', label: '左上' },
-  { value: 'top-right', label: '右上' },
-  { value: 'bottom-left', label: '左下' },
-  { value: 'bottom-right', label: '右下' },
+  { value: "top-left", label: "左上" },
+  { value: "top-right", label: "右上" },
+  { value: "bottom-left", label: "左下" },
+  { value: "bottom-right", label: "右下" },
 ];
 
 /** 显示范围：白名单空 = 全部已配置环境 */
-const badgeScope = computed<'all' | 'selected'>(() =>
-  envBadge.value.whitelist.length === 0 ? 'all' : 'selected',
+const badgeScope = computed<"all" | "selected">(() =>
+  envBadge.value.whitelist.length === 0 ? "all" : "selected",
 );
 
 async function saveEnvBadge(next: EnvBadgeConfig) {
   config.value.envBadge = next;
-  await saveWithFeedback({ envBadge: next }, '✓ 已保存');
+  await saveWithFeedback({ envBadge: next }, "✓ 已保存");
 }
 
 function setEnvBadgeEnabled(enabled: boolean) {
@@ -657,15 +683,18 @@ function setEnvBadgePosition(position: EnvBadgePosition) {
   void saveEnvBadge({ ...envBadge.value, position });
 }
 
-function setBadgeScope(scope: 'all' | 'selected') {
+function setBadgeScope(scope: "all" | "selected") {
   const current = envBadge.value;
-  if (scope === 'all') {
+  if (scope === "all") {
     if (current.whitelist.length === 0) return;
     void saveEnvBadge({ ...current, whitelist: [] });
   } else if (current.whitelist.length === 0) {
     // 切到「仅这些环境」时物化当前生效集合（空白名单语义=全部），
     // 避免勾选列表全空却被读作「全部」的歧义
-    void saveEnvBadge({ ...current, whitelist: Object.keys(config.value.domains) });
+    void saveEnvBadge({
+      ...current,
+      whitelist: Object.keys(config.value.domains),
+    });
   }
 }
 
@@ -680,13 +709,13 @@ function toggleWhitelist(key: string) {
 /** 存量默认环境值不在当前环境列表里（环境已删/改名）时原样显示并标注 */
 const quickLoginDomainUnmatched = computed(
   () =>
-    quickLoginDefaultDomain.value !== '' &&
+    quickLoginDefaultDomain.value !== "" &&
     !(quickLoginDefaultDomain.value in config.value.domains),
 );
 
 // ----- 行内验证（复用 TRIAL_LOGIN，默认零副作用：不写会话/不跳转/不碰当前标签页） -----
 interface VerifyState {
-  status: 'running' | 'ok' | 'fail';
+  status: "running" | "ok" | "fail";
   /** 一句话结论：成功时为「能换到凭据」/「已登录」，失败时为原因 */
   message: string;
 }
@@ -699,19 +728,21 @@ function verifyStateOf(envKey: string, accId: string): VerifyState | undefined {
 
 /** 行内验证密码回退：账号密码 > 环境默认密码 > 全局默认密码（与快捷登录同源） */
 function resolveRowPassword(env: DomainConfig, acc: Account): string {
-  return acc.password || env.defaultPassword || globalDefaultPassword.value || '';
+  return (
+    acc.password || env.defaultPassword || globalDefaultPassword.value || ""
+  );
 }
 
 async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   const k = verifyKey(envKey, acc.id);
-  if (verifyStates.value[k]?.status === 'running') return;
+  if (verifyStates.value[k]?.status === "running") return;
   // 与 DomainsPanel / 登录 prelude 同一条读取链：私有声明 > 库镜像 > 旧配方迁移，
   // 保证「这里能验证的」就是「实际会执行的」。
   const { spec } = readSpecFromConfig(env, config.value.strategies);
   if (!spec) {
     verifyStates.value[k] = {
-      status: 'fail',
-      message: '该环境没有登录声明，无法行内验证',
+      status: "fail",
+      message: "该环境没有登录声明，无法行内验证",
     };
     return;
   }
@@ -719,22 +750,22 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   const issues = validateLoginSpec(spec);
   if (issues.length > 0) {
     verifyStates.value[k] = {
-      status: 'fail',
-      message: '登录声明校验未过：' + issues[0].message,
+      status: "fail",
+      message: "登录声明校验未过：" + issues[0].message,
     };
     return;
   }
   const password = resolveRowPassword(env, acc);
   if (!password) {
     verifyStates.value[k] = {
-      status: 'fail',
-      message: '缺密码（账号、环境与全局均未配置）',
+      status: "fail",
+      message: "缺密码（账号、环境与全局均未配置）",
     };
     return;
   }
-  verifyStates.value[k] = { status: 'running', message: '' };
+  verifyStates.value[k] = { status: "running", message: "" };
   try {
-    const res = await sendBgMessage('TRIAL_LOGIN', {
+    const res = await sendBgMessage("TRIAL_LOGIN", {
       spec,
       origin: envKey,
       username: acc.username,
@@ -742,18 +773,20 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
       // writeSession 缺省 false：只发请求验证，不写会话
     });
     verifyStates.value[k] = res.ok
-      ? { status: 'ok', message: res.sessionWritten ? '已登录' : '能换到凭据' }
-      : { status: 'fail', message: res.error || '验证失败' };
+      ? { status: "ok", message: res.sessionWritten ? "已登录" : "能换到凭据" }
+      : { status: "fail", message: res.error || "验证失败" };
   } catch (e) {
     verifyStates.value[k] = {
-      status: 'fail',
+      status: "fail",
       message: e instanceof Error ? e.message : String(e),
     };
   }
 }
 
 // ----- 验证环境（卡头）：只做配置可用性检查，不发请求 -----
-const envCheckStates = ref<Record<string, { ok: boolean; message: string }>>({});
+const envCheckStates = ref<Record<string, { ok: boolean; message: string }>>(
+  {},
+);
 
 function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
   const problems: string[] = [];
@@ -761,13 +794,15 @@ function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
   // 镜像环境不持私有声明，回落读库条目（ADR-0019 修订）
   const spec =
     env.strategyConfig?.spec ??
-    (env.strategyId ? config.value.strategies?.[env.strategyId]?.spec : undefined);
+    (env.strategyId
+      ? config.value.strategies?.[env.strategyId]?.spec
+      : undefined);
   if (spec) {
     for (const issue of validateLoginSpec(spec)) {
       const where =
-        issue.opIndex !== undefined ? ` 第 ${issue.opIndex + 1} 步` : '';
+        issue.opIndex !== undefined ? ` 第 ${issue.opIndex + 1} 步` : "";
       problems.push(
-        `登录声明${issue.rule ? ' ' + issue.rule : ''}${where}：${issue.message}`,
+        `登录声明${issue.rule ? " " + issue.rule : ""}${where}：${issue.message}`,
       );
     }
   }
@@ -784,10 +819,10 @@ function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
           ok: true,
           message:
             accounts.length === 0
-              ? '配置可用（尚无账号可验）'
+              ? "配置可用（尚无账号可验）"
               : `配置可用：${accounts.length} 个账号凭据齐全`,
         }
-      : { ok: false, message: problems.join('；') };
+      : { ok: false, message: problems.join("；") };
 }
 
 // ----- 行内「登录」：与面板同一条 SWITCH_ACCOUNT 消息路径 -----
@@ -796,28 +831,33 @@ const switchingAccountId = ref<string | null>(null);
 async function loginAccount(envKey: string, acc: Account) {
   if (switchingAccountId.value) return;
   switchingAccountId.value = acc.id;
-  showToast('正在登录 ' + acc.name + '…', 'info');
+  showToast("正在登录 " + acc.name + "…", "info");
   try {
-    const response = await sendBgMessage('SWITCH_ACCOUNT', {
+    const response = await sendBgMessage("SWITCH_ACCOUNT", {
       account: acc,
       domain: envKey,
     });
     if (response?.success) {
-      showToast('已切换至 ' + acc.name, 'success');
+      showToast("已切换至 " + acc.name, "success");
     } else {
-      const err = response?.error || '未知错误';
+      const err = response?.error || "未知错误";
       // 并发互斥拒绝是「忙碌」而非失败（与 SwitcherPanel 一致）
       if (err === LOGIN_BUSY_ERROR) {
-        showToast(err, 'info');
+        showToast(err, "info");
       } else {
+        const env = config.value.domains[envKey];
+        const spec = env
+          ? readSpecFromConfig(env, config.value.strategies).spec
+          : null;
         showLoginRecoveryToast({
-          prefix: '登录失败',
+          prefix: "登录失败",
           error: err,
           errorCode: response?.errorCode,
           envKey,
+          spec: spec ?? undefined,
           onRetry: () => loginAccount(envKey, acc),
           detail: {
-            action: 'SWITCH_ACCOUNT',
+            action: "SWITCH_ACCOUNT",
             envName: config.value.domains[envKey]?.name,
             origin: envKey,
             strategy: config.value.domains[envKey]?.loginMethod,
@@ -838,35 +878,34 @@ onMounted(async () => {
   configReady.value = true;
   void refresh();
   // 「⋯」菜单：点页面任意处关闭（⋯ 按钮自身 @click.stop 除外）
-  document.addEventListener('click', closeMenu);
+  document.addEventListener("click", closeMenu);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeMenu);
+  document.removeEventListener("click", closeMenu);
 });
 
 /**
  * 设置按钮点击处理 — 切换到设置标签页
  */
 function handleSettingsClick() {
-  activeTab.value = 'settings';
+  activeTab.value = "settings";
 }
 
 // 设置页各项独立保存对应字段，互不干扰也不覆盖其他页面改过的字段
 function saveQuickLoginDefaultDomain() {
   void saveWithFeedback(
     { quickLoginDefaultDomain: quickLoginDefaultDomain.value },
-    '✓ 已保存',
+    "✓ 已保存",
   );
 }
 
 function saveGlobalDefaultPassword() {
   void saveWithFeedback(
     { globalDefaultPassword: globalDefaultPassword.value },
-    '✓ 已保存',
+    "✓ 已保存",
   );
 }
-
 </script>
 
 <template>
@@ -1175,7 +1214,9 @@ function saveGlobalDefaultPassword() {
                         >
                           <template v-if="accFallbackEnv(acc)">
                             <button class="more-item" @click="closeMenu(); verifyMenuAccount(acc)">验证</button>
+                            <!-- 「登录」暂时隐藏，保留 loginAccount 实现
                             <button class="more-item" :disabled="!!switchingAccountId" @click="closeMenu(); loginMenuAccount(acc)">登录</button>
+                            -->
                             <div class="more-sep" />
                           </template>
                           <button class="more-item" @click="closeMenu(); editAccount(acc.id)">编辑</button>

@@ -92,7 +92,7 @@ interface LoginSpec {
 | 类别 | 算子 | 说明 |
 |------|------|------|
 | 会话清理 | `clear.cookies` / `clear.storage` | 按 `AuthRange`（`all` / 键名数组）清理 |
-| 导航 | `goto` | 跳转并可等待加载；`when` 为假时跳过 |
+| 导航 | `goto` | 跳转、等待加载及可选 `waitForTarget` 表单就绪确认；`when` 为假时跳过 |
 | HTTP | `http.execute` | 请求 + 解析；`expectStatus` 判定；结果进绑定表 |
 | 数据变换 | `digest` / `crypto.encrypt` / `payload.build` / `map` / `apply.set` | SHA-1/256、RSA、拼装（对象/字符串）、映射、改写请求 |
 | 会话写入 | `auth.write` / `auth.capture` / `auth.restore` | 按 `auth` 声明写会话、跨 origin 捕获/恢复 |
@@ -107,6 +107,13 @@ interface LoginSpec {
 `generic` 是唯一的内置声明（`spec/editor.ts` 的 `defaultLoginSpec`），覆盖
 通用页面登录。API 请求、摘要、RSA 加密和会话写入由声明中的通用算子组合，
 不包含特定站点的登录端点或密钥。
+
+自动识别或锁定标准登录表单时，会同时记录实际标签页的登录页地址；同域地址
+保存为 `{origin}/...`，并在前导 `clear.*` 后生成 `goto(waitForLoad: true)`。
+扫描只枚举 localStorage / sessionStorage 键名，用户在确认卡片中勾选高置信度认证键，
+生成精准的 `clear.storage`，不读取键值也不默认清空全部存储。`waitForTarget` 会在
+导航后等待实际用户名输入框出现，避免 SPA 渲染与旧登录态重定向竞态。
+高级多步声明不被识别回填隐式重排；明确留空登录页的简易声明仍保留当前页 / SPA 用法，并显示软提示。
 
 其他系统由用户通过「导入登录策略包…」导入 `dt-login-config/v1`，存入
 **登录策略库**（ADR-0019）。公开仓库只提供通用格式与虚构示例；导入格式和

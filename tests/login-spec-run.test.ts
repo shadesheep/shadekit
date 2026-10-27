@@ -144,7 +144,106 @@ describe("runSpec — 算子编排与轨迹", () => {
       [2, "fill", "success", "#p"],
       [3, "click", "success", "#go"],
     ]);
-    expect(result.trace.every((t) => typeof t.duration === "number")).toBe(true);
+    expect(result.trace.every((t) => typeof t.duration === "number")).toBe(
+      true,
+    );
+  });
+
+  it("已登录后台切号：清理后导航登录页并等待加载，再填充表单", async () => {
+    const domActions: string[] = [];
+    executeScript.mockImplementation(async (injection: { args: unknown[] }) => {
+      const first = injection.args[0];
+      if (
+        first &&
+        typeof first === "object" &&
+        "action" in first &&
+        typeof first.action === "string"
+      ) {
+        domActions.push(first.action);
+      }
+      return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+    });
+    const ops: SpecOp[] = [
+      { op: "clear.cookies", range: "all" },
+      { op: "clear.storage", area: "local", range: "all" },
+      {
+        op: "goto",
+        url: "{origin}/admin/login",
+        waitForLoad: true,
+        waitForTarget: { placeholder: "请输入手机号" },
+      },
+      {
+        op: "fill",
+        target: { placeholder: "请输入手机号" },
+        value: "{username}",
+      },
+      {
+        op: "fill",
+        target: { placeholder: "请输入密码" },
+        value: "{password}",
+      },
+      { op: "click", target: { text: "登 录" }, onNotFound: "fail" },
+    ];
+    const result = await runSpec(
+      spec(ops),
+      buildCtx({
+        origin: "https://xiaoyule.com.cn",
+        targetUrl: "https://xiaoyule.com.cn/admin/users",
+      }),
+      { settle: { pollingIntervalMs: 1 } },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.trace.map((step) => step.op)).toEqual([
+      "clear.cookies",
+      "clear.storage",
+      "goto",
+      "fill",
+      "fill",
+      "click",
+    ]);
+    expect(mocks.applyNavigationIntent).toHaveBeenCalledWith(5, {
+      action: "navigate",
+      url: "https://xiaoyule.com.cn/admin/login",
+    });
+    const firstFillCall = executeScript.mock.invocationCallOrder[2];
+    expect(
+      mocks.applyNavigationIntent.mock.invocationCallOrder[0],
+    ).toBeLessThan(firstFillCall);
+    expect(mocks.waitForTabLoaded.mock.invocationCallOrder[0]).toBeLessThan(
+      firstFillCall,
+    );
+    expect(domActions).toEqual(["locate", "fill", "fill", "click"]);
+  });
+
+  it("导航后等待表单超时，报告当前地址并提示检查本地登录态", async () => {
+    executeScript.mockResolvedValue([
+      { frameId: 0, result: { status: "notFound", count: 0 } },
+    ]);
+    const result = await runSpec(
+      spec(
+        [
+          {
+            op: "goto",
+            url: "{origin}/admin/login",
+            waitForTarget: { placeholder: "请输入手机号" },
+          },
+        ],
+        { limits: { settleMs: 5 } },
+      ),
+      buildCtx({
+        origin: "https://xiaoyule.com.cn",
+        targetUrl: "https://xiaoyule.com.cn/admin/users",
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toContain("等待登录表单出现超时");
+    expect(result.error).toContain("https://example.com/home");
+    expect(result.error).toContain("本地登录态清理");
+    expect(result.trace).toHaveLength(1);
+    expect(result.trace[0]).toMatchObject({ op: "goto", status: "error" });
   });
 
   it("填充值经过模板解析：原生动作收到真实账号密码", async () => {
@@ -187,14 +286,11 @@ describe("runSpec — 算子编排与轨迹", () => {
 
   it("单次 DOM 交互超时（limits.stepMs）→ STEP_TIMEOUT", async () => {
     // executeScript 永不 resolve → withStepTimeout 竞速触发 STEP_TIMEOUT
-    executeScript.mockImplementation(
-      () => new Promise<unknown>(() => {}),
-    );
+    executeScript.mockImplementation(() => new Promise<unknown>(() => {}));
     const result = await runSpec(
-      spec(
-        [{ op: "fill", target: "#u", value: "a" }],
-        { limits: { stepMs: 30 } },
-      ),
+      spec([{ op: "fill", target: "#u", value: "a" }], {
+        limits: { stepMs: 30 },
+      }),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -247,7 +343,10 @@ describe("runSpec — 算子编排与轨迹", () => {
 
   it("定位记录的 frame 已不在页面 → FRAME_NOT_FOUND（不回退全 frame 搜索）", async () => {
     executeScript.mockResolvedValue([
-      { frameId: 0, result: { status: "ok", count: 1, frameUrl: "https://example.com/" } },
+      {
+        frameId: 0,
+        result: { status: "ok", count: 1, frameUrl: "https://example.com/" },
+      },
     ]);
     const result = await runSpec(
       spec([
@@ -282,7 +381,9 @@ describe("runSpec — 算子编排与轨迹", () => {
   });
 
   it("goto 失败报导航错误，不再继续执行后续算子", async () => {
-    mocks.applyNavigationIntent.mockRejectedValueOnce(new Error("No tab with id: 5"));
+    mocks.applyNavigationIntent.mockRejectedValueOnce(
+      new Error("No tab with id: 5"),
+    );
     domPlaybook([]);
     const result = await runSpec(spec(FORM_OPS), buildCtx(), {
       settle: { pollingIntervalMs: 1 },
@@ -294,7 +395,7 @@ describe("runSpec — 算子编排与轨迹", () => {
     expect(result.trace).toHaveLength(1);
   });
 
-  it("goto.when 按 D1 假值集合判定：字符串 \"0\" / \"false\" 视为真", async () => {
+  it('goto.when 按 D1 假值集合判定：字符串 "0" / "false" 视为真', async () => {
     const result = await runSpec(
       spec([
         {
@@ -430,13 +531,13 @@ describe("runSpec — 算子编排与轨迹", () => {
       const [source] = injection.args as [string, string];
       return source === "cookie" ? [] : [{ frameId: 0, result: "sid-1" }];
     });
-    cookiesGetAll.mockResolvedValue([{ name: "sid", value: "sid-1", domain: "example.com", path: "/" }]);
+    cookiesGetAll.mockResolvedValue([
+      { name: "sid", value: "sid-1", domain: "example.com", path: "/" },
+    ]);
     mocks.evaluateCondition.mockResolvedValue(false);
 
     const result = await runSpec(
-      spec([
-        { op: "extract", source: "cookie", key: "sid", as: "session" },
-      ], {
+      spec([{ op: "extract", source: "cookie", key: "sid", as: "session" }], {
         success: [
           {
             anyOf: [
@@ -579,8 +680,12 @@ describe("runSpec — 页面成功信号", () => {
 
   it("纯数据成功信号：算子结束后静态判定，未满足报 SUCCESS_CONDITION_UNMET", async () => {
     executeScript.mockImplementation(
-      async (injection: { func?: (code: string, bindings: string) => unknown; args: [string, string] }) => {
-        if (!injection.func) return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+      async (injection: {
+        func?: (code: string, bindings: string) => unknown;
+        args: [string, string];
+      }) => {
+        if (!injection.func)
+          return [{ frameId: 0, result: { status: "ok", count: 1 } }];
         const [code, bindings] = injection.args;
         return [{ frameId: 0, result: injection.func(code, bindings) }];
       },
@@ -620,7 +725,8 @@ describe("runSpec — extract / script / 模板", () => {
     executeScript.mockImplementation(async (injection: { args: unknown[] }) => {
       const [source] = injection.args as [string, string];
       if (source === "local") return [{ frameId: 0, result: null }];
-      if (source === "session") return [{ frameId: 0, result: "session-token" }];
+      if (source === "session")
+        return [{ frameId: 0, result: "session-token" }];
       return [{ frameId: 0, result: null }];
     });
 
@@ -667,7 +773,10 @@ describe("runSpec — extract / script / 模板", () => {
         const action = injection.args[0];
         if (action.action === "read") {
           return [
-            { frameId: 0, result: { status: "ok", count: 1, value: "欢迎回来" } },
+            {
+              frameId: 0,
+              result: { status: "ok", count: 1, value: "欢迎回来" },
+            },
           ];
         }
         return [{ frameId: 0, result: { status: "ok", count: 1 } }];
@@ -713,9 +822,13 @@ describe("runSpec — extract / script / 模板", () => {
   });
 
   it("extract cookie 按 name 取首个匹配值（ADR-0015 D1）", async () => {
-    cookiesGetAll.mockResolvedValue([{ name: "sid", value: "cookie-value", domain: "example.com", path: "/" }]);
+    cookiesGetAll.mockResolvedValue([
+      { name: "sid", value: "cookie-value", domain: "example.com", path: "/" },
+    ]);
     const result = await runSpec(
-      spec([{ op: "extract", source: "cookie", key: "sid", as: "cookieValue" }]),
+      spec([
+        { op: "extract", source: "cookie", key: "sid", as: "cookieValue" },
+      ]),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -733,10 +846,10 @@ describe("runSpec — extract / script / 模板", () => {
       }
       return [{ frameId: 0, result: null }];
     });
-    cookiesGetAll.mockResolvedValue([{ name: "sid", value: "cookie-value", domain: "example.com", path: "/" }]);
-    mocks.currentUrl.mockResolvedValue(
-      "https://example.com/cb?code=abc%20123",
-    );
+    cookiesGetAll.mockResolvedValue([
+      { name: "sid", value: "cookie-value", domain: "example.com", path: "/" },
+    ]);
+    mocks.currentUrl.mockResolvedValue("https://example.com/cb?code=abc%20123");
 
     const result = await runSpec(
       spec(
@@ -775,7 +888,8 @@ describe("runSpec — extract / script / 模板", () => {
         func?: (code: string, bindings: string) => unknown;
         args: [string, string];
       }) => {
-        if (!injection.func) return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+        if (!injection.func)
+          return [{ frameId: 0, result: { status: "ok", count: 1 } }];
         const [code, bindings] = injection.args;
         const value = injection.func(code, bindings);
         return [{ frameId: 0, result: value }];
@@ -806,14 +920,21 @@ describe("runSpec — extract / script / 模板", () => {
         func?: (code: string, bindings: string) => unknown;
         args: [string, string];
       }) => {
-        if (!injection.func) return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+        if (!injection.func)
+          return [{ frameId: 0, result: { status: "ok", count: 1 } }];
         const [code, bindings] = injection.args;
         return [{ frameId: 0, result: injection.func(code, bindings) }];
       },
     );
 
     const thrown = await runSpec(
-      spec([{ op: "script", code: '() => { throw new Error("接口契约变了"); }', as: "out" }]),
+      spec([
+        {
+          op: "script",
+          code: '() => { throw new Error("接口契约变了"); }',
+          as: "out",
+        },
+      ]),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -839,14 +960,17 @@ describe("runSpec — extract / script / 模板", () => {
         func?: (code: string, bindings: string) => unknown;
         args: [string, string];
       }) => {
-        if (!injection.func) return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+        if (!injection.func)
+          return [{ frameId: 0, result: { status: "ok", count: 1 } }];
         const [code, bindings] = injection.args;
         return [{ frameId: 0, result: injection.func(code, bindings) }];
       },
     );
 
     const result = await runSpec(
-      spec([{ op: "script", code: "() => ({ user: { name: 'a' } })", as: "out" }]),
+      spec([
+        { op: "script", code: "() => ({ user: { name: 'a' } })", as: "out" },
+      ]),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );

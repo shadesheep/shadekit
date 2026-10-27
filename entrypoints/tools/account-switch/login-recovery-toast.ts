@@ -1,5 +1,6 @@
 import { sendBgMessage } from "../../shared/messages";
 import { showToast, type ToastAction } from "../../shared/use-toast";
+import type { LoginSpec } from "./spec/types";
 import { loginRecoveryFor } from "./login-recovery";
 import {
   buildErrorDetail,
@@ -15,24 +16,31 @@ export function showLoginRecoveryToast(input: {
   error: string;
   errorCode?: ErrorCode;
   envKey?: string;
+  spec?: LoginSpec;
   onRetry: () => void;
   detail: ErrorDetailContext;
 }): void {
   const code = input.errorCode ?? ErrorCodes.UNKNOWN;
-  const recovery = loginRecoveryFor(input.errorCode);
+  const recovery = loginRecoveryFor(input.errorCode, input.spec);
   const message = recovery.message ?? input.error;
   const actions: ToastAction[] = [];
   if (recovery.retry) actions.push({ label: "重试", onClick: input.onRetry });
   if (recovery.manualLocate && input.envKey) {
     actions.push({
-      label: "手动定位",
+      label: recovery.editEnvironment ? "编辑环境" : "手动定位",
       onClick: () => {
-        void sendBgMessage("OPEN_ACCOUNT_ENVIRONMENT", { envKey: input.envKey! })
+        void sendBgMessage("OPEN_ACCOUNT_ENVIRONMENT", {
+          envKey: input.envKey!,
+        })
           .then((result) => {
-            if (!result.success) showToast(result.error ?? "无法打开环境编辑页", "error");
+            if (!result.success)
+              showToast(result.error ?? "无法打开环境编辑页", "error");
           })
           .catch((error: unknown) => {
-            showToast(error instanceof Error ? error.message : String(error), "error");
+            showToast(
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
           });
       },
     });
@@ -42,7 +50,10 @@ export function showLoginRecoveryToast(input: {
     onClick: () => {
       const detail = buildErrorDetail(code, input.error, input.detail);
       void copyToClipboard(detail).then((ok) => {
-        showToast(ok ? "错误详情已复制" : "复制失败，请查看控制台日志", ok ? "success" : "info");
+        showToast(
+          ok ? "错误详情已复制" : "复制失败，请查看控制台日志",
+          ok ? "success" : "info",
+        );
       });
     },
   });

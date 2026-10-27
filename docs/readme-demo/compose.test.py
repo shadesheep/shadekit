@@ -21,7 +21,7 @@ class ComposeTests(unittest.TestCase):
         sources = {
             'recipe-01-environment': Image.new('RGB', (560, 900), 'white'),
             'recipe-02-picker': Image.new('RGB', (1440, 900), 'white'),
-            'recipe-03-trial': Image.new('RGB', (560, 900), 'white'),
+            'recipe-03-save': Image.new('RGB', (560, 900), 'white'),
         }
         self.assertEqual(ensure_login_recipe_layout(sources), [(432, 608), (432, 608), (432, 608)])
 
@@ -39,7 +39,7 @@ class ComposeTests(unittest.TestCase):
     def test_recipe_crops_stop_after_complete_sections(self):
         source = Image.new('RGB', (560, 900), 'white')
         self.assertEqual(crop_recipe_source('recipe-01-environment', source).size, (560, 608))
-        self.assertEqual(crop_recipe_source('recipe-03-trial', source).size, (560, 660))
+        self.assertEqual(crop_recipe_source('recipe-03-save', source).size, (560, 608))
 
     def test_gif_duration_sums_each_frame(self):
         image = Image.new('P', (40, 40), 0)

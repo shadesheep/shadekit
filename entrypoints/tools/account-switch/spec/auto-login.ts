@@ -1,6 +1,13 @@
-import { defaultLoginSpec, simpleSpecShape, type SimpleSpecShape } from "./editor";
 import {
-  AUTO_LOGIN_TARGET,
+  defaultLoginSpec,
+  setSpecAuthStorageCleanup,
+  setSpecLoginUrl,
+  simpleSpecShape,
+  toSpecLoginUrl,
+  type SimpleSpecShape,
+} from "./editor";
+import type { AuthStorageSelection } from "../strategies/auth-storage";
+import {
   DEFAULT_AUTH,
   DEFAULT_LIMITS,
   LOGIN_SPEC_VERSION,
@@ -17,15 +24,20 @@ export { AUTO_LOGIN_TARGET } from "./types";
 
 /** 仅接受精确的自动标记，拒绝未知值和额外字段。 */
 export function isAutoLoginTarget(value: unknown): value is AutoLoginTarget {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return false;
   const keys = Object.keys(value);
-  return keys.length === 1 && keys[0] === "auto" &&
-    (value as Record<string, unknown>).auto === "login";
+  return (
+    keys.length === 1 &&
+    keys[0] === "auto" &&
+    (value as Record<string, unknown>).auto === "login"
+  );
 }
 
 function deepFreeze<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
-    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+    for (const nested of Object.values(value as Record<string, unknown>))
+      deepFreeze(nested);
     Object.freeze(value);
   }
   return value;
@@ -42,25 +54,40 @@ export const LEGACY_EMPTY_DEFAULT_SPEC: Readonly<LoginSpec> = deepFreeze({
     { op: "click", target: "", onNotFound: "fail" },
     { op: "auth.write" },
   ],
-  success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],
+  success: [
+    {
+      page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] },
+    },
+  ],
   auth: { ...DEFAULT_AUTH },
   limits: { ...DEFAULT_LIMITS },
 });
 
 function deepEqual(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
-  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {
+  if (
+    typeof left !== "object" ||
+    left === null ||
+    typeof right !== "object" ||
+    right === null
+  ) {
     return false;
   }
   if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) &&
-      left.length === right.length && left.every((item, index) => deepEqual(item, right[index]));
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => deepEqual(item, right[index]))
+    );
   }
   const a = left as Record<string, unknown>;
   const b = right as Record<string, unknown>;
   const aKeys = Object.keys(a).sort();
   const bKeys = Object.keys(b).sort();
-  return deepEqual(aKeys, bKeys) && aKeys.every((key) => deepEqual(a[key], b[key]));
+  return (
+    deepEqual(aKeys, bKeys) && aKeys.every((key) => deepEqual(a[key], b[key]))
+  );
 }
 
 export function isLegacyEmptyDefaultSpec(value: unknown): value is LoginSpec {
@@ -81,9 +108,15 @@ export function projectLegacyDefaultSpec(spec: LoginSpec): LoginSpec {
 export function autoLoginSpecShape(spec: LoginSpec): SimpleSpecShape | null {
   const shape = simpleSpecShape(spec);
   if (!shape) return null;
-  const targets = [shape.usernameIndex, shape.passwordIndex, shape.submitIndex].map((index) => {
+  const targets = [
+    shape.usernameIndex,
+    shape.passwordIndex,
+    shape.submitIndex,
+  ].map((index) => {
     const op = spec.ops[index];
-    return op && (op.op === "fill" || op.op === "click") ? op.target : undefined;
+    return op && (op.op === "fill" || op.op === "click")
+      ? op.target
+      : undefined;
   });
   return targets.every(isAutoLoginTarget) ? shape : null;
 }
@@ -93,36 +126,84 @@ function isNonEmptyConcreteTarget(target: LoginFormTarget): target is Target {
   if (typeof target === "string") return target.trim() !== "";
   if (typeof target !== "object" || target === null) return false;
   const values = Object.values(target);
-  return values.length === 1 && typeof values[0] === "string" && values[0].trim() !== "";
+  return (
+    values.length === 1 &&
+    typeof values[0] === "string" &&
+    values[0].trim() !== ""
+  );
 }
 
-/** 把用户选定的扫描 frame 无损投影到现有标准三步；不重排高级声明。 */
-export function applyLoginFormFrame(spec: LoginSpec, frame: FormScanFrame): LoginSpec | null {
+/**
+ * 把用户选定的扫描 frame 无损投影到现有标准三步；不重排高级声明。
+ * 提供识别页时同时补齐「清理 → 登录页 → 表单」的切换闭环。
+ */
+export function applyLoginFormFrame(
+  spec: LoginSpec,
+  frame: FormScanFrame,
+  navigation?: {
+    pageUrl?: string | null;
+    origin?: string;
+    storage?: AuthStorageSelection;
+  },
+): LoginSpec | null {
   const shape = simpleSpecShape(spec);
   if (!shape) return null;
-  const scope: FrameScope = frame.frameId !== undefined && frame.frameId !== 0
-    ? { frameId: frame.frameId, ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}) }
-    : {};
+  const scope: FrameScope =
+    frame.frameId !== undefined && frame.frameId !== 0
+      ? {
+          frameId: frame.frameId,
+          ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}),
+        }
+      : {};
   const replacements = new Map<number, { target: Target | undefined }>([
     [shape.usernameIndex, { target: frame.username?.target }],
     [shape.passwordIndex, { target: frame.password?.target }],
     [shape.submitIndex, { target: frame.submit?.target }],
   ]);
-  const ops = spec.ops.map((op, index): SpecOp => {
+  const formOps = spec.ops.map((op, index): SpecOp => {
     const replacement = replacements.get(index);
     if (!replacement || (op.op !== "fill" && op.op !== "click")) return op;
     const { frameId: _frameId, frameUrl: _frameUrl, ...withoutScope } = op;
-    return { ...withoutScope, target: replacement.target ?? "", ...scope } as SpecOp;
+    return {
+      ...withoutScope,
+      target: replacement.target ?? "",
+      ...scope,
+    } as SpecOp;
   });
-  return { ...spec, ops };
+  const loginUrl = toSpecLoginUrl(navigation?.pageUrl, navigation?.origin);
+  const navigatedOps = loginUrl ? setSpecLoginUrl(formOps, loginUrl) : formOps;
+  const cleanedOps = navigation?.storage
+    ? setSpecAuthStorageCleanup(navigatedOps, navigation.storage)
+    : navigatedOps;
+  const usernameOp = formOps[shape.usernameIndex];
+  const waitTarget =
+    usernameOp?.op === "fill" && isNonEmptyConcreteTarget(usernameOp.target)
+      ? usernameOp.target
+      : null;
+  return {
+    ...spec,
+    ops: waitTarget
+      ? cleanedOps.map((op) =>
+          op.op === "goto" ? { ...op, waitForTarget: waitTarget } : op,
+        )
+      : cleanedOps,
+  };
 }
 
-export function loginFormTargetMode(spec: LoginSpec): "auto" | "locked" | "custom" | "advanced" {
+export function loginFormTargetMode(
+  spec: LoginSpec,
+): "auto" | "locked" | "custom" | "advanced" {
   const shape = simpleSpecShape(spec);
   if (!shape) return "advanced";
-  const targets = [shape.usernameIndex, shape.passwordIndex, shape.submitIndex].map((index) => {
+  const targets = [
+    shape.usernameIndex,
+    shape.passwordIndex,
+    shape.submitIndex,
+  ].map((index) => {
     const op = spec.ops[index];
-    return (op && (op.op === "fill" || op.op === "click") ? op.target : "") as LoginFormTarget;
+    return (
+      op && (op.op === "fill" || op.op === "click") ? op.target : ""
+    ) as LoginFormTarget;
   });
   if (targets.every(isAutoLoginTarget)) return "auto";
   if (targets.every(isNonEmptyConcreteTarget)) return "locked";

@@ -76,10 +76,10 @@ type SettleCondition =
 ```ts
 { op: "clear.cookies"; range: AuthRange; includeParent?: boolean }
 { op: "clear.storage"; area: "local" | "session"; range: AuthRange }
-{ op: "goto"; url: Ref; waitForLoad?: boolean; timeoutMs?: number; when?: Ref }
+{ op: "goto"; url: Ref; waitForLoad?: boolean; waitForTarget?: Target; timeoutMs?: number; when?: Ref }
 ```
 
-`goto.waitForLoad` 默认 true；`when` 为 `undefined/null/false/""/0` 时跳过。
+`goto.waitForLoad` 默认 true；`waitForTarget` 在导航后轮询等待唯一可见的表单目标，超时报告当前地址及重定向 / 本地登录态检查提示；`when` 为 `undefined/null/false/""/0` 时跳过。
 
 ### HTTP 与请求改写
 

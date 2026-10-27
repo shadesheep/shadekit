@@ -176,11 +176,7 @@ export async function runDomRead(
   target: Target,
   frame?: FrameScope,
 ): Promise<{ ok: true; value: string } | { ok: false; error: LoginError }> {
-  const outcome = await runDomAction(
-    tabId,
-    { action: "read", target },
-    frame,
-  );
+  const outcome = await runDomAction(tabId, { action: "read", target }, frame);
   if (outcome.status === "ok") return { ok: true, value: outcome.value ?? "" };
   return {
     ok: false,
@@ -226,5 +222,36 @@ export function toTargetError(
         ErrorCodes.ELEMENT_NOT_FOUND,
         `无法在页面中查找元素: ${description}（${outcome.message}）`,
       );
+  }
+}
+
+/** 导航后等待登录表单目标；只有 notFound 会重试，定位错误立即返回。 */
+export async function waitForDomTarget(
+  tabId: number,
+  target: Target,
+  timeoutMs: number,
+  pollingIntervalMs = 200,
+): Promise<LoginError | null> {
+  const description = describeTarget(target);
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  const interval = Math.max(1, pollingIntervalMs);
+  while (true) {
+    const outcome = await runDomAction(tabId, { action: "locate", target });
+    if (outcome.status === "ok") return null;
+    if (outcome.status !== "notFound")
+      return toTargetError(outcome, description);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+      const current = tab?.url ? `；当前地址 ${tab.url}` : "";
+      return new LoginError(
+        ErrorCodes.ELEMENT_NOT_FOUND,
+        `等待登录表单出现超时: ${description}${current}。请检查登录页重定向及本地登录态清理`,
+      );
+    }
+    // Node 20 测试运行时没有 Promise.withResolvers；保持扩展与测试共用实现。
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(interval, remaining)),
+    );
   }
 }

@@ -13,11 +13,15 @@
  */
 
 import type { FormScanFrame } from "../tools/account-switch/strategies/login-form-scan";
+import type { AuthStorageSelection } from "../tools/account-switch/strategies/auth-storage";
 import type { DryRunStepResult } from "../tools/account-switch/strategies/generic-dry-run";
 import type { Recipe } from "../tools/account-switch/strategies/generic-recipe";
 import type { RecipeStepTrace } from "../tools/account-switch/spec/types";
 import type { Account } from "../tools/account-switch/types";
-import type { LoginFormLockResult, PreparedLoginFormLock } from "../tools/account-switch/login-form-lock";
+import type {
+  LoginFormLockResult,
+  PreparedLoginFormLock,
+} from "../tools/account-switch/login-form-lock";
 import type { ErrorCode } from "../tools/account-switch/utils/error-codes";
 import type { TrialSignalState } from "../tools/account-switch/spec/run";
 
@@ -96,6 +100,8 @@ export interface BackgroundMessageMap {
       errorCode?: ErrorCode;
       /** 命中密码框的 frame（主 frame 在前）；多 frame 时由 UI 选择 */
       frames: FormScanFrame[];
+      /** 只读枚举并筛选出的认证存储键名；不包含任何存储值 */
+      authStorage?: AuthStorageSelection;
     };
   };
 

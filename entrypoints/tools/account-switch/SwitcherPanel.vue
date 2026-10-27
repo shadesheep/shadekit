@@ -4,12 +4,12 @@
  * 功能与 Popup.vue 保持一致：搜索、角色筛选、最近使用、键盘导航
  * 暗色模式使用 [data-dt-dark] 属性选择器（content script 容器）
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { sendBgMessage } from '../../shared/messages';
-import { getConfig } from '../../shared/tool-config';
-import { showToast } from '../../shared/use-toast';
-import type { Account, AccountSwitchConfig, DomainConfig } from './types';
-import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from './types';
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { sendBgMessage } from "../../shared/messages";
+import { getConfig } from "../../shared/tool-config";
+import { showToast } from "../../shared/use-toast";
+import type { Account, AccountSwitchConfig, DomainConfig } from "./types";
+import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
 import {
   collectRoles,
   filterAccounts,
@@ -18,27 +18,34 @@ import {
   resolvePassword,
   roleColor,
   roleColorStyle,
-} from './account-view';
-import { accountInitial } from './account-palette';
-import { closePanel, getCurrentOrigin } from './utils/env';
-import { ErrorCodes, type ErrorCode, type ErrorDetailContext } from './utils/error-codes';
-import { showLoginRecoveryToast } from './login-recovery-toast';
-import { LOGIN_BUSY_ERROR } from './utils/error-codes';
-import { parseLoginText, type ParsedLogin } from './utils/parse-text';
+} from "./account-view";
+import { accountInitial } from "./account-palette";
+import { closePanel, getCurrentOrigin } from "./utils/env";
+import {
+  ErrorCodes,
+  type ErrorCode,
+  type ErrorDetailContext,
+} from "./utils/error-codes";
+import { showLoginRecoveryToast } from "./login-recovery-toast";
+import { LOGIN_BUSY_ERROR } from "./utils/error-codes";
+import { parseLoginText, type ParsedLogin } from "./utils/parse-text";
+import { readSpecFromConfig } from "./spec/migrate";
+import type { LoginSpec } from "./spec/types";
 
 const accounts = ref<Account[]>([]);
-const origin = ref('');
+const origin = ref("");
 const matchedEnv = ref<DomainConfig | null>(null);
-const matchedEnvKey = ref('');
+const matchedEnvKey = ref("");
+const strategies = ref<AccountSwitchConfig["strategies"]>({});
 
 // 搜索 & 筛选
-const searchQuery = ref('');
+const searchQuery = ref("");
 const activeRole = ref<string | null>(null);
 const searchInput = ref<HTMLInputElement | null>(null);
 
 // Tab 管理
-const activeTab = ref<'users' | 'quicklogin'>('users');
-const tabOrder = ref<('users' | 'quicklogin')[]>(['users', 'quicklogin']);
+const activeTab = ref<"users" | "quicklogin">("users");
+const tabOrder = ref<("users" | "quicklogin")[]>(["users", "quicklogin"]);
 
 // 键盘导航
 const highlightedIndex = ref(-1);
@@ -67,12 +74,16 @@ onMounted(async () => {
 
   try {
     // getConfig + defaults：享受旧 key 迁移与缺失字段补齐（ADR-0003 D5）
-    const cfg = await getConfig<AccountSwitchConfig>('account-switch', ACCOUNT_SWITCH_CONFIG_DEFAULTS);
+    const cfg = await getConfig<AccountSwitchConfig>(
+      "account-switch",
+      ACCOUNT_SWITCH_CONFIG_DEFAULTS,
+    );
 
     // 环境匹配链收口于 account-view(resolveEnvironment)
     const resolved = resolveEnvironment(origin.value, cfg?.domains ?? {});
-    matchedEnvKey.value = resolved?.domain ?? '';
+    matchedEnvKey.value = resolved?.domain ?? "";
     matchedEnv.value = resolved?.env ?? null;
+    strategies.value = cfg?.strategies ?? {};
     // role? 兼容归一化下沉至 account-view(ADR-0004 D6)
     accounts.value = (cfg?.accounts ?? []).map(normalizeAccount);
     // 读取 tab 顺序配置
@@ -82,11 +93,11 @@ onMounted(async () => {
     // 默认选中第一个 tab
     activeTab.value = tabOrder.value[0];
     // 读取快捷登录默认域名
-    quickLoginDefaultDomain.value = cfg?.quickLoginDefaultDomain || '';
-    globalDefaultPassword.value = cfg?.globalDefaultPassword || '';
+    quickLoginDefaultDomain.value = cfg?.quickLoginDefaultDomain || "";
+    globalDefaultPassword.value = cfg?.globalDefaultPassword || "";
   } catch (e) {
     // 静默降级：配置读取失败时不影响面板展示
-    console.warn('[account-switch] Failed to load config:', e);
+    console.warn("[account-switch] Failed to load config:", e);
   }
 
   // 自动聚焦搜索框（仅在搜索框可见时）
@@ -112,13 +123,14 @@ const showLoginErrorToast = (
   err: string,
   errorCode: ErrorCode | undefined,
   ctx: ErrorDetailContext,
-  recovery: { envKey?: string; onRetry: () => void },
+  recovery: { envKey?: string; spec?: LoginSpec; onRetry: () => void },
 ) => {
   showLoginRecoveryToast({
     prefix,
     error: err,
     errorCode,
     envKey: recovery.envKey,
+    spec: recovery.spec,
     onRetry: recovery.onRetry,
     detail: {
       envName: matchedEnv.value?.name,
@@ -133,30 +145,40 @@ const switchAccount = async (account: Account) => {
   // 登录期间拒绝重复触发（点击其他卡片 / 回车键）
   if (switchingAccountId.value) return;
   switchingAccountId.value = account.id;
-  showToast('正在切换至 ' + account.name + '...', 'info');
+  showToast("正在切换至 " + account.name + "...", "info");
   try {
-    const response = await sendBgMessage('SWITCH_ACCOUNT', {
+    const response = await sendBgMessage("SWITCH_ACCOUNT", {
       account,
       domain: origin.value,
     });
     if (response?.success) {
-      showToast('已切换至 ' + account.name, 'success');
+      showToast("已切换至 " + account.name, "success");
       closePanel();
     } else {
-      const err = response?.error || '未知错误';
+      const err = response?.error || "未知错误";
       // 并发互斥拒绝是「忙碌」而非失败，不加「切换失败」前缀
       if (err === LOGIN_BUSY_ERROR) {
-        showToast(err, 'info');
+        showToast(err, "info");
       } else {
-        showLoginErrorToast('切换失败', err, response?.errorCode, {
-          action: 'SWITCH_ACCOUNT',
-          accountName: account.name,
-          username: account.username,
-          recipeSteps: response?.recipeSteps,
-        }, {
-          envKey: matchedEnvKey.value || origin.value,
-          onRetry: () => switchAccount(account),
-        });
+        showLoginErrorToast(
+          "切换失败",
+          err,
+          response?.errorCode,
+          {
+            action: "SWITCH_ACCOUNT",
+            accountName: account.name,
+            username: account.username,
+            recipeSteps: response?.recipeSteps,
+          },
+          {
+            envKey: matchedEnvKey.value || origin.value,
+            spec: matchedEnv.value
+              ? (readSpecFromConfig(matchedEnv.value, strategies.value).spec ??
+                undefined)
+              : undefined,
+            onRetry: () => switchAccount(account),
+          },
+        );
       }
     }
   } finally {
@@ -166,7 +188,7 @@ const switchAccount = async (account: Account) => {
 };
 
 const clearSearch = () => {
-  searchQuery.value = '';
+  searchQuery.value = "";
   activeRole.value = null;
   highlightedIndex.value = -1;
   searchInput.value?.focus();
@@ -187,13 +209,13 @@ const isHighlighted = (localIndex: number): boolean => {
 
 // 键盘导航
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === '/') {
+  if (e.key === "/") {
     e.preventDefault();
     searchInput.value?.focus();
     return;
   }
 
-  if (e.key === 'Escape') {
+  if (e.key === "Escape") {
     if (searchQuery.value || activeRole.value) {
       clearSearch();
     } else {
@@ -202,16 +224,16 @@ const handleKeydown = (e: KeyboardEvent) => {
     return;
   }
 
-  if (e.key === 'ArrowDown') {
+  if (e.key === "ArrowDown") {
     e.preventDefault();
     highlightedIndex.value = Math.min(
       highlightedIndex.value + 1,
       totalItemCount.value - 1,
     );
-  } else if (e.key === 'ArrowUp') {
+  } else if (e.key === "ArrowUp") {
     e.preventDefault();
     highlightedIndex.value = Math.max(highlightedIndex.value - 1, 0);
-  } else if (e.key === 'Enter' && highlightedIndex.value >= 0) {
+  } else if (e.key === "Enter" && highlightedIndex.value >= 0) {
     e.preventDefault();
     const account = getAccountByGlobalIndex(highlightedIndex.value);
     if (account) switchAccount(account);
@@ -227,20 +249,22 @@ const selectRole = (role: string | null) => {
 // 快速登录：粘贴测试信息，自动解析并执行登录+跳转
 // ============================================================
 
-const quickLoginText = ref('');
+const quickLoginText = ref("");
 const quickLoginLoading = ref(false);
-const quickLoginDefaultDomain = ref('');
-const globalDefaultPassword = ref('');
+const quickLoginDefaultDomain = ref("");
+const globalDefaultPassword = ref("");
 const redirectEnabled = ref(false);
 const quickLoginMatchedEnv = ref<DomainConfig | null>(null);
-const quickLoginMatchedEnvKey = ref('');
+const quickLoginMatchedEnvKey = ref("");
 
 /** 从粘贴的快速登录文本中提取域名（仅 URL） */
 function extractOriginFromText(text: string): string | null {
-  const parsed = parseLoginText(text, '');
+  const parsed = parseLoginText(text, "");
   if (!parsed?.url) return null;
   try {
-    const u = new URL(parsed.url.startsWith('http') ? parsed.url : `http://${parsed.url}`);
+    const u = new URL(
+      parsed.url.startsWith("http") ? parsed.url : `http://${parsed.url}`,
+    );
     return u.origin;
   } catch {
     return null;
@@ -250,38 +274,47 @@ function extractOriginFromText(text: string): string | null {
 const handleQuickLogin = async () => {
   // 登录期间拒绝重复触发（Ctrl+Enter 不受按钮 disabled 约束）
   if (quickLoginLoading.value) return;
-  const parsed = parseLoginText(quickLoginText.value, quickLoginDefaultDomain.value || origin.value);
+  const parsed = parseLoginText(
+    quickLoginText.value,
+    quickLoginDefaultDomain.value || origin.value,
+  );
   if (!parsed) {
-    showToast('格式无法解析：请确保包含账号信息', 'error');
+    showToast("格式无法解析：请确保包含账号信息", "error");
     return;
   }
 
   // 纯账号模式：优先使用当前页面匹配的环境（URL + 默认密码）
   const isPureAccount = !parsed.hasUrl;
-  const targetUrl = isPureAccount && matchedEnv.value
-    ? origin.value
-    : parsed.url;
+  const targetUrl =
+    isPureAccount && matchedEnv.value ? origin.value : parsed.url;
 
   // 密码优先级：用户输入 > 当前页面环境默认密码(纯账号) > 文本URL环境默认密码 > 全局默认密码
-  const currentEnvPassword = isPureAccount ? matchedEnv.value?.defaultPassword : undefined;
-  const textEnvPassword = isPureAccount ? undefined : quickLoginMatchedEnv.value?.defaultPassword;
+  const currentEnvPassword = isPureAccount
+    ? matchedEnv.value?.defaultPassword
+    : undefined;
+  const textEnvPassword = isPureAccount
+    ? undefined
+    : quickLoginMatchedEnv.value?.defaultPassword;
   const password = resolvePassword({
     input: parsed.password,
     envDefault: currentEnvPassword ?? textEnvPassword,
     globalDefault: globalDefaultPassword.value,
   });
   if (!password) {
-    showToast('未找到可用密码：请输入完整的账号/密码信息', 'error');
+    showToast("未找到可用密码：请输入完整的账号/密码信息", "error");
     return;
   }
 
-  const debugRedirect = redirectEnabled.value && parsed.hasUrl && quickLoginMatchedEnv.value?.debugRedirect
-    ? quickLoginMatchedEnv.value.debugRedirect
-    : undefined;
+  const debugRedirect =
+    redirectEnabled.value &&
+    parsed.hasUrl &&
+    quickLoginMatchedEnv.value?.debugRedirect
+      ? quickLoginMatchedEnv.value.debugRedirect
+      : undefined;
 
   quickLoginLoading.value = true;
   try {
-    const response = await sendBgMessage('QUICK_LOGIN', {
+    const response = await sendBgMessage("QUICK_LOGIN", {
       url: targetUrl,
       username: parsed.username,
       password,
@@ -289,45 +322,61 @@ const handleQuickLogin = async () => {
       debugRedirect,
     });
     if (response?.success) {
-      showToast('登录成功，正在跳转...', 'success');
+      showToast("登录成功，正在跳转...", "success");
       await new Promise((r) => setTimeout(r, 500));
       closePanel();
     } else {
-      const err = response?.error || '未知错误';
+      const err = response?.error || "未知错误";
       // 并发互斥拒绝是「忙碌」而非失败
       if (err === LOGIN_BUSY_ERROR) {
-        showToast(err, 'info');
+        showToast(err, "info");
       } else {
-        showLoginErrorToast('登录失败', err, response?.errorCode, {
-          action: 'QUICK_LOGIN',
-          accountName: parsed.username,
-          username: parsed.username,
-          strategy:
-            quickLoginMatchedEnv.value?.loginMethod ??
-            matchedEnv.value?.loginMethod,
-          recipeSteps: response?.recipeSteps,
-        }, {
-          envKey: isPureAccount ? matchedEnvKey.value : quickLoginMatchedEnvKey.value,
-          onRetry: handleQuickLogin,
-        });
+        showLoginErrorToast(
+          "登录失败",
+          err,
+          response?.errorCode,
+          {
+            action: "QUICK_LOGIN",
+            accountName: parsed.username,
+            username: parsed.username,
+            strategy:
+              quickLoginMatchedEnv.value?.loginMethod ??
+              matchedEnv.value?.loginMethod,
+            recipeSteps: response?.recipeSteps,
+          },
+          {
+            envKey: isPureAccount
+              ? matchedEnvKey.value
+              : quickLoginMatchedEnvKey.value,
+            onRetry: handleQuickLogin,
+          },
+        );
       }
     }
   } catch {
     // sendMessage 本身失败（background 重启/上下文失效等），原因不可知，归为 UNKNOWN
-    showLoginErrorToast('登录失败', '请求发送失败', ErrorCodes.UNKNOWN, {
-      action: 'QUICK_LOGIN',
-      username: parsed.username,
-    }, {
-      envKey: isPureAccount ? matchedEnvKey.value : quickLoginMatchedEnvKey.value,
-      onRetry: handleQuickLogin,
-    });
+    showLoginErrorToast(
+      "登录失败",
+      "请求发送失败",
+      ErrorCodes.UNKNOWN,
+      {
+        action: "QUICK_LOGIN",
+        username: parsed.username,
+      },
+      {
+        envKey: isPureAccount
+          ? matchedEnvKey.value
+          : quickLoginMatchedEnvKey.value,
+        onRetry: handleQuickLogin,
+      },
+    );
   } finally {
     quickLoginLoading.value = false;
   }
 };
 
 const handleQuickLoginKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     handleQuickLogin();
   }
@@ -338,13 +387,16 @@ watch(quickLoginText, async () => {
   const textOrigin = extractOriginFromText(quickLoginText.value);
   if (!textOrigin || !accounts.value.length) {
     quickLoginMatchedEnv.value = null;
-    quickLoginMatchedEnvKey.value = '';
+    quickLoginMatchedEnvKey.value = "";
     redirectEnabled.value = false;
     return;
   }
   try {
     // 同上:getConfig + defaults(ADR-0003 D5);匹配链收口于 account-view
-    const cfg = await getConfig<AccountSwitchConfig>('account-switch', ACCOUNT_SWITCH_CONFIG_DEFAULTS);
+    const cfg = await getConfig<AccountSwitchConfig>(
+      "account-switch",
+      ACCOUNT_SWITCH_CONFIG_DEFAULTS,
+    );
     const resolved = resolveEnvironment(textOrigin, cfg?.domains ?? {});
     if (resolved) {
       quickLoginMatchedEnvKey.value = resolved.domain;
@@ -353,10 +405,10 @@ watch(quickLoginText, async () => {
       return;
     }
   } catch (e) {
-    console.warn('[account-switch] Failed to match environment:', e);
+    console.warn("[account-switch] Failed to match environment:", e);
   }
   quickLoginMatchedEnv.value = null;
-  quickLoginMatchedEnvKey.value = '';
+  quickLoginMatchedEnvKey.value = "";
   redirectEnabled.value = false;
 });
 
@@ -365,15 +417,22 @@ const quickLoginPreview = computed(() => {
   const text = quickLoginText.value.trim();
   if (!text) return null;
 
-  const parsed = parseLoginText(text, quickLoginDefaultDomain.value || origin.value);
+  const parsed = parseLoginText(
+    text,
+    quickLoginDefaultDomain.value || origin.value,
+  );
   if (!parsed) {
-    return { ok: false, hint: '格式无法解析' };
+    return { ok: false, hint: "格式无法解析" };
   }
 
   // 密码来源分析
   const isPureAccount = !parsed.hasUrl;
-  const currentEnvPassword = isPureAccount ? matchedEnv.value?.defaultPassword : undefined;
-  const textEnvPassword = isPureAccount ? undefined : quickLoginMatchedEnv.value?.defaultPassword;
+  const currentEnvPassword = isPureAccount
+    ? matchedEnv.value?.defaultPassword
+    : undefined;
+  const textEnvPassword = isPureAccount
+    ? undefined
+    : quickLoginMatchedEnv.value?.defaultPassword;
   const password = resolvePassword({
     input: parsed.password,
     envDefault: currentEnvPassword ?? textEnvPassword,
@@ -394,16 +453,16 @@ const quickLoginPreview = computed(() => {
   parts.push(`👤 ${parsed.username}`);
   if (password) {
     if (parsed.password) {
-      parts.push('🔑 已输入密码');
+      parts.push("🔑 已输入密码");
     } else if (currentEnvPassword) {
-      parts.push(`🔑 使用${matchedEnv.value?.name || '当前环境'}默认密码`);
+      parts.push(`🔑 使用${matchedEnv.value?.name || "当前环境"}默认密码`);
     } else if (textEnvPassword) {
       parts.push(`🔑 使用目标环境默认密码`);
     } else {
-      parts.push('🔑 使用全局默认密码');
+      parts.push("🔑 使用全局默认密码");
     }
   } else {
-    parts.push('⚠️ 未找到密码');
+    parts.push("⚠️ 未找到密码");
   }
 
   return { ok: true, parts };

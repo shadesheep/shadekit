@@ -27,6 +27,7 @@ import {
   runDomAction,
   runDomRead,
   toTargetError,
+  waitForDomTarget,
 } from "../strategies/generic-dom";
 import {
   currentUrl,
@@ -69,16 +70,8 @@ import {
   type SpecOpName,
   type SuccessSignal,
 } from "./types";
-import {
-  collectRevealed,
-  redactHeaders,
-  redactTextBody,
-} from "./redact";
-import {
-  runAuthWrite,
-  runClearCookies,
-  runClearStorage,
-} from "./session";
+import { collectRevealed, redactHeaders, redactTextBody } from "./redact";
+import { runAuthWrite, runClearCookies, runClearStorage } from "./session";
 import { runAuthCapture, runAuthRestore, isCapturedSnapshot } from "./snapshot";
 import {
   runHttpExecute,
@@ -262,7 +255,8 @@ export function buildSpecInputs(
         : (variable.default ?? "");
   }
   if (spec.aux?.nonce === "auto") inputs.nonce = aux.nonce;
-  if (spec.aux?.timestamp === "auto") inputs.timestamp = stringifyAux(aux.timestamp);
+  if (spec.aux?.timestamp === "auto")
+    inputs.timestamp = stringifyAux(aux.timestamp);
   return inputs;
 }
 
@@ -326,7 +320,10 @@ function trialDenyReason(
   // 声明了 default 的 extract 在试登录里安全：不触达页面，直接回退字面量。
   // 可用它产出 pageLanguage（default:"zh"），后续 map 引用
   // $pageLanguage；不豁免会让「读改」链断开（第 2 步 map 报「未解析的绑定引用」）。
-  if (op.op === "extract" && typeof (op as SpecOp & { default?: unknown }).default === "string") {
+  if (
+    op.op === "extract" &&
+    typeof (op as SpecOp & { default?: unknown }).default === "string"
+  ) {
     return null;
   }
   return "试登录不执行该算子";
@@ -390,9 +387,7 @@ function stripPageSignals(signals: SuccessSignal[]): SuccessSignal[] {
   const keep = (signal: SuccessSignal) => {
     if ("page" in signal) return;
     if ("anyOf" in signal) {
-      const children = signal.anyOf.filter(
-        (child) => !("page" in child),
-      );
+      const children = signal.anyOf.filter((child) => !("page" in child));
       if (children.length > 0) out.push({ anyOf: children });
       return;
     }
@@ -684,7 +679,10 @@ async function runPageScript(
     }
   }
   if (firstError !== undefined) {
-    throw new LoginError(ErrorCodes.LOGIN_REJECTED, `脚本执行失败: ${firstError}`);
+    throw new LoginError(
+      ErrorCodes.LOGIN_REJECTED,
+      `脚本执行失败: ${firstError}`,
+    );
   }
   return null;
 }
@@ -754,7 +752,8 @@ async function extractOpValue(
   inputs: Record<string, unknown>,
   bindings: Record<string, unknown>,
 ): Promise<unknown> {
-  const key = op.key === undefined ? "" : resolveTemplate(op.key, { inputs, bindings });
+  const key =
+    op.key === undefined ? "" : resolveTemplate(op.key, { inputs, bindings });
   const parse = op.parse ?? "raw";
   let raw: unknown;
   switch (op.source) {
@@ -809,7 +808,9 @@ function describeOp(op: SpecOp): string | undefined {
       return op.url;
     case "fill":
     case "click":
-      return isAutoLoginTarget(op.target) ? "自动（登录表单）" : describeTarget(op.target);
+      return isAutoLoginTarget(op.target)
+        ? "自动（登录表单）"
+        : describeTarget(op.target);
     case "waitFor":
       return describeCondition(op.when);
     case "extract":
@@ -870,12 +871,13 @@ interface RunState {
 }
 
 /** 试登录模式下：算子是否被拒（被拒返回原因；允许返回 null）。 */
-function trialRejectsOp(
-  op: SpecOp,
-  options: RunSpecOptions,
-): string | null {
+function trialRejectsOp(op: SpecOp, options: RunSpecOptions): string | null {
   if (!options.trial) return null;
-  return trialDenyReason(op, options.trial.writeSession === true, options.deniedOps);
+  return trialDenyReason(
+    op,
+    options.trial.writeSession === true,
+    options.deniedOps,
+  );
 }
 
 function wrapTemplateError(e: unknown): LoginError {
@@ -889,7 +891,10 @@ function wrapTemplateError(e: unknown): LoginError {
   }
   return e instanceof LoginError
     ? e
-    : new LoginError(errorCodeOf(e), e instanceof Error ? e.message : String(e));
+    : new LoginError(
+        errorCodeOf(e),
+        e instanceof Error ? e.message : String(e),
+      );
 }
 
 /** 模板求值：未解析引用 → TEMPLATE_UNRESOLVED（D4） */
@@ -905,7 +910,10 @@ function resolveRef(state: RunState, template: string): string {
 }
 
 /** 解析并登记一条 apply.set 改写（等到下一个 http.execute 落位）。 */
-function collectApplySet(state: RunState, op: Extract<SpecOp, { op: "apply.set" }>): void {
+function collectApplySet(
+  state: RunState,
+  op: Extract<SpecOp, { op: "apply.set" }>,
+): void {
   const value = resolveRef(state, op.value);
   state.applySet.push({ target: op.target, key: op.key, value });
 }
@@ -924,10 +932,7 @@ async function withStepTimeout<T>(
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(
-        new LoginError(
-          ErrorCodes.STEP_TIMEOUT,
-          `${label} 超时（${stepMs}ms）`,
-        ),
+        new LoginError(ErrorCodes.STEP_TIMEOUT, `${label} 超时（${stepMs}ms）`),
       );
     }, stepMs);
   });
@@ -948,13 +953,25 @@ async function refreshSettleBaseline(state: RunState): Promise<void> {
 function automaticResolutionError(resolution: AutoLoginResolution): LoginError {
   switch (resolution.status) {
     case "noPassword":
-      return new LoginError(ErrorCodes.LOGIN_FORM_NOT_FOUND, "未找到可用的登录表单");
+      return new LoginError(
+        ErrorCodes.LOGIN_FORM_NOT_FOUND,
+        "未找到可用的登录表单",
+      );
     case "incomplete":
-      return new LoginError(ErrorCodes.LOGIN_FORM_INCOMPLETE, `未找到完整登录表单：${resolution.reason}`);
+      return new LoginError(
+        ErrorCodes.LOGIN_FORM_INCOMPLETE,
+        `未找到完整登录表单：${resolution.reason}`,
+      );
     case "ambiguous":
-      return new LoginError(ErrorCodes.LOGIN_FORM_AMBIGUOUS, `检测到多个候选，无法确定：${resolution.reason}`);
+      return new LoginError(
+        ErrorCodes.LOGIN_FORM_AMBIGUOUS,
+        `检测到多个候选，无法确定：${resolution.reason}`,
+      );
     case "error":
-      return new LoginError(ErrorCodes.TAB_RESTRICTED, `无法扫描登录表单：${resolution.message}`);
+      return new LoginError(
+        ErrorCodes.TAB_RESTRICTED,
+        `无法扫描登录表单：${resolution.message}`,
+      );
     default:
       throw new Error("resolved 不是定位失败");
   }
@@ -974,7 +991,8 @@ function resolutionSummary(resolution: AutoLoginResolution): string {
     return `自动定位成功：${resolution.status}，frame ${resolution.frameId}${resolution.frameUrl ? `（${frameUrlForLog(resolution.frameUrl)}）` : ""}`;
   }
   if (resolution.status === "noPassword") return "自动定位：noPassword";
-  if (resolution.status === "error") return `自动定位失败：${resolution.status}`;
+  if (resolution.status === "error")
+    return `自动定位失败：${resolution.status}`;
   return `自动定位失败：${resolution.status}（${resolution.reason}）`;
 }
 
@@ -986,7 +1004,10 @@ async function resolveAutomaticOp(
   recordPreparation: (message: string) => Promise<void>,
 ): Promise<SpecOp> {
   if (!state.autoShape) {
-    throw new LoginError(ErrorCodes.CONFIG_INVALID, "自动定位只适用于连续的用户名、密码、登录按钮");
+    throw new LoginError(
+      ErrorCodes.CONFIG_INVALID,
+      "自动定位只适用于连续的用户名、密码、登录按钮",
+    );
   }
   if (!state.autoResolution) {
     let resolution = resolveAutoLoginScan(await scanLoginForm(state.ctx.tabId));
@@ -998,14 +1019,16 @@ async function resolveAutomaticOp(
       resolution = resolveAutoLoginScan(await scanLoginForm(state.ctx.tabId));
       await recordPreparation(resolutionSummary(resolution));
     }
-    if (resolution.status !== "resolved") throw automaticResolutionError(resolution);
+    if (resolution.status !== "resolved")
+      throw automaticResolutionError(resolution);
     state.autoResolution = resolution;
   }
-  const role = index === state.autoShape.usernameIndex
-    ? "username"
-    : index === state.autoShape.passwordIndex
-      ? "password"
-      : "submit";
+  const role =
+    index === state.autoShape.usernameIndex
+      ? "username"
+      : index === state.autoShape.passwordIndex
+        ? "password"
+        : "submit";
   const resolved = state.autoResolution;
   const { frameId: _frameId, frameUrl: _frameUrl, ...withoutScope } = op;
   return {
@@ -1051,11 +1074,7 @@ async function executeOp(
 
     // auth.capture / auth.restore（跨 origin，08 实现）
     case "auth.capture": {
-      state.bindings[op.as] = await runAuthCapture(
-        ctx.tabId,
-        ctx.origin,
-        op,
-      );
+      state.bindings[op.as] = await runAuthCapture(ctx.tabId, ctx.origin, op);
       return "done";
     }
 
@@ -1090,7 +1109,18 @@ async function executeOp(
       }
       state.lastGotoUrl = url;
       if (op.waitForLoad !== false) {
-        await waitForTabLoaded(ctx.tabId, op.timeoutMs ?? state.limits.settleMs);
+        await waitForTabLoaded(
+          ctx.tabId,
+          op.timeoutMs ?? state.limits.settleMs,
+        );
+      }
+      if (op.waitForTarget) {
+        const error = await waitForDomTarget(
+          ctx.tabId,
+          op.waitForTarget,
+          op.timeoutMs ?? state.limits.settleMs,
+        );
+        if (error) throw error;
       }
       return "done";
     }
@@ -1127,11 +1157,7 @@ async function executeOp(
       await refreshSettleBaseline(state);
       const outcome = await withStepTimeout(
         state,
-        runDomAction(
-          ctx.tabId,
-          { action: "click", target: op.target },
-          op,
-        ),
+        runDomAction(ctx.tabId, { action: "click", target: op.target }, op),
         `点击 ${describeTarget(op.target)}`,
       );
       const error = toTargetError(
@@ -1203,12 +1229,7 @@ async function executeOp(
       await refreshSettleBaseline(state);
       const value = await withStepTimeout(
         state,
-        runPageScript(
-          ctx.tabId,
-          op.code,
-          state.bindings,
-          op.world ?? "MAIN",
-        ),
+        runPageScript(ctx.tabId, op.code, state.bindings, op.world ?? "MAIN"),
         "执行脚本",
       );
       state.bindings[op.as] = value;
@@ -1233,10 +1254,7 @@ async function executeOp(
       // 记录脱敏的日志素材：headers / body / response.body 逐字段脱敏，
       // `log.reveal` 白名单命中值单独放入 `revealed`（黑名单优先）。
       const logRequest = result.forLog.request;
-      const revealed = collectRevealed(
-        state.spec.log?.reveal,
-        state.bindings,
-      );
+      const revealed = collectRevealed(state.spec.log?.reveal, state.bindings);
       state.logView = {
         request: {
           url: logRequest.url,
@@ -1316,7 +1334,10 @@ export async function runSpec(
   options: RunSpecOptions = {},
 ): Promise<RunSpecResult> {
   const spec = projectLegacyDefaultSpec(inputSpec);
-  const limits: Required<SpecLimits> = { ...DEFAULT_LIMITS, ...(spec.limits ?? {}) };
+  const limits: Required<SpecLimits> = {
+    ...DEFAULT_LIMITS,
+    ...(spec.limits ?? {}),
+  };
   const aux = options.aux ?? generateAuxInputs();
   const state: RunState = {
     spec,
@@ -1333,12 +1354,16 @@ export async function runSpec(
   };
   const trace: SpecOpTrace[] = [];
 
-  const invalidAutoIndex = spec.ops.findIndex((op) =>
-    (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target),
+  const invalidAutoIndex = spec.ops.findIndex(
+    (op) =>
+      (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target),
   );
   if (invalidAutoIndex >= 0 && !state.autoShape) {
     const op = spec.ops[invalidAutoIndex];
-    const error = new LoginError(ErrorCodes.CONFIG_INVALID, "自动定位只适用于连续的用户名、密码、登录按钮");
+    const error = new LoginError(
+      ErrorCodes.CONFIG_INVALID,
+      "自动定位只适用于连续的用户名、密码、登录按钮",
+    );
     const entry: SpecOpTrace = {
       index: invalidAutoIndex,
       op: op.op,
@@ -1350,22 +1375,35 @@ export async function runSpec(
       resolution: "auto",
     };
     trace.push(entry);
-    await options.onOp?.({ phase: "start", index: invalidAutoIndex, op: op.op });
-    await options.onOp?.({ phase: "end", index: invalidAutoIndex, op: op.op, trace: entry });
+    await options.onOp?.({
+      phase: "start",
+      index: invalidAutoIndex,
+      op: op.op,
+    });
+    await options.onOp?.({
+      phase: "end",
+      index: invalidAutoIndex,
+      op: op.op,
+      trace: entry,
+    });
     return {
       success: false,
       bindings: {},
       trace,
       error: `第 ${invalidAutoIndex + 1} 步（${SPEC_OP_LABELS[op.op]}）：${error.message}`,
       errorCode: error.code,
-      ...(state.trial ? { trialSignals: evaluateTrialSignals(spec, {}).signals } : {}),
+      ...(state.trial
+        ? { trialSignals: evaluateTrialSignals(spec, {}).signals }
+        : {}),
     };
   }
 
   // 起步基准：非试登录时先采一次兜底基准（快捷登录可从任意页选中起步）。
   // 试登录不假设目标 tab，也不碰当前标签页——跳过口令框基准采样。
   if (!state.trial) {
-    state.baseline.passwordFieldPresent = await snapshotPasswordField(ctx.tabId);
+    state.baseline.passwordFieldPresent = await snapshotPasswordField(
+      ctx.tabId,
+    );
     state.baseline.initialUrl = await currentUrl(ctx.tabId);
   }
 
@@ -1398,7 +1436,12 @@ export async function runSpec(
       resolution: "auto",
     };
     trace.push(entry);
-    await options.onOp?.({ phase: "end", index, op: "auto.prepare", trace: entry });
+    await options.onOp?.({
+      phase: "end",
+      index,
+      op: "auto.prepare",
+      trace: entry,
+    });
   };
 
   for (let index = 0; index < spec.ops.length; index++) {
@@ -1409,12 +1452,25 @@ export async function runSpec(
     await options.onOp?.({ phase: "start", index, op: op.op });
     try {
       const deny = trialRejectsOp(op, options);
-      if (deny === null && (op.op === "fill" || op.op === "click") && isAutoLoginTarget(op.target)) {
-        effectiveOp = await resolveAutomaticOp(state, op, index, recordPreparation);
+      if (
+        deny === null &&
+        (op.op === "fill" || op.op === "click") &&
+        isAutoLoginTarget(op.target)
+      ) {
+        effectiveOp = await resolveAutomaticOp(
+          state,
+          op,
+          index,
+          recordPreparation,
+        );
         resolution = "auto";
       } else if (
         state.formShape &&
-        [state.formShape.usernameIndex, state.formShape.passwordIndex, state.formShape.submitIndex].includes(index) &&
+        [
+          state.formShape.usernameIndex,
+          state.formShape.passwordIndex,
+          state.formShape.submitIndex,
+        ].includes(index) &&
         loginFormTargetMode(state.spec) === "locked"
       ) {
         resolution = "locked";
@@ -1424,7 +1480,10 @@ export async function runSpec(
       await record(index, op, status === "done" ? "success" : "skipped", {
         duration: Date.now() - startedAt,
         ...(actualTarget !== undefined
-          ? { target: resolution === "auto" ? `auto → ${actualTarget}` : actualTarget }
+          ? {
+              target:
+                resolution === "auto" ? `auto → ${actualTarget}` : actualTarget,
+            }
           : {}),
         ...(resolution ? { resolution } : {}),
       });
@@ -1434,7 +1493,10 @@ export async function runSpec(
       await record(index, op, "error", {
         duration: Date.now() - startedAt,
         ...(actualTarget !== undefined
-          ? { target: resolution === "auto" ? `auto → ${actualTarget}` : actualTarget }
+          ? {
+              target:
+                resolution === "auto" ? `auto → ${actualTarget}` : actualTarget,
+            }
           : {}),
         ...(resolution ? { resolution } : {}),
         errorCode: error.code,

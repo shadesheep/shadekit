@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 ROOT = Path(__file__).resolve().parents[2]
 RAW = Path(os.environ.get('SHADEKIT_DEMO_RAW', ROOT / 'docs/images/raw'))
 OUTPUT = ROOT / 'docs/images'
-RECIPE_NAMES = ('recipe-01-environment', 'recipe-02-picker', 'recipe-03-trial')
+RECIPE_NAMES = ('recipe-01-environment', 'recipe-02-picker', 'recipe-03-save')
 MEDIA = ('hero.webp', 'login-recipe.webp', 'dev-tools.webp', 'account-switch.gif')
 CANVAS = '#f5f6f8'
 INK = '#18213a'
@@ -89,7 +89,7 @@ def crop_recipe_source(name, image):
     """Keep the real form/picker and omit the demo page's password hint."""
     if name == 'recipe-02-picker':
         return image.crop((876, 164, 1356, 565))
-    bottom = {'recipe-01-environment': 608, 'recipe-03-trial': 660}[name]
+    bottom = {'recipe-01-environment': 608, 'recipe-03-save': 608}[name]
     return image.crop((0, 0, 560, bottom))
 
 
@@ -108,8 +108,8 @@ def compose_recipe():
     sizes = ensure_login_recipe_layout(sources)
     canvas = Image.new('RGBA', (1440, 972), CANVAS)
     draw = ImageDraw.Draw(canvas)
-    heading(draw, 'GENERIC LOGIN RECIPE', '通用登录配方，三步接入。', '识别登录表单，拾取页面元素，再验证配置；目标系统无需改代码')
-    labels = [('01', '添加环境', '通用登录 · 配置登录页'), ('02', '识别并拾取', '自动识别 · 页面可视化选择'), ('03', '试登录验证', '验证请求 · 默认不写会话')]
+    heading(draw, 'GENERIC LOGIN RECIPE', '通用登录配方，三步接入。', '识别登录表单，拾取页面元素，再保存配置；目标系统无需改代码')
+    labels = [('01', '添加环境', '通用登录 · 配置登录页'), ('02', '识别并拾取', '自动识别 · 页面可视化选择'), ('03', '保存配置', '声明式配方 · 本地保存')]
     for index, (number, title, caption) in enumerate(labels):
         x = 36 + index * 468
         y = 166

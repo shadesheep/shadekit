@@ -1170,7 +1170,7 @@ async function runTrialLogin(): Promise<void> {
         </DtButton>
       </div>
 
-      <!-- 试登录：默认零副作用，显式勾选后才写会话；任意声明都可试跑 -->
+      <!-- 试登录暂时隐藏，保留实现，恢复时放回完整区域
       <div class="form-row trial-login-row">
         <div class="trial-inputs">
           <label class="trial-label">试登录</label>
@@ -1206,7 +1206,7 @@ async function runTrialLogin(): Promise<void> {
         </p>
         <div v-if="trialResult" class="trial-result" :class="{ 'trial-ok': trialResult.ok, 'trial-fail': !trialResult.ok }">
           <div class="trial-result-head">
-            <span :class="trialResult.ok ? 'i-lucide-check-circle w-4 h-4' : 'i-lucide-alert-circle w-4 h-4'" />
+            <span :class="trialResult.ok ? 'i-lucide-check-circle w-3.5 h-3.5' : 'i-lucide-alert-circle w-3.5 h-3.5'" />
             <span>
               {{ trialResult.ok ? (trialResult.sessionWritten ? '已登录（与会话）' : '请求成功，可换到凭据') : trialError(trialResult.errorCode, trialResult.error) }}
             </span>
@@ -1224,6 +1224,7 @@ async function runTrialLogin(): Promise<void> {
           </p>
         </div>
       </div>
+      -->
 
       <!-- 高级配置（可折叠）：登录声明 / 变量覆盖 / Cookie 清理范围，各态默认收拢 -->
       <div class="advanced-settings-section">

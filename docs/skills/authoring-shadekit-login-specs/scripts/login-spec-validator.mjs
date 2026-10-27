@@ -371,6 +371,9 @@ function validateOpShape(raw, index, issues, allowLegacyEmpty = false) {
       break;
     case "goto":
       if (!nonEmptyString(raw.url)) missing("url");
+      if (isAutoLoginTarget(raw.waitForTarget)) {
+        issues.push(issue(`第 ${index + 1} 步（goto）waitForTarget 需要具体定位`, { opIndex: index }));
+      } else if (raw.waitForTarget !== void 0) validateDomTarget(raw.waitForTarget, index, issues, allowLegacyEmpty);
       break;
     case "http.execute": {
       if (!nonEmptyString(raw.url)) missing("url");

@@ -11,6 +11,8 @@
 import { authLog } from "../../shared/logger";
 import { runLoginSpec } from "./spec/login-run";
 import type { FormScanFrame } from "./strategies/login-form-scan";
+import type { AuthStorageSelection } from "./strategies/auth-storage";
+import { scanAuthStorage } from "./strategies/auth-storage";
 import {
   injectAndNavigate,
   refreshAfterSwitch,
@@ -53,7 +55,9 @@ async function getTabId(
  * null（由调用方给明确提示，引导用户先手动打开目标页面或改配具体环境）。
  * 不做真实 URL 校验（交给 new URL 或在 new-tab prelude 里报错）。
  */
-export async function resolveOpenableUrl(domainKey: string): Promise<string | null> {
+export async function resolveOpenableUrl(
+  domainKey: string,
+): Promise<string | null> {
   if (!domainKey) return null;
   // 环境 key 通常是「协议://host[:port][/path]」形态；含 * 是通配符，无法直接打开
   if (domainKey.includes("*")) return null;
@@ -67,7 +71,10 @@ export async function resolveOpenableUrl(domainKey: string): Promise<string | nu
  * 该 origin 的文档没有 token——取绑定里的 `token`，连同整份绑定值注入目标
  * tab 的 localStorage。键名保持旧配置兼容，不应用于新策略。
  */
-function createLegacyTokenInjector(): (tabId: number, tokenData: Record<string, unknown> | null) => Promise<void> {
+function createLegacyTokenInjector(): (
+  tabId: number,
+  tokenData: Record<string, unknown> | null,
+) => Promise<void> {
   return async (tabId, tokenData) => {
     if (!tokenData) return;
     const token = typeof tokenData.token === "string" ? tokenData.token : "";
@@ -125,7 +132,11 @@ export async function handleSwitchAccount(
     execTarget: { kind: "existing", tabId: tabId ?? 0 },
   });
   if (!outcome.ok) {
-    return { success: false, error: outcome.error, errorCode: outcome.errorCode };
+    return {
+      success: false,
+      error: outcome.error,
+      errorCode: outcome.errorCode,
+    };
   }
   const { prepared } = outcome;
   let success = false;
@@ -252,7 +263,12 @@ export async function handleTestRecipe(
 }> {
   const { recipe, invalid } = normalizeRecipe(recipeInput);
   if (invalid) {
-    return { success: false, error: invalid, errorCode: ErrorCodes.CONFIG_INVALID, steps: [] };
+    return {
+      success: false,
+      error: invalid,
+      errorCode: ErrorCodes.CONFIG_INVALID,
+      steps: [],
+    };
   }
 
   const targetTabId = tabId ?? (await getTabId(sender));
@@ -301,6 +317,7 @@ export async function handleScanLoginForm(
   error?: string;
   errorCode?: ErrorCode;
   frames: FormScanFrame[];
+  authStorage?: AuthStorageSelection;
 }> {
   const targetTabId = tabId ?? (await getTabId(sender));
   if (targetTabId === undefined || targetTabId <= 0) {
@@ -315,8 +332,15 @@ export async function handleScanLoginForm(
   const { scanLoginForm } = await import("./strategies/login-form-scan");
   const result = await scanLoginForm(targetTabId);
   switch (result.status) {
-    case "found":
-      return { success: true, frames: result.frames };
+    case "found": {
+      let authStorage: AuthStorageSelection = { local: [], session: [] };
+      try {
+        authStorage = await scanAuthStorage(targetTabId);
+      } catch {
+        // 存储权限或注入失败不影响已经成功的表单识别。
+      }
+      return { success: true, frames: result.frames, authStorage };
+    }
     case "notFound":
       return { success: true, frames: [] };
     case "error":
@@ -351,14 +375,19 @@ export async function handleOpenAccountEnvironment(
     if (existing?.id !== undefined) {
       await chrome.tabs.update(existing.id, { active: true, url });
       if (existing.windowId !== undefined) {
-        await chrome.windows.update(existing.windowId, { focused: true }).catch(() => undefined);
+        await chrome.windows
+          .update(existing.windowId, { focused: true })
+          .catch(() => undefined);
       }
     } else {
       await chrome.tabs.create({ url });
     }
     return { success: true };
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -386,7 +415,11 @@ export async function handleQuickLogin(
     execTarget: { kind: "existing", tabId: tabId ?? 0 },
   });
   if (!outcome.ok) {
-    return { success: false, error: outcome.error, errorCode: outcome.errorCode };
+    return {
+      success: false,
+      error: outcome.error,
+      errorCode: outcome.errorCode,
+    };
   }
   const { prepared } = outcome;
   const { session } = prepared;
@@ -419,8 +452,7 @@ export async function handleQuickLogin(
       // 恢复目标遵循与导航相同的 origin 推导：redirect origin 优先。
       capturedAuth: loginResult.capturedAuth,
       capturedAuthOrigin: prepared.redirect?.origin ?? prepared.origin,
-      onBeforeNavigate: () =>
-        session.logFinal(loginResult, session.buffer),
+      onBeforeNavigate: () => session.logFinal(loginResult, session.buffer),
     });
 
     if (!navResult.success) {
@@ -475,7 +507,11 @@ export async function handleQuickLoginInNewTab(
     execTarget: { kind: "new", url: targetUrl },
   });
   if (!outcome.ok) {
-    return { success: false, error: outcome.error, errorCode: outcome.errorCode };
+    return {
+      success: false,
+      error: outcome.error,
+      errorCode: outcome.errorCode,
+    };
   }
   const { prepared } = outcome;
   const { session } = prepared;

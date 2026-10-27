@@ -55,7 +55,10 @@ async function scanCandidate(tabId: number): Promise<ScannedCandidate> {
   return { tabId, scan, resolution: resolveAutoLoginScan(scan) };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), timeoutMs);
@@ -80,19 +83,34 @@ export async function prepareLoginFormLock(input: {
     const tabs = await chrome.tabs.query({ currentWindow: true });
     const candidates = rankPickerTabs(tabs, envUrl.origin, own?.id)
       .filter((tab) => {
-        if (tab.id === undefined || (tab.status !== undefined && tab.status !== "complete")) return false;
+        if (
+          tab.id === undefined ||
+          (tab.status !== undefined && tab.status !== "complete")
+        )
+          return false;
         const url = tab.url ? environmentUrl(tab.url) : null;
         return url?.origin === envUrl.origin;
       })
       .sort((left, right) => {
-        const leftPath = left.url ? environmentUrl(left.url)?.pathname : undefined;
-        const rightPath = right.url ? environmentUrl(right.url)?.pathname : undefined;
-        return Number(rightPath === envUrl.pathname) - Number(leftPath === envUrl.pathname);
+        const leftPath = left.url
+          ? environmentUrl(left.url)?.pathname
+          : undefined;
+        const rightPath = right.url
+          ? environmentUrl(right.url)?.pathname
+          : undefined;
+        return (
+          Number(rightPath === envUrl.pathname) -
+          Number(leftPath === envUrl.pathname)
+        );
       });
     if (candidates.length === 0) return null;
 
-    const scanned = await Promise.all(candidates.map((tab) => scanCandidate(tab.id!)));
-    const resolved = scanned.filter((item) => item.resolution.status === "resolved");
+    const scanned = await Promise.all(
+      candidates.map((tab) => scanCandidate(tab.id!)),
+    );
+    const resolved = scanned.filter(
+      (item) => item.resolution.status === "resolved",
+    );
     if (resolved.length !== 1) return null;
     return {
       operationId: crypto.randomUUID(),
@@ -103,7 +121,13 @@ export async function prepareLoginFormLock(input: {
   })();
   return withTimeout(
     preparing,
-    Math.max(1, Math.min(input.timeoutMs ?? LOGIN_FORM_PREPARE_TIMEOUT_MS, LOGIN_FORM_PREPARE_TIMEOUT_MS)),
+    Math.max(
+      1,
+      Math.min(
+        input.timeoutMs ?? LOGIN_FORM_PREPARE_TIMEOUT_MS,
+        LOGIN_FORM_PREPARE_TIMEOUT_MS,
+      ),
+    ),
   );
 }
 
@@ -115,11 +139,16 @@ function specForEnvironment(
   return read.spec && !read.invalid ? read.spec : null;
 }
 
-function expectedAutoSpec(config: AccountSwitchConfig | undefined, input: PreparedLoginFormLock): LoginSpec | null {
+function expectedAutoSpec(
+  config: AccountSwitchConfig | undefined,
+  input: PreparedLoginFormLock,
+): LoginSpec | null {
   const env = config?.domains[input.envKey];
   if (!config || !env) return null;
   const current = specForEnvironment(config, env);
-  return current && loginSpecEquals(current, input.expectedSpec) && autoLoginSpecShape(current)
+  return current &&
+    loginSpecEquals(current, input.expectedSpec) &&
+    autoLoginSpecShape(current)
     ? current
     : null;
 }
@@ -134,10 +163,12 @@ export async function lockPreparedLoginForm(
   }
 
   const envUrl = environmentUrl(input.envKey);
+  let loginUrl: string | undefined;
   if (!envUrl) return { status: "skipped", reason: "环境 URL 无效" };
   try {
     const tab = await chrome.tabs.get(input.tabId);
     const tabUrl = tab.url ? environmentUrl(tab.url) : null;
+    loginUrl = tab.url;
     if (!tabUrl || tabUrl.origin !== envUrl.origin) {
       return { status: "skipped", reason: "候选页面已变化" };
     }
@@ -146,24 +177,33 @@ export async function lockPreparedLoginForm(
   }
 
   const candidate = await scanCandidate(input.tabId);
-  if (candidate.resolution.status !== "resolved" || candidate.scan.status !== "found") {
+  if (
+    candidate.resolution.status !== "resolved" ||
+    candidate.scan.status !== "found"
+  ) {
     return { status: "skipped", reason: "候选表单已不再唯一完整" };
   }
   const frame = candidate.scan.frames[0];
   let skipReason = "环境已删除或声明已变化";
-  const transaction = await updateConfigTransaction<AccountSwitchConfig>(TOOL_ID, (latest) => {
-    const currentSpec = expectedAutoSpec(latest, input);
-    if (!latest || !currentSpec) return null;
-    const lockedSpec = applyLoginFormFrame(currentSpec, frame);
-    if (!lockedSpec) return null;
-    const currentEnv = latest.domains[input.envKey];
-    const nextEnv: DomainConfig = {
-      ...currentEnv,
-      strategyConfig: { ...currentEnv.strategyConfig, spec: lockedSpec },
-    };
-    skipReason = "";
-    return { domains: { ...latest.domains, [input.envKey]: nextEnv } };
-  });
+  const transaction = await updateConfigTransaction<AccountSwitchConfig>(
+    TOOL_ID,
+    (latest) => {
+      const currentSpec = expectedAutoSpec(latest, input);
+      if (!latest || !currentSpec) return null;
+      const lockedSpec = applyLoginFormFrame(currentSpec, frame, {
+        pageUrl: loginUrl,
+        origin: envUrl.origin,
+      });
+      if (!lockedSpec) return null;
+      const currentEnv = latest.domains[input.envKey];
+      const nextEnv: DomainConfig = {
+        ...currentEnv,
+        strategyConfig: { ...currentEnv.strategyConfig, spec: lockedSpec },
+      };
+      skipReason = "";
+      return { domains: { ...latest.domains, [input.envKey]: nextEnv } };
+    },
+  );
   if (!transaction.ok) return { status: "failed", reason: "配置写入失败" };
   if (!transaction.changed) return { status: "skipped", reason: skipReason };
   return { status: "locked" };
@@ -181,7 +221,7 @@ export async function finalizeNewEnvironmentSave(input: {
     try {
       const result = await sendBgMessage("LOCK_LOGIN_FORM", input.candidate);
       lockStatus = result.status;
-    } catch (error: unknown) {
+    } catch {
       lockStatus = "failed";
     }
   }

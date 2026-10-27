@@ -11,12 +11,33 @@
         "ops": [
           { "op": "clear.cookies", "range": "all" },
           { "op": "goto", "url": "{origin}/login", "waitForLoad": true },
-          { "op": "fill", "target": { "css": "#username" }, "value": "{username}", "clearFirst": true },
-          { "op": "fill", "target": { "css": "#password" }, "value": "{password}", "clearFirst": true },
-          { "op": "click", "target": { "css": "#submit-btn" }, "onNotFound": "fail" },
+          {
+            "op": "fill",
+            "target": { "css": "#username" },
+            "value": "{username}",
+            "clearFirst": true
+          },
+          {
+            "op": "fill",
+            "target": { "css": "#password" },
+            "value": "{password}",
+            "clearFirst": true
+          },
+          {
+            "op": "click",
+            "target": { "css": "#submit-btn" },
+            "onNotFound": "fail"
+          },
           { "op": "auth.write" }
         ],
-        "success": [{ "page": { "type": "any", "of": [{ "type": "formGone" }, { "type": "urlChanged" }] } }],
+        "success": [
+          {
+            "page": {
+              "type": "any",
+              "of": [{ "type": "formGone" }, { "type": "urlChanged" }]
+            }
+          }
+        ],
         "auth": { "mode": "page" },
         "limits": { "requestMs": 15000, "stepMs": 5000, "settleMs": 10000 }
       }

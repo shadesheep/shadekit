@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch } from "vue";
 import type {
   LoginFormTarget,
   LoginSpec,
   SpecOp,
   SpecOpName,
   Target,
-} from '../spec';
+} from "../spec";
 import {
   bucketSpecErrors,
   changeSpecOp,
@@ -18,6 +18,7 @@ import {
   moveSpecOp,
   removeSpecOp,
   reorderOpsAroundForm,
+  setSpecLoginUrl,
   simpleSpecShape,
   specAuxToEdit,
   specInputHints,
@@ -25,28 +26,35 @@ import {
   specsVariables,
   specVarsToEdit,
   SPEC_OP_OPTIONS,
+  toSpecLoginUrl,
   updateSpecOp,
   type SpecAuxEdit,
   type SpecVarEdit,
-} from '../spec';
-import { applyLoginFormFrame, isAutoLoginTarget, projectLegacyDefaultSpec } from '../spec/auto-login';
-import { validateLoginSpec } from '../spec/validate';
-import { sendBgMessage } from '../../../shared/messages';
-import { SCAN_ERROR_TEXT, type FormScanFrame } from './login-form-scan';
-import { rankPickerTabs } from './target-picker';
-import DtButton from '../../../shared/components/DtButton.vue';
-import TargetField from './TargetField.vue';
-import type { TargetCandidate } from './target-picker';
+} from "../spec";
+import {
+  applyLoginFormFrame,
+  isAutoLoginTarget,
+  projectLegacyDefaultSpec,
+} from "../spec/auto-login";
+import { validateLoginSpec } from "../spec/validate";
+import { sendBgMessage } from "../../../shared/messages";
+import { SCAN_ERROR_TEXT, type FormScanFrame } from "./login-form-scan";
+import { rankPickerTabs } from "./target-picker";
+import DtButton from "../../../shared/components/DtButton.vue";
+import TargetField from "./TargetField.vue";
+import type { TargetCandidate } from "./target-picker";
+import AuthStorageSelector from "./AuthStorageSelector.vue";
+import type { AuthStorageSelection } from "../strategies/auth-storage";
 
 /** waitFor.when.type 的可选值（界面里的切换项） */
 type SettleKindValue =
-  | 'formGone'
-  | 'urlChanged'
-  | 'url'
-  | 'selector'
-  | 'cookie'
-  | 'storage'
-  | 'fixed';
+  | "formGone"
+  | "urlChanged"
+  | "url"
+  | "selector"
+  | "cookie"
+  | "storage"
+  | "fixed";
 
 /**
  * 登录声明编辑器— 三层视图：简易 / 高级 / 原始 JSON。
@@ -80,12 +88,12 @@ const ops = ref<SpecOp[]>(cloneSpecOps(initialSpec.ops));
 const vars = ref<SpecVarEdit[]>(specVarsToEdit(initialSpec));
 const aux = ref<SpecAuxEdit>(specAuxToEdit(initialSpec));
 const showVars = ref(false);
-const jsonText = ref('');
-const jsonError = ref('');
+const jsonText = ref("");
+const jsonError = ref("");
 
 /** 简易 / 高级 / JSON 视图切换；只显式由用户触发，绝不自动回落 */
-const mode = ref<'simple' | 'advanced' | 'json'>(
-  simpleSpecShape(initialSpec) ? 'simple' : 'advanced',
+const mode = ref<"simple" | "advanced" | "json">(
+  simpleSpecShape(initialSpec) ? "simple" : "advanced",
 );
 
 /** 简易形态的算子下标（指向原始 ops 数组）；漂移时为 null */
@@ -114,14 +122,14 @@ const currentSpec = computed<LoginSpec>(() => {
 });
 
 /** 最近一次向外发出的值（序列化比较，防回写死循环） */
-let lastEmitted = '';
+let lastEmitted = "";
 watch(
   currentSpec,
   (value) => {
     const serialized = JSON.stringify(value);
     if (serialized === lastEmitted) return;
     lastEmitted = serialized;
-    emit('change', value);
+    emit("change", value);
   },
   { deep: true },
 );
@@ -135,7 +143,7 @@ watch(
     vars.value = specVarsToEdit(projected);
     aux.value = specAuxToEdit(projected);
     selectedOp.value = null;
-    mode.value = simpleSpecShape(projected) ? 'simple' : 'advanced';
+    mode.value = simpleSpecShape(projected) ? "simple" : "advanced";
   },
   { deep: true },
 );
@@ -158,14 +166,14 @@ function syncJson(): void {
 watch(
   mode,
   (m) => {
-    if (m === 'json') syncJson();
+    if (m === "json") syncJson();
   },
   { immediate: true },
 );
 
 function onJsonInput(text: string): void {
   jsonText.value = text;
-  jsonError.value = '';
+  jsonError.value = "";
   try {
     const parsed = JSON.parse(text);
     const merged: LoginSpec = {
@@ -173,7 +181,7 @@ function onJsonInput(text: string): void {
       ...parsed,
       ops: Array.isArray(parsed?.ops) ? parsed.ops : currentSpec.value.ops,
     };
-    emit('change', merged);
+    emit("change", merged);
   } catch (e) {
     jsonError.value = e instanceof Error ? e.message : String(e);
   }
@@ -187,6 +195,15 @@ const scanning = ref(false);
 const scanFrames = ref<FormScanFrame[]>([]);
 const scanChoice = ref(0);
 const scanNotice = ref<string | null>(null);
+const scanTabUrl = ref<string | null>(null);
+const authStorageCandidates = ref<AuthStorageSelection>({
+  local: [],
+  session: [],
+});
+const authStorageSelection = ref<AuthStorageSelection>({
+  local: [],
+  session: [],
+});
 
 const scanFrame = computed<FormScanFrame | null>(
   () => scanFrames.value[scanChoice.value] ?? null,
@@ -207,6 +224,9 @@ async function runScan(): Promise<void> {
   scanNotice.value = null;
   scanFrames.value = [];
   scanChoice.value = 0;
+  scanTabUrl.value = null;
+  authStorageCandidates.value = { local: [], session: [] };
+  authStorageSelection.value = { local: [], session: [] };
   try {
     const own = await chrome.tabs.getCurrent().catch(() => undefined);
     const tabs = await chrome.tabs.query({ currentWindow: true });
@@ -218,20 +238,33 @@ async function runScan(): Promise<void> {
     if (!candidate || candidate.id === undefined) {
       scanNotice.value = origin
         ? `没有打开 ${origin} 的标签页：请先打开该环境的页面，再识别登录表单`
-        : '没有可用于识别的网页标签页，请先打开目标登录页';
+        : "没有可用于识别的网页标签页，请先打开目标登录页";
       return;
     }
-    const res = await sendBgMessage('SCAN_LOGIN_FORM', {
+    const res = await sendBgMessage("SCAN_LOGIN_FORM", {
       tabId: candidate.id,
-      origin: props.origin ?? '',
+      origin: props.origin ?? "",
     });
     if (!res.success) {
       scanNotice.value = res.error ?? SCAN_ERROR_TEXT.INJECT_FAILED;
       return;
     }
+    const scannedAuthStorage = res.authStorage ?? { local: [], session: [] };
+    authStorageCandidates.value = scannedAuthStorage;
+    authStorageSelection.value = {
+      local: [...scannedAuthStorage.local],
+      session: [...scannedAuthStorage.session],
+    };
+    const scannedTab = await chrome.tabs
+      .get(candidate.id)
+      .catch(() => undefined);
+    scanTabUrl.value = toSpecLoginUrl(
+      scannedTab?.url ?? candidate.url,
+      props.origin,
+    );
     scanFrames.value = res.frames;
     if (res.frames.length === 0) {
-      scanNotice.value = '在环境页面上未找到标准登录表单，请手动拾取或直接填写';
+      scanNotice.value = "在环境页面上未找到标准登录表单，请手动拾取或直接填写";
     }
   } catch (e: unknown) {
     scanNotice.value = e instanceof Error ? e.message : String(e);
@@ -257,22 +290,43 @@ function applyScan(): void {
   const frame = scanFrame.value;
   if (!frame) return;
   if (simpleSpecShape(currentSpec.value)) {
-    const next = applyLoginFormFrame(currentSpec.value, frame);
+    const next = applyLoginFormFrame(currentSpec.value, frame, {
+      pageUrl: scanTabUrl.value,
+      storage: authStorageSelection.value,
+    });
     if (next) ops.value = cloneSpecOps(next.ops);
   } else {
     const scope =
       frame.frameId !== undefined && frame.frameId !== 0
-        ? { frameId: frame.frameId, ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}) }
+        ? {
+            frameId: frame.frameId,
+            ...(frame.frameUrl ? { frameUrl: frame.frameUrl } : {}),
+          }
         : {};
     const formOps: SpecOp[] = [
-      { op: 'fill', target: frame.username?.target ?? '', value: '{username}', ...scope },
-      { op: 'fill', target: frame.password?.target ?? '', value: '{password}', ...scope },
-      { op: 'click', target: frame.submit?.target ?? '', onNotFound: 'fail', ...scope },
+      {
+        op: "fill",
+        target: frame.username?.target ?? "",
+        value: "{username}",
+        ...scope,
+      },
+      {
+        op: "fill",
+        target: frame.password?.target ?? "",
+        value: "{password}",
+        ...scope,
+      },
+      {
+        op: "click",
+        target: frame.submit?.target ?? "",
+        onNotFound: "fail",
+        ...scope,
+      },
     ];
     ops.value = reorderOpsAroundForm(ops.value, formOps);
   }
   selectedOp.value = null;
-  if (simpleSpecShape(currentSpec.value)) mode.value = 'simple';
+  if (simpleSpecShape(currentSpec.value)) mode.value = "simple";
   closeScan();
 }
 
@@ -285,64 +339,52 @@ function update(index: number, patch: Record<string, unknown>): void {
 }
 
 function setSimpleField(
-  key: 'username' | 'password' | 'submit',
+  key: "username" | "password" | "submit",
   target: LoginFormTarget,
 ): void {
   const shape = simpleShape.value;
   if (!shape) return;
   const index =
-    key === 'username'
+    key === "username"
       ? shape.usernameIndex
-      : key === 'password'
+      : key === "password"
         ? shape.passwordIndex
         : shape.submitIndex;
   update(index, { target });
 }
 
-function simpleTarget(key: 'username' | 'password' | 'submit'): LoginFormTarget {
+function simpleTarget(
+  key: "username" | "password" | "submit",
+): LoginFormTarget {
   const shape = simpleShape.value;
-  if (!shape) return '';
+  if (!shape) return "";
   const index =
-    key === 'username'
+    key === "username"
       ? shape.usernameIndex
-      : key === 'password'
+      : key === "password"
         ? shape.passwordIndex
         : shape.submitIndex;
   const op = ops.value[index];
-  return op && (op.op === 'fill' || op.op === 'click') ? op.target : '';
+  return op && (op.op === "fill" || op.op === "click") ? op.target : "";
 }
 
 function simpleLoginUrl(): string {
   const shape = simpleShape.value;
   const gi = shape?.gotoIndex;
   const goto = gi === undefined ? null : ops.value[gi];
-  return goto?.op === 'goto' ? goto.url : '';
+  return goto?.op === "goto" ? goto.url : "";
 }
 
 function simpleWaitForLoad(): boolean {
   const shape = simpleShape.value;
   const gi = shape?.gotoIndex;
   const goto = gi === undefined ? null : ops.value[gi];
-  return goto?.op === 'goto' ? goto.waitForLoad !== false : false;
+  return goto?.op === "goto" ? goto.waitForLoad !== false : false;
 }
 
 function setSimpleLoginUrl(url: string): void {
-  const shape = simpleShape.value;
-  if (!shape) return;
-  const gotoIndex = ops.value.findIndex((o) => o.op === 'goto');
-  if (!url.trim()) {
-    if (gotoIndex >= 0) ops.value = removeSpecOp(ops.value, gotoIndex);
-    return;
-  }
-  if (gotoIndex >= 0) {
-    update(gotoIndex, { url });
-    return;
-  }
-  ops.value = insertSpecOp(ops.value, gotoIndex, {
-    op: 'goto',
-    url,
-    waitForLoad: false,
-  });
+  if (!simpleShape.value) return;
+  ops.value = setSpecLoginUrl(ops.value, url);
 }
 
 function setSimpleWaitForLoad(checked: boolean): void {
@@ -350,7 +392,7 @@ function setSimpleWaitForLoad(checked: boolean): void {
   const gi = shape?.gotoIndex;
   if (gi === undefined) return;
   const current = ops.value[gi];
-  if (current?.op !== 'goto') return;
+  if (current?.op !== "goto") return;
   update(gi, { ...current, waitForLoad: checked });
 }
 
@@ -360,7 +402,7 @@ function setSimpleWaitForLoad(checked: boolean): void {
 
 function addOp(): void {
   const at = selectedOp.value ?? ops.value.length - 1;
-  ops.value = insertSpecOp(ops.value, at, createSpecOp('fill'));
+  ops.value = insertSpecOp(ops.value, at, createSpecOp("fill"));
   selectedOp.value = at + 1;
 }
 
@@ -392,27 +434,32 @@ function selectOp(index: number): void {
 // ============================================================
 
 function targetOf(op: SpecOp): LoginFormTarget {
-  if ((op.op === 'fill' || op.op === 'click') && op.target !== undefined) {
+  if ((op.op === "fill" || op.op === "click") && op.target !== undefined) {
     return op.target;
   }
-  if (op.op === 'waitFor' && op.when.type === 'selector') return op.when.target;
-  if (op.op === 'extract' && op.source === 'dom') {
-    return (op.key ?? '') as unknown as Target;
+  if (op.op === "waitFor" && op.when.type === "selector") return op.when.target;
+  if (op.op === "extract" && op.source === "dom") {
+    return (op.key ?? "") as unknown as Target;
   }
-  return '';
+  return "";
 }
 
 function setTarget(index: number, target: LoginFormTarget): void {
   const op = ops.value[index];
   if (!op) return;
-  if (op.op === 'fill' || op.op === 'click') {
+  if (op.op === "fill" || op.op === "click") {
     update(index, { target });
   } else if (isAutoLoginTarget(target)) {
     return;
-  } else if (op.op === 'waitFor' && op.when.type === 'selector') {
+  } else if (op.op === "waitFor" && op.when.type === "selector") {
     update(index, { when: { ...op.when, target } });
-  } else if (op.op === 'extract' && op.source === 'dom') {
-    const key = typeof target === 'string' ? target : 'css' in target ? target.css : String(target);
+  } else if (op.op === "extract" && op.source === "dom") {
+    const key =
+      typeof target === "string"
+        ? target
+        : "css" in target
+          ? target.css
+          : String(target);
     update(index, { key });
   }
 }
@@ -424,58 +471,71 @@ function setTarget(index: number, target: LoginFormTarget): void {
 /** waitFor 的 kind 切换：selector 需先有 target 才能进入 TargetField */
 function setWaitKind(index: number, kind: SettleKindValue): void {
   const op = ops.value[index];
-  if (op?.op !== 'waitFor') return;
+  if (op?.op !== "waitFor") return;
   const schemes: Record<string, SpecOp> = {
-    formGone: { op: 'waitFor', when: { type: 'formGone' } },
-    urlChanged: { op: 'waitFor', when: { type: 'urlChanged' } },
-    url: { op: 'waitFor', when: { type: 'url', glob: '' } },
-    selector: { op: 'waitFor', when: { type: 'selector', target: '' } },
-    cookie: { op: 'waitFor', when: { type: 'cookie', name: '' } },
-    storage: { op: 'waitFor', when: { type: 'storage', area: 'local', key: '' } },
-    fixed: { op: 'waitFor', when: { type: 'fixed', ms: 1000 } },
+    formGone: { op: "waitFor", when: { type: "formGone" } },
+    urlChanged: { op: "waitFor", when: { type: "urlChanged" } },
+    url: { op: "waitFor", when: { type: "url", glob: "" } },
+    selector: { op: "waitFor", when: { type: "selector", target: "" } },
+    cookie: { op: "waitFor", when: { type: "cookie", name: "" } },
+    storage: {
+      op: "waitFor",
+      when: { type: "storage", area: "local", key: "" },
+    },
+    fixed: { op: "waitFor", when: { type: "fixed", ms: 1000 } },
   };
   ops.value = ops.value.map((o, i) => (i === index ? schemes[kind] : o));
 }
 
 function insertVar(index: number, token: string): void {
   const op = ops.value[index];
-  if (op?.op === 'fill') update(index, { value: (op.value || '') + token });
+  if (op?.op === "fill") update(index, { value: (op.value || "") + token });
 }
 
 /** 拾取成功：缓存候选（供候选胶囊渲染），并在 fill 值为空时建议变量 */
 function onPicked(
   index: number,
-  payload: { meta?: { tag: string; type?: string }; candidates: TargetCandidate[] },
+  payload: {
+    meta?: { tag: string; type?: string };
+    candidates: TargetCandidate[];
+  },
 ): void {
-  pickerCandidates.value = { ...pickerCandidates.value, [index]: payload.candidates };
+  pickerCandidates.value = {
+    ...pickerCandidates.value,
+    [index]: payload.candidates,
+  };
   const op = ops.value[index];
-  if (op?.op === 'fill' && !(op.value ?? '').trim()) {
+  if (op?.op === "fill" && !(op.value ?? "").trim()) {
     const others = ops.value
-      .filter((o, i) => i !== index && o.op === 'fill')
-      .map((o) => (o.op === 'fill' ? o.value : ''));
+      .filter((o, i) => i !== index && o.op === "fill")
+      .map((o) => (o.op === "fill" ? o.value : ""));
     const used = { username: false, password: false };
     for (const v of others) {
-      if (v.includes('{username}')) used.username = true;
-      if (v.includes('{password}')) used.password = true;
+      if (v.includes("{username}")) used.username = true;
+      if (v.includes("{password}")) used.password = true;
     }
     let suggested: string | null = null;
     const meta = payload.meta;
-    if (meta?.type === 'password') suggested = '{password}';
-    else if (meta && (meta.tag === 'input' || meta.tag === 'textarea') && !used.username) {
-      suggested = '{username}';
+    if (meta?.type === "password") suggested = "{password}";
+    else if (
+      meta &&
+      (meta.tag === "input" || meta.tag === "textarea") &&
+      !used.username
+    ) {
+      suggested = "{username}";
     }
     if (suggested) update(index, { value: suggested });
   }
 }
 
 // 简易视图三行定位的错误
-function simpleError(key: 'username' | 'password' | 'submit'): string[] {
+function simpleError(key: "username" | "password" | "submit"): string[] {
   const shape = simpleShape.value;
   if (!shape) return [];
   const index =
-    key === 'username'
+    key === "username"
       ? shape.usernameIndex
-      : key === 'password'
+      : key === "password"
         ? shape.passwordIndex
         : shape.submitIndex;
   return errors.value.ops[index] ?? [];
@@ -518,6 +578,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
         <input v-model="scanChoice" type="radio" :value="i" />
         <span>{{ f.frameId === 0 ? '主页面' : `frame #${f.frameId}` }} · {{ f.frameUrl || '未知地址' }}</span>
       </label>
+      <AuthStorageSelector v-model="authStorageSelection" :candidates="authStorageCandidates" />
       <div class="scan-actions">
         <DtButton variant="primary" @click="applyScan">
           <div class="i-lucide-check w-3.5 h-3.5 mr-1" />回填算子
@@ -556,6 +617,10 @@ defineExpose({ errors, invalid, spec: currentSpec });
             @input="setSimpleLoginUrl(($event.target as HTMLInputElement).value)"
           />
         </div>
+        <p v-if="!simpleLoginUrl()" class="scan-warn login-page-warning">
+          未配置登录页；已登录或位于其他页面时，可能无法切换账号。
+          <button v-if="scanTabUrl" type="button" class="scan-dismiss" @click="setSimpleLoginUrl(scanTabUrl)">使用识别页</button>
+        </p>
         <label v-if="simpleLoginUrl()" class="inline-check">
           <input type="checkbox" :checked="simpleWaitForLoad()" @change="setSimpleWaitForLoad(($event.target as HTMLInputElement).checked)" />
           等待页面加载完成

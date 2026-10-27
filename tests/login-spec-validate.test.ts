@@ -53,6 +53,25 @@ describe("validateLoginSpec — 合法 spec", () => {
     expect(validateLoginSpec(spec())).toEqual([]);
   });
 
+  it("接受具体 goto.waitForTarget 并拒绝自动标记", () => {
+    const valid = spec();
+    valid.ops[0] = {
+      op: "goto",
+      url: "{origin}/login",
+      waitForTarget: { placeholder: "请输入手机号" },
+    };
+    expect(validateLoginSpec(valid)).toEqual([]);
+
+    valid.ops[0] = {
+      op: "goto",
+      url: "{origin}/login",
+      waitForTarget: AUTO_LOGIN_TARGET as never,
+    };
+    expect(validateLoginSpec(valid).some((issue) => issue.opIndex === 0)).toBe(
+      true,
+    );
+  });
+
   it("完整的加密 + 签名 + 写会话 spec 无问题", () => {
     const full = spec({
       vars: [{ name: "publicKey" }],
@@ -716,53 +735,107 @@ describe("自动登录定位结构", () => {
       op.op === "fill" || op.op === "click" ? { ...op, target: "" } : op,
     );
     const issues = validateLoginSpec(spec({ template: "custom", ops: empty }));
-    expect(issues.filter((issue) => issue.code === "CONFIG_INVALID").map((issue) => issue.opIndex))
-      .toEqual(expect.arrayContaining([1, 2, 3]));
+    expect(
+      issues
+        .filter((issue) => issue.code === "CONFIG_INVALID")
+        .map((issue) => issue.opIndex),
+    ).toEqual(expect.arrayContaining([1, 2, 3]));
   });
 
   it("拒绝部分自动和错误顺序", () => {
     const partial = automaticOps();
     partial[1] = { op: "fill", target: "#u", value: "{username}" };
-    expect(validateLoginSpec(spec({ ops: partial })).some((issue) => issue.opIndex === 2)).toBe(true);
+    expect(
+      validateLoginSpec(spec({ ops: partial })).some(
+        (issue) => issue.opIndex === 2,
+      ),
+    ).toBe(true);
 
     const wrongOrder = automaticOps();
-    wrongOrder[1] = { op: "fill", target: AUTO_LOGIN_TARGET, value: "{password}" };
-    wrongOrder[2] = { op: "fill", target: AUTO_LOGIN_TARGET, value: "{username}" };
-    expect(codes(validateLoginSpec(spec({ ops: wrongOrder })))).toContain("CONFIG_INVALID");
+    wrongOrder[1] = {
+      op: "fill",
+      target: AUTO_LOGIN_TARGET,
+      value: "{password}",
+    };
+    wrongOrder[2] = {
+      op: "fill",
+      target: AUTO_LOGIN_TARGET,
+      value: "{username}",
+    };
+    expect(codes(validateLoginSpec(spec({ ops: wrongOrder })))).toContain(
+      "CONFIG_INVALID",
+    );
   });
 
   it("拒绝高级非标准声明中的自动组合", () => {
-    const ops = [...automaticOps(), { op: "waitFor", when: { type: "fixed", ms: 1 } } as SpecOp];
+    const ops = [
+      ...automaticOps(),
+      { op: "waitFor", when: { type: "fixed", ms: 1 } } as SpecOp,
+    ];
     expect(codes(validateLoginSpec(spec({ ops })))).toContain("CONFIG_INVALID");
   });
 
-  it.each([
-    { auto: "sso" },
-    { auto: "login", css: "#u" },
-  ])("拒绝非法自动标记 %j", (target) => {
-    const ops = automaticOps();
-    ops[1] = { op: "fill", target: target as never, value: "{username}" };
-    const issues = validateLoginSpec(spec({ ops }));
-    expect(issues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1)).toBe(true);
-  });
+  it.each([{ auto: "sso" }, { auto: "login", css: "#u" }])(
+    "拒绝非法自动标记 %j",
+    (target) => {
+      const ops = automaticOps();
+      ops[1] = { op: "fill", target: target as never, value: "{username}" };
+      const issues = validateLoginSpec(spec({ ops }));
+      expect(
+        issues.some(
+          (issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1,
+        ),
+      ).toBe(true);
+    },
+  );
 
   it("异常自动 fill value 也返回校验问题而不抛异常", () => {
     const ops = automaticOps();
     ops[1] = { op: "fill", target: AUTO_LOGIN_TARGET, value: 42 as never };
     let issues: SpecIssue[] = [];
-    expect(() => { issues = validateLoginSpec(spec({ ops })); }).not.toThrow();
-    expect(issues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1)).toBe(true);
+    expect(() => {
+      issues = validateLoginSpec(spec({ ops }));
+    }).not.toThrow();
+    expect(
+      issues.some(
+        (issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 1,
+      ),
+    ).toBe(true);
   });
 
   it("拒绝在 waitFor 和 DOM extract 中使用自动标记", () => {
-    const waitIssues = validateLoginSpec(spec({
-      ops: [{ op: "waitFor", when: { type: "selector", target: AUTO_LOGIN_TARGET as never } }],
-    }));
-    expect(waitIssues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0)).toBe(true);
+    const waitIssues = validateLoginSpec(
+      spec({
+        ops: [
+          {
+            op: "waitFor",
+            when: { type: "selector", target: AUTO_LOGIN_TARGET as never },
+          },
+        ],
+      }),
+    );
+    expect(
+      waitIssues.some(
+        (issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0,
+      ),
+    ).toBe(true);
 
-    const extractIssues = validateLoginSpec(spec({
-      ops: [{ op: "extract", source: "dom", key: AUTO_LOGIN_TARGET as never, as: "field" }],
-    }));
-    expect(extractIssues.some((issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0)).toBe(true);
+    const extractIssues = validateLoginSpec(
+      spec({
+        ops: [
+          {
+            op: "extract",
+            source: "dom",
+            key: AUTO_LOGIN_TARGET as never,
+            as: "field",
+          },
+        ],
+      }),
+    );
+    expect(
+      extractIssues.some(
+        (issue) => issue.code === "CONFIG_INVALID" && issue.opIndex === 0,
+      ),
+    ).toBe(true);
   });
 });

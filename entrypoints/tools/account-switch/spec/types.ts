@@ -60,6 +60,8 @@ export type SpecOp =
       op: "goto";
       url: Ref;
       waitForLoad?: boolean;
+      /** 导航后等待实际登录表单目标出现，避免 SPA 渲染 / 重定向竞态 */
+      waitForTarget?: Target;
       timeoutMs?: number;
       /** 值为假时跳过本算子，轨迹记 `skipped` */
       when?: Ref;
@@ -129,7 +131,11 @@ export type SpecOp =
       value: Ref;
       clearFirst?: boolean;
     } & FrameScope)
-  | ({ op: "click"; target: LoginFormTarget; onNotFound?: "fail" | "skip" } & FrameScope)
+  | ({
+      op: "click";
+      target: LoginFormTarget;
+      onNotFound?: "fail" | "skip";
+    } & FrameScope)
   | { op: "waitFor"; when: SettleCondition; timeoutMs?: number }
   | {
       op: "extract";

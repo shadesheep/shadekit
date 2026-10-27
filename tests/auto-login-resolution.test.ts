@@ -29,31 +29,44 @@ function found(frames: FormScanFrame[]): ScanLoginFormResult {
     status: "found",
     frames,
     matches: frames.length,
-    complete: frames.some((item) => item.username && item.password && item.submit),
+    complete: frames.some(
+      (item) => item.username && item.password && item.submit,
+    ),
   };
 }
 
-const uniqueCompleteUniqueTargets = found([frame({
-  frameId: 2,
-  frameUrl: "https://example.test/frame",
-})]);
+const uniqueCompleteUniqueTargets = found([
+  frame({
+    frameId: 2,
+    frameUrl: "https://example.test/frame",
+  }),
+]);
 
 const twoCompleteFrames = found([
   frame({ frameId: 0 }),
   frame({ frameId: 2, frameUrl: "https://example.test/frame" }),
 ]);
 
-const oneFrameWithDuplicateUsername = found([frame({
-  username: candidate({ name: "user" }, 2),
-})]);
+const oneFrameWithDuplicateUsername = found([
+  frame({
+    username: candidate({ name: "user" }, 2),
+  }),
+]);
 
 const oneFrameMissingSubmit = found([frame({ submit: undefined })]);
 
 describe("resolveAutoLoginScan", () => {
   it("distinguishes no password from injection errors", () => {
-    expect(resolveAutoLoginScan({ status: "notFound" })).toEqual({ status: "noPassword" });
-    expect(resolveAutoLoginScan({ status: "error", code: "INJECT_FAILED", message: "denied" }))
-      .toEqual({ status: "error", message: "denied" });
+    expect(resolveAutoLoginScan({ status: "notFound" })).toEqual({
+      status: "noPassword",
+    });
+    expect(
+      resolveAutoLoginScan({
+        status: "error",
+        code: "INJECT_FAILED",
+        message: "denied",
+      }),
+    ).toEqual({ status: "error", message: "denied" });
   });
 
   it("resolves one complete frame with three unique targets and one scope", () => {
@@ -80,11 +93,15 @@ describe("resolveAutoLoginScan", () => {
 
   it("rejects multiple frames and non-unique preferred targets as ambiguous", () => {
     expect(resolveAutoLoginScan(twoCompleteFrames).status).toBe("ambiguous");
-    expect(resolveAutoLoginScan(oneFrameWithDuplicateUsername).status).toBe("ambiguous");
+    expect(resolveAutoLoginScan(oneFrameWithDuplicateUsername).status).toBe(
+      "ambiguous",
+    );
   });
 
   it("rejects an incomplete form without guessing", () => {
-    expect(resolveAutoLoginScan(oneFrameMissingSubmit)).toMatchObject({ status: "incomplete" });
+    expect(resolveAutoLoginScan(oneFrameMissingSubmit)).toMatchObject({
+      status: "incomplete",
+    });
   });
 });
 
@@ -102,38 +119,111 @@ describe("applyLoginFormFrame", () => {
       ],
     };
     const before = structuredClone(original);
-    const selected = frame({ frameId: 3, frameUrl: "https://example.test/login-frame" });
+    const selected = frame({
+      frameId: 3,
+      frameUrl: "https://example.test/login-frame",
+    });
 
     const next = applyLoginFormFrame(original, selected);
 
     expect(next).not.toBeNull();
     expect(original).toEqual(before);
-    expect(next?.ops.slice(0, 3)).toEqual(original.ops.slice(0, 3));
-    expect(next?.ops[6]).toEqual(original.ops[6]);
+    expect(next?.ops.slice(0, 2)).toEqual(original.ops.slice(0, 2));
+    expect(next?.ops[2]).toEqual({
+      ...original.ops[2],
+      waitForTarget: { name: "user" },
+    });
     expect(next?.success).toBe(original.success);
     expect(next?.failure).toBe(original.failure);
     expect(next?.vars).toBe(original.vars);
     expect(next?.ops.slice(3, 6)).toEqual([
-      { op: "fill", target: { name: "user" }, value: "{username}", clearFirst: true, frameId: 3, frameUrl: "https://example.test/login-frame" },
-      { op: "fill", target: { css: "#p" }, value: "{password}", clearFirst: true, frameId: 3, frameUrl: "https://example.test/login-frame" },
-      { op: "click", target: { text: "登录" }, onNotFound: "fail", frameId: 3, frameUrl: "https://example.test/login-frame" },
+      {
+        op: "fill",
+        target: { name: "user" },
+        value: "{username}",
+        clearFirst: true,
+        frameId: 3,
+        frameUrl: "https://example.test/login-frame",
+      },
+      {
+        op: "fill",
+        target: { css: "#p" },
+        value: "{password}",
+        clearFirst: true,
+        frameId: 3,
+        frameUrl: "https://example.test/login-frame",
+      },
+      {
+        op: "click",
+        target: { text: "登录" },
+        onNotFound: "fail",
+        frameId: 3,
+        frameUrl: "https://example.test/login-frame",
+      },
     ]);
   });
 
   it("clears stale child-frame scope when the selected frame is main", () => {
     const original = defaultLoginSpec();
-    original.ops[1] = { ...original.ops[1], frameId: 8, frameUrl: "https://example.test/old" } as never;
+    original.ops[1] = {
+      ...original.ops[1],
+      frameId: 8,
+      frameUrl: "https://example.test/old",
+    } as never;
 
     const next = applyLoginFormFrame(original, frame({ frameId: 0 }));
 
     expect(next?.ops[1]).toEqual({
-      op: "fill", target: { name: "user" }, value: "{username}", clearFirst: true,
+      op: "fill",
+      target: { name: "user" },
+      value: "{username}",
+      clearFirst: true,
     });
+  });
+
+  it("records the scanned login page after leading clears and waits for navigation", () => {
+    const next = applyLoginFormFrame(defaultLoginSpec(), frame(), {
+      pageUrl: "https://example.test/admin/login?from=scan#form",
+      origin: "https://example.test",
+    });
+
+    expect(next?.ops.map((op) => op.op)).toEqual([
+      "clear.cookies",
+      "goto",
+      "fill",
+      "fill",
+      "click",
+      "auth.write",
+    ]);
+    expect(next?.ops[1]).toEqual({
+      op: "goto",
+      url: "{origin}/admin/login?from=scan#form",
+      waitForLoad: true,
+      waitForTarget: { name: "user" },
+    });
+  });
+
+  it("projects confirmed local and session auth keys without clearing unrelated storage", () => {
+    const next = applyLoginFormFrame(defaultLoginSpec(), frame(), {
+      storage: { local: ["token", "userInfo"], session: ["access_token"] },
+    });
+
+    expect(next?.ops.slice(0, 3)).toEqual([
+      { op: "clear.cookies", range: "all" },
+      { op: "clear.storage", area: "local", range: ["token", "userInfo"] },
+      { op: "clear.storage", area: "session", range: ["access_token"] },
+    ]);
+    expect(
+      next?.ops.some((op) => op.op === "clear.storage" && op.range === "all"),
+    ).toBe(false);
   });
 
   it("returns null rather than reordering an advanced declaration", () => {
     const advanced = defaultLoginSpec();
-    advanced.ops.splice(4, 0, { op: "waitFor", when: { type: "fixed", ms: 1 } });
+    advanced.ops.splice(4, 0, {
+      op: "waitFor",
+      when: { type: "fixed", ms: 1 },
+    });
     expect(applyLoginFormFrame(advanced, frame())).toBeNull();
   });
 });

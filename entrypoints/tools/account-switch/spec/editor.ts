@@ -9,6 +9,7 @@
  * 第二套数据；简易视图只读写四个算子，其余算子原样保留（往返无损）。
  */
 
+import type { AuthStorageSelection } from "../strategies/auth-storage";
 import {
   AUTO_LOGIN_TARGET,
   BUILTIN_INPUT_NAMES,
@@ -40,6 +41,7 @@ import type { SpecIssue } from "./validate";
  * 不默认带 `goto`：并非所有系统都有 `/login` 路由，新建时更安全的假设
  * 是「用户已在登录页」，登录成功后由 login-tab-flow 原地 reload。需要
  * 导航的用户在简易视图填「登录页 URL」即会自动补一条 goto。
+ * 自动识别 / 锁定表单时会按实际标签页补入登录页，不依赖这个空默认假设。
  *
  * D11 的不对称：默认模板含 `clear.storage(local, all)`，但存量配方迁移
  * 不追加该算子。这里**不**包含 clear.storage，新建后由用户在高级视图
@@ -51,12 +53,29 @@ export function defaultLoginSpec(): LoginSpec {
     template: "generic",
     ops: [
       { op: "clear.cookies", range: "all" },
-      { op: "fill", target: AUTO_LOGIN_TARGET, value: "{username}", clearFirst: true },
-      { op: "fill", target: AUTO_LOGIN_TARGET, value: "{password}", clearFirst: true },
+      {
+        op: "fill",
+        target: AUTO_LOGIN_TARGET,
+        value: "{username}",
+        clearFirst: true,
+      },
+      {
+        op: "fill",
+        target: AUTO_LOGIN_TARGET,
+        value: "{password}",
+        clearFirst: true,
+      },
       { op: "click", target: AUTO_LOGIN_TARGET, onNotFound: "fail" },
       { op: "auth.write" },
     ],
-    success: [{ page: { type: "any", of: [{ type: "formGone" }, { type: "urlChanged" }] } }],
+    success: [
+      {
+        page: {
+          type: "any",
+          of: [{ type: "formGone" }, { type: "urlChanged" }],
+        },
+      },
+    ],
     auth: { ...DEFAULT_AUTH },
     limits: { ...DEFAULT_LIMITS },
   };
@@ -70,7 +89,11 @@ const USERNAME_VALUE = "{username}";
 const PASSWORD_VALUE = "{password}";
 
 /** 简易视图判定的剔除集：会话清理与写会话不算「登录表单步骤」 */
-const SIMPLE_EXCLUDED = new Set<SpecOpName>(["clear.cookies", "clear.storage", "auth.write"]);
+const SIMPLE_EXCLUDED = new Set<SpecOpName>([
+  "clear.cookies",
+  "clear.storage",
+  "auth.write",
+]);
 
 /** 简易形态的算子下标定位 */
 export interface SimpleSpecShape {
@@ -80,8 +103,15 @@ export interface SimpleSpecShape {
   submitIndex: number;
 }
 
-function isFillWith(op: SpecOp, value: string): op is Extract<SpecOp, { op: "fill" }> {
-  return op.op === "fill" && typeof op.value === "string" && op.value.trim() === value;
+function isFillWith(
+  op: SpecOp,
+  value: string,
+): op is Extract<SpecOp, { op: "fill" }> {
+  return (
+    op.op === "fill" &&
+    typeof op.value === "string" &&
+    op.value.trim() === value
+  );
 }
 
 /**
@@ -158,13 +188,21 @@ export function specInputHints(spec: LoginSpec): VariableHint[] {
     kind: "input",
   }));
   for (const v of spec.vars ?? []) {
-    hints.push({ token: `{${v.name}}`, label: v.title ?? v.name, kind: "input" });
+    hints.push({
+      token: `{${v.name}}`,
+      label: v.title ?? v.name,
+      kind: "input",
+    });
   }
   if (spec.aux?.nonce === "auto") {
     hints.push({ token: "{nonce}", label: AUX_LABELS.nonce, kind: "input" });
   }
   if (spec.aux?.timestamp === "auto") {
-    hints.push({ token: "{timestamp}", label: AUX_LABELS.timestamp, kind: "input" });
+    hints.push({
+      token: "{timestamp}",
+      label: AUX_LABELS.timestamp,
+      kind: "input",
+    });
   }
   return hints;
 }
@@ -223,7 +261,13 @@ export function createSpecOp(op: SpecOpName): SpecOp {
     case "digest":
       return { op, algorithm: "sha256", input: "", as: "sign" };
     case "crypto.encrypt":
-      return { op, algorithm: "rsa-pkcs1v15", publicKey: "{publicKey}", input: "{password}", as: "enc" };
+      return {
+        op,
+        algorithm: "rsa-pkcs1v15",
+        publicKey: "{publicKey}",
+        input: "{password}",
+        as: "enc",
+      };
     case "payload.build":
       return { op, parts: [], as: "payload" };
     case "map":
@@ -287,7 +331,11 @@ export function cloneSpecOps(ops: SpecOp[]): SpecOp[] {
 }
 
 /** 上移 / 下移；越界时原样返回 */
-export function moveSpecOp(ops: SpecOp[], index: number, delta: -1 | 1): SpecOp[] {
+export function moveSpecOp(
+  ops: SpecOp[],
+  index: number,
+  delta: -1 | 1,
+): SpecOp[] {
   const target = index + delta;
   if (index < 0 || index >= ops.length) return ops;
   if (target < 0 || target >= ops.length) return ops;
@@ -301,11 +349,68 @@ export function removeSpecOp(ops: SpecOp[], index: number): SpecOp[] {
   return ops.filter((_, i) => i !== index);
 }
 
-/** 在某位置后插入；index 为 -1 表示插到末尾 */
-export function insertSpecOp(ops: SpecOp[], index: number, op: SpecOp): SpecOp[] {
+/** 在某位置后插入；index 为 -1 表示插到开头 */
+export function insertSpecOp(
+  ops: SpecOp[],
+  index: number,
+  op: SpecOp,
+): SpecOp[] {
   const next = [...ops];
   next.splice(index + 1, 0, op);
   return next;
+}
+
+/** 简易视图登录页：先清旧会话，再导航并等待加载，避免在已登录页面找表单。 */
+export function setSpecLoginUrl(ops: SpecOp[], url: string): SpecOp[] {
+  const gotoIndex = ops.findIndex((op) => op.op === "goto");
+  if (!url.trim()) {
+    return gotoIndex >= 0 ? removeSpecOp(ops, gotoIndex) : ops;
+  }
+  if (gotoIndex >= 0) {
+    return updateSpecOp(ops, gotoIndex, { url });
+  }
+
+  let insertAfter = -1;
+  while (ops[insertAfter + 1]?.op.startsWith("clear.")) insertAfter += 1;
+  return insertSpecOp(ops, insertAfter, { op: "goto", url, waitForLoad: true });
+}
+
+/** 替换前导自动清理声明；非前导的自定义 storage 算子保持原样。 */
+export function setSpecAuthStorageCleanup(
+  ops: SpecOp[],
+  selection: AuthStorageSelection,
+): SpecOp[] {
+  let prefixEnd = 0;
+  while (ops[prefixEnd]?.op.startsWith("clear.")) prefixEnd += 1;
+  const prefix = ops
+    .slice(0, prefixEnd)
+    .filter((op) => op.op !== "clear.storage");
+  const cleanup: SpecOp[] = [];
+  for (const area of ["local", "session"] as const) {
+    const keys = [
+      ...new Set(selection[area].map((key) => key.trim()).filter(Boolean)),
+    ];
+    if (keys.length > 0)
+      cleanup.push({ op: "clear.storage", area, range: keys });
+  }
+  return [...prefix, ...cleanup, ...ops.slice(prefixEnd)];
+}
+
+/** 同域登录页使用 {origin}，避免环境别名或子域变化后跳到旧地址。 */
+export function toSpecLoginUrl(
+  pageUrl: string | null | undefined,
+  origin?: string,
+): string {
+  const value = pageUrl?.trim() ?? "";
+  if (!value || !origin) return value;
+  try {
+    const parsed = new URL(value);
+    return parsed.origin === origin
+      ? `{origin}${parsed.pathname}${parsed.search}${parsed.hash}`
+      : value;
+  } catch {
+    return value;
+  }
 }
 
 /** 复制算子：深拷贝后插入到原算子之后 */
@@ -329,9 +434,16 @@ export function duplicateSpecOp(ops: SpecOp[], index: number): SpecOp[] {
  * `formOps` 是已构造好的 fill/fill/click 序列；本函数只负责重排，不修改
  * 单个算子内容。
  */
-export function reorderOpsAroundForm(existing: SpecOp[], formOps: SpecOp[]): SpecOp[] {
+export function reorderOpsAroundForm(
+  existing: SpecOp[],
+  formOps: SpecOp[],
+): SpecOp[] {
   const CLEAN = new Set<SpecOpName>(["clear.cookies", "clear.storage"]);
-  const WRITE = new Set<SpecOpName>(["auth.write", "auth.capture", "auth.restore"]);
+  const WRITE = new Set<SpecOpName>([
+    "auth.write",
+    "auth.capture",
+    "auth.restore",
+  ]);
   const FORM = new Set<SpecOpName>(["fill", "click"]);
 
   const goto = existing.find((o) => o.op === "goto");
@@ -390,9 +502,7 @@ export function specVarsToEdit(spec: LoginSpec): SpecVarEdit[] {
 }
 
 /** 从 vars 编辑清单构造回 `vars`（空 name 丢弃） */
-export function specsVariables(
-  edit: SpecVarEdit[],
-): SpecVar[] {
+export function specsVariables(edit: SpecVarEdit[]): SpecVar[] {
   return edit
     .filter((v) => v.name.trim())
     .map((v) => ({

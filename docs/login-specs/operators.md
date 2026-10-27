@@ -148,18 +148,19 @@ type SettleCondition =
 跳转当前 tab 到指定 URL。
 
 ```json
-{ "op": "goto", "url": "{origin}/login", "waitForLoad": true, "timeoutMs": 8000, "when": "{needsLoginPage}" }
+{ "op": "goto", "url": "{origin}/login", "waitForLoad": true, "waitForTarget": { "placeholder": "请输入手机号" }, "timeoutMs": 8000, "when": "{needsLoginPage}" }
 ```
 
 | 字段 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
 | `url` | `Ref` | ✓ | — | 模板字符串 |
 | `waitForLoad` | `boolean` | — | `true` | 为 `false` 时不等 `chrome.tabs.onUpdated complete` |
+| `waitForTarget` | `Target` | — | — | 导航后轮询等待唯一可见的登录表单目标；复用 `timeoutMs` |
 | `timeoutMs` | `number` | — | `limits.settleMs` | 等待加载完成的超时 |
 | `when` | `Ref` | — | — | 求值为假（`undefined/null/false/""/0`）时**跳过本算子**，轨迹记 `skipped` |
 
 - URL 引用 `{targetUrl}` / `{debugRedirect}` 会触发 R3「跨 origin 写入」校验：要求其后存在 `auth.restore` 或 `auth.capture` 配套（同 origin 登录页导航不受此约束）
-- 失败错误码：导航本身失败 → `errorCodeOf(e)` 归一化；`waitForLoad` 超时 → `TAB_LOAD_TIMEOUT`
+- 失败错误码：导航本身失败 → `errorCodeOf(e)` 归一化；`waitForLoad` 超时 → `TAB_LOAD_TIMEOUT`；`waitForTarget` 超时 → `ELEMENT_NOT_FOUND`，错误包含当前地址及重定向 / 本地登录态检查提示
 - 轨迹描述：URL 原文
 
 ---

@@ -8,7 +8,7 @@
 |---|---|---|
 | `docs/images/hero.webp` | 账号面板与环境指示器 | 真实扩展 + 本机演示控制台 |
 | `docs/images/account-switch.gif` | 验收测试 → 交付管理员 | 真实扩展操作的连续录像 |
-| `docs/images/login-recipe.webp` | 添加环境、拾取元素、试登录 | 真实配置抽屉和页面拾取 |
+| `docs/images/login-recipe.webp` | 添加环境、拾取元素、保存配置 | 真实配置抽屉和页面拾取 |
 | `docs/images/dev-tools.webp` | JSON 格式化、对比、模拟数据 | 三个真实独立工具页 |
 | `docs/images/local-account-storage.webp` | 本地存储示意 | 手绘示意图 |
 | `docs/images/multi-env-accounts.webp` | 多环境、多账号切换痛点 | 手绘示意图 |
@@ -38,7 +38,7 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers \
 node docs/readme-demo/capture.mjs all
 ```
 
-脚本执行真实的「新建环境 → 识别 → 回填 → 拾取 → 试登录 → 保存账号」，打开 Shadow DOM 账号面板，并断言 `data-current-role` 从 `tester` 变为 `admin`。录像前通过本机演示 API 建立真实 HttpOnly 测试员会话，再创建录制标签页，因此 GIF 从测试员控制台开始，不包含准备阶段的登录表单或密码提示。无头浏览器不总是分发扩展快捷键，此时通过扩展自己的后台消息唤起面板，不渲染替代 UI。面板保持产品原始尺寸。
+脚本执行真实的「新建环境 → 识别 → 回填 → 拾取 → 确认认证键 → 保存配置与账号」，打开 Shadow DOM 账号面板，并断言 `data-current-role` 从 `tester` 变为 `admin`；同时验证认证键被清除、无关本地存储保留。录像前通过本机演示 API 建立真实 HttpOnly 测试员会话，再创建录制标签页，因此 GIF 从测试员控制台开始，不包含准备阶段的登录表单或密码提示。无头浏览器不总是分发扩展快捷键，此时通过扩展自己的后台消息唤起面板，不渲染替代 UI。面板保持产品原始尺寸。
 
 采集脚本从当前临时 Playwright 安装中解析配套 Chromium 路径，不依赖某个本机浏览器目录；`PLAYWRIGHT_BROWSERS_PATH` 需在安装和采集时保持一致。需要 MV3 扩展支持时应使用 Chrome for Testing，系统 Chrome 可能禁用侧载扩展。可用 `CHROME_PATH` 显式指定可执行文件。
 
