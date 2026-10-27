@@ -33,8 +33,8 @@ interface DomainConfig {
   name: string;               // 环境名称: "本地开发", "测试环境" 等
   tags: string[];             // 环境标签: local/dev/test/staging/prod
   loginMethod?: string;       // 仅作 SpecTemplate.id：新建环境时的默认声明 + 日志名称
-  debugRedirect?: string;     // Bug 复现地址：登录成功后自动进入的页面
-  debugRedirectEnabled?: boolean;  // 「登录后自动进入」开关默认值
+  debugRedirect?: string;     // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
+  debugRedirectEnabled?: boolean;  // 「登录后打开复现页面」开关默认值
   defaultPassword?: string;   // 快进登录默认密码
   cookieClearIncludeParent?: boolean; // 清 Cookie 是否含父域（默认仅精确 host）
   strategyConfig?: {          // 结构化登录配置（ADR-0012 D2）

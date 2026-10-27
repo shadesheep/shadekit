@@ -17,11 +17,11 @@ RAW = Path(os.environ.get('SHADEKIT_DEMO_RAW', ROOT / 'docs/images/raw'))
 OUTPUT = ROOT / 'docs/images'
 RECIPE_NAMES = ('recipe-01-environment', 'recipe-02-picker', 'recipe-03-save')
 MEDIA = ('hero.webp', 'login-recipe.webp', 'dev-tools.webp', 'account-switch.gif')
-CANVAS = '#f5f6f8'
-INK = '#18213a'
-MUTED = '#657087'
-LINE = '#dfe4ec'
-INDIGO = '#5968e8'
+CANVAS = '#0d1117'
+INK = '#f1f5f9'
+MUTED = '#9aa7b8'
+LINE = '#30363d'
+INDIGO = '#a5b4fc'
 
 
 def font(size):
@@ -56,7 +56,7 @@ def paste_rounded(canvas, image, box, radius=10, shadow=True):
     if shadow:
         shadow_image = Image.new('RGBA', canvas.size)
         sd = ImageDraw.Draw(shadow_image)
-        sd.rounded_rectangle((x + 2, y + 5, x + image.width + 2, y + image.height + 5), radius, fill='#15234424')
+        sd.rounded_rectangle((x + 2, y + 5, x + image.width + 2, y + image.height + 5), radius, fill='#00000066')
         canvas.alpha_composite(shadow_image.filter(ImageFilter.GaussianBlur(7)))
     mask = Image.new('L', image.size)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, image.width, image.height), radius, fill=255)
@@ -180,6 +180,10 @@ def resolve_switch_video(raw, explicit):
         raise ValueError('roleSwitchVerified 必须为 true，不能用失败录像生成 GIF')
     if manifest.get('startRole') != 'tester' or manifest.get('finalRole') != 'admin':
         raise ValueError('录像必须验证 tester → admin 的真实角色变化')
+    if manifest.get('visibleAccountSwitchVerified') is not True:
+        raise ValueError('visibleAccountSwitchVerified 必须为 true，不能用账号变化不可见的录像生成 GIF')
+    if manifest.get('startAccount') != 'tester@shadesheep.test' or manifest.get('finalAccount') != 'admin@shadesheep.test':
+        raise ValueError('录像必须验证可见账号 tester@shadesheep.test → admin@shadesheep.test')
     if explicit:
         if str(Path(explicit).resolve()) != str(Path(manifest.get('videoPath', '')).resolve()):
             raise ValueError('显式录像与已验证角色切换的 videoPath 不一致')
@@ -197,11 +201,11 @@ def encode_gif():
         raise FileNotFoundError('请设置 FFMPEG_PATH 指向 FFmpeg 可执行文件')
     source = resolve_switch_video(RAW, os.environ.get('SHADEKIT_DEMO_SWITCH_VIDEO'))
     destination = OUTPUT / 'account-switch.gif'
-    filters = 'fps=10,scale=1152:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle'
+    filters = 'crop=1200:750:240:0,fps=10,scale=1152:720:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=160:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle'
     subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'warning', '-y', '-i', source, '-filter_complex', filters, '-loop', '0', str(destination)], check=True)
     with Image.open(destination) as gif:
         duration = gif_duration(gif)
-        if gif.width != 1152 or not 8 <= duration <= 15:
+        if gif.size != (1152, 720) or not 8 <= duration <= 15:
             raise ValueError(f'GIF 尺寸/时长不合格：{gif.size}，{duration:.2f}s')
         print(f'account-switch.gif: {gif.n_frames} frames, {duration:.2f}s, {destination.stat().st_size / 1048576:.2f} MiB')
 
@@ -216,6 +220,8 @@ def validate_media(output=OUTPUT):
             if name.endswith('.webp') and image.width != 1440:
                 raise ValueError(f'{name} 宽度不是 1440px')
             if name.endswith('.gif'):
+                if image.size != (1152, 720):
+                    raise ValueError('GIF 尺寸不是 1152×720')
                 if not (8 <= gif_duration(image) <= 15):
                     raise ValueError('GIF 时长不在 8–15 秒')
                 if path.stat().st_size > 8 * 1024 * 1024:

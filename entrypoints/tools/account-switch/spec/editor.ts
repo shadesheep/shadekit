@@ -169,7 +169,7 @@ const BUILTIN_LABELS: Record<string, string> = {
   password: "密码",
   origin: "环境 origin",
   targetUrl: "目标跳转地址",
-  debugRedirect: "Bug 复现地址",
+  debugRedirect: "本地 Bug 复现地址",
 };
 
 const AUX_LABELS: Record<string, string> = {

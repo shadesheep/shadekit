@@ -193,14 +193,14 @@ defineExpose({ focus });
     </div>
 
     <div v-if="scanFrames.length > 0" class="scan-card">
-      <strong>{{ scanFrames.length > 1 ? '选择要锁定的 frame' : '确认登录表单与认证存储清理' }}</strong>
+      <strong>{{ scanFrames.length > 1 ? '选择检测到的登录表单' : '确认检测到的登录表单' }}</strong>
       <label v-for="(frame, index) in scanFrames" :key="`${frame.frameId}-${index}`">
         <input v-model="scanChoice" type="radio" :value="index" />
-        {{ frame.frameId === 0 ? '主页面' : `frame #${frame.frameId}` }} · {{ frame.frameUrl || '未知地址' }}
+        {{ frame.frameId === 0 ? '主页面' : `页面区域 #${frame.frameId}` }} · {{ frame.frameUrl || '未知地址' }}
       </label>
       <AuthStorageSelector v-model="authStorageSelection" :candidates="authStorageCandidates" />
       <div class="scan-actions">
-        <DtButton size="sm" variant="primary" @click="lockFrame(scanFrames[scanChoice])">锁定所选表单</DtButton>
+        <DtButton size="sm" variant="primary" @click="lockFrame(scanFrames[scanChoice])">使用识别结果</DtButton>
         <DtButton size="sm" @click="closeScan">取消</DtButton>
       </div>
     </div>
@@ -208,19 +208,19 @@ defineExpose({ focus });
 </template>
 
 <style scoped>
-.login-form-locator { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; outline: none; }
+.login-form-locator { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; outline: none; }
 .login-form-locator:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
-.locator-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.locator-head :last-child { margin-left: auto; }
+.locator-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 32px; }
+.locator-head .dt-button { margin-left: auto; }
 .locator-title { font-size: 13px; font-weight: 600; }
 .locator-state { padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #4f46e5; font-size: 12px; }
 .locator-state-locked { background: #ecfdf5; color: #15803d; }
 .locator-state-custom, .locator-state-advanced { background: #f1f5f9; color: #64748b; }
-.locator-hint { margin: 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.locator-hint { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
 .locator-notice { margin: 0; color: #b45309; font-size: 12px; line-height: 1.5; }
 .locator-warning { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #b45309; font-size: 12px; line-height: 1.5; }
-.scan-card { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; font-size: 12px; }
-.scan-actions { display: flex; gap: 6px; }
+.scan-card { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; font-size: 12px; }
+.scan-actions { display: flex; justify-content: flex-end; gap: 8px; }
 [data-dt-dark] .login-form-locator { border-color: #30363d; }
 [data-dt-dark] .locator-hint { color: #8b949e; }
 [data-dt-dark] .locator-state-custom, [data-dt-dark] .locator-state-advanced { background: #21262d; color: #8b949e; }

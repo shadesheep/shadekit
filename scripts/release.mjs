@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * 双商店一键发布：构建 Chrome + Edge zip → wxt submit 同时提交两个商店
+ * 三商店一键发布：构建 Chrome + Edge + Firefox zip → wxt submit 同时提交三个商店
  *
  * 用法:
  *   npm run release                  # 构建 + 发布（正式提交审核）
  *   npm run release -- --dry-run     # 只验证凭证，不上传不提交
  *   npm run release -- --skip-build  # 跳过构建，直接用 .output 里已有的 zip
- *   npm run release -- --chrome-only / --edge-only
+ *   npm run release -- --chrome-only / --edge-only / --firefox-only
  *
  * 凭证来源: 项目根目录 .env
  *   CHROME_EXTENSION_ID / CHROME_PUBLISHER_ID
  *     + CHROME_SERVICE_ACCOUNT_JSON 指向服务账号密钥文件；
  *       或直接填 CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL / CHROME_SERVICE_ACCOUNT_PRIVATE_KEY
  *   PRODUCT_ID / CLIENT_ID / CLIENT_SECRET  (Edge Makefile 命名，自动映射为 wxt 需要的 EDGE_*)
+ *   FIREFOX_EXTENSION_ID / FIREFOX_JWT_ISSUER / FIREFOX_JWT_SECRET
+ *   FIREFOX_CHANNEL (listed 或 unlisted，默认 listed)
  *
  * 网络: Chrome API 需走本地代理（默认 127.0.0.1:7890，可用 PROXY_URL 环境变量覆盖）；
  *       通过 scripts/undici-proxy.cjs 预加载注入全局 dispatcher。
@@ -32,6 +34,10 @@ const DRY_RUN = args.includes("--dry-run");
 const SKIP_BUILD = args.includes("--skip-build");
 const CHROME_ONLY = args.includes("--chrome-only");
 const EDGE_ONLY = args.includes("--edge-only");
+const FIREFOX_ONLY = args.includes("--firefox-only");
+const chromeEnabled = !EDGE_ONLY && !FIREFOX_ONLY;
+const edgeEnabled = !CHROME_ONLY && !FIREFOX_ONLY;
+const firefoxEnabled = !CHROME_ONLY && !EDGE_ONLY;
 
 const fail = (msg) => { console.error(`❌ ${msg}`); process.exit(1); };
 const info = (msg) => console.log(msg);
@@ -52,7 +58,7 @@ const submitEnv = { ...process.env };
 
 // Chrome 认证二选一：OAuth refresh token（npm run chrome:login）或服务账号 JWT
 let chromeAuth;
-if (!EDGE_ONLY) {
+if (chromeEnabled) {
   for (const k of ["CHROME_EXTENSION_ID", "CHROME_PUBLISHER_ID"]) {
     if (!env[k]) fail(`缺少 ${k}，请检查 .env`);
     submitEnv[k] = env[k];
@@ -74,7 +80,7 @@ if (!EDGE_ONLY) {
     fail(err.message);
   }
 }
-if (!CHROME_ONLY) {
+if (edgeEnabled) {
   // Makefile 命名 → wxt submit 命名
   const map = { PRODUCT_ID: "EDGE_PRODUCT_ID", CLIENT_ID: "EDGE_CLIENT_ID", CLIENT_SECRET: "EDGE_API_KEY" };
   for (const [from, to] of Object.entries(map)) {
@@ -82,20 +88,36 @@ if (!CHROME_ONLY) {
     submitEnv[to] = env[from];
   }
 }
+if (firefoxEnabled) {
+  for (const k of ["FIREFOX_EXTENSION_ID", "FIREFOX_JWT_ISSUER", "FIREFOX_JWT_SECRET"]) {
+    if (!env[k]) fail(`缺少 ${k}（Firefox），请检查 .env`);
+    submitEnv[k] = env[k];
+  }
+  submitEnv.FIREFOX_CHANNEL = env.FIREFOX_CHANNEL || "listed";
+}
 
 // ── 3. 构建 zip ──────────────────────────────────────────
 const chromeZip = resolve(root, `.output/shadekit-${version}-chrome.zip`);
 const edgeZip = resolve(root, `.output/shadekit-${version}-edge.zip`);
+const firefoxZip = resolve(root, `.output/shadekit-${version}-firefox.zip`);
+const firefoxSourcesZip = resolve(root, `.output/shadekit-${version}-sources.zip`);
 
 if (!SKIP_BUILD) {
-  info("🔨 构建 Chrome + Edge zip...");
-  for (const cmd of ["npm run zip", "npm run zip:edge"]) {
+  const buildCommands = [
+    ...(chromeEnabled ? ["npm run zip"] : []),
+    ...(edgeEnabled ? ["npm run zip:edge"] : []),
+    ...(firefoxEnabled ? ["npm run zip:firefox"] : []),
+  ];
+  info("🔨 构建商店 zip...");
+  for (const cmd of buildCommands) {
     const r = spawnSync(cmd, { shell: true, stdio: "inherit", cwd: root });
     if (r.status !== 0) fail(`构建失败: ${cmd}`);
   }
 }
-if (!EDGE_ONLY && !existsSync(chromeZip)) fail(`找不到 ${chromeZip}`);
-if (!CHROME_ONLY && !existsSync(edgeZip)) fail(`找不到 ${edgeZip}`);
+if (chromeEnabled && !existsSync(chromeZip)) fail(`找不到 ${chromeZip}`);
+if (edgeEnabled && !existsSync(edgeZip)) fail(`找不到 ${edgeZip}`);
+if (firefoxEnabled && !existsSync(firefoxZip)) fail(`找不到 ${firefoxZip}`);
+if (firefoxEnabled && !existsSync(firefoxSourcesZip)) fail(`找不到 ${firefoxSourcesZip}`);
 
 // ── 4. 代理检测（Chrome API 必需）─────────────────────────
 const PROXY_URL = process.env.PROXY_URL || "http://127.0.0.1:7890";
@@ -110,7 +132,7 @@ function proxyUp(url) {
   });
 }
 
-if (!EDGE_ONLY) {
+if (chromeEnabled) {
   if (await proxyUp(PROXY_URL)) {
     // wxt submit 子进程通过预加载脚本注入代理；OAuth 通道走本进程的全局 fetch
     submitEnv.DEVTOOLS_PROXY_URL = PROXY_URL;
@@ -130,7 +152,7 @@ try {
 
 // ── 6. 提交发布 ──────────────────────────────────────────
 // Chrome: OAuth 通道自管 v2 接口；服务账号通道交给 wxt submit。
-if (!EDGE_ONLY && chromeAuth.mode === "oauth") {
+if (chromeEnabled && chromeAuth.mode === "oauth") {
   try {
     await publishChrome({
       credentials: chromeAuth.credentials,
@@ -151,9 +173,10 @@ if (!EDGE_ONLY && chromeAuth.mode === "oauth") {
 
 const submitArgs = ["wxt", "submit"];
 if (DRY_RUN) submitArgs.push("--dry-run");
-// OAuth 通道已自行处理 Chrome，这里只保留 Edge
-if (!EDGE_ONLY && chromeAuth.mode !== "oauth") submitArgs.push("--chrome-zip", chromeZip);
-if (!CHROME_ONLY) submitArgs.push("--edge-zip", edgeZip);
+// OAuth 通道已自行处理 Chrome，这里只保留其他商店
+if (chromeEnabled && chromeAuth.mode !== "oauth") submitArgs.push("--chrome-zip", chromeZip);
+if (edgeEnabled) submitArgs.push("--edge-zip", edgeZip);
+if (firefoxEnabled) submitArgs.push("--firefox-zip", firefoxZip, "--firefox-sources-zip", firefoxSourcesZip);
 
 if (submitArgs.length > 2) {
   info(`🚀 ${DRY_RUN ? "干跑验证" : "提交发布"}: npx ${submitArgs.join(" ")}`);

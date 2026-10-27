@@ -1043,7 +1043,7 @@ async function runTrialLogin(): Promise<void> {
 <template>
   <div>
     <DtDrawer :show="showDomainForm" :title="editingDomain ? '编辑环境' : '添加环境'" @close="cancelEditDomain">
-      <div class="form-card" :class="{ 'form-card-highlight': domainFormHighlight }">
+      <div class="form-card domain-form" :class="{ 'form-card-highlight': domainFormHighlight }">
       <div class="form-row">
         <label>域名 / URL</label>
         <input
@@ -1073,38 +1073,6 @@ async function runTrialLogin(): Promise<void> {
           <span v-for="t in customTags" :key="t" class="env-tag" title="存量自定义标签（只读）">{{ t }}</span>
         </div>
       </div>
-      <!-- 默认密码（已挪出高级区）：测试给的账号通常共用环境密码，配一次即「URL + 账号」即可登录 -->
-      <div class="form-row">
-        <label>默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
-        <input class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
-        <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
-      </div>
-      <LoginFormLocator
-        ref="loginFormLocatorRef"
-        :spec="newDomain.spec"
-        :origin="formOrigin"
-        :mirrored="!!newDomain.strategyId"
-        @change="onSpecChange"
-      />
-      <!-- Bug 复现地址：测试反馈里附带的页面地址，登录成功后自动进入该页，省去手工粘贴 -->
-      <div class="form-row">
-        <label>Bug 复现地址 <span class="optional">（选填，登录成功后自动进入该页面）</span></label>
-        <input class="dt-input" v-model="newDomain.debugRedirect" placeholder="例: http://localhost:8888/#/bug-detail/123" />
-      </div>
-      <div class="form-row" v-if="newDomain.debugRedirect">
-        <label>登录后自动进入</label>
-        <div class="debug-redirect-toggle" @click="newDomain.debugRedirectEnabled = !newDomain.debugRedirectEnabled">
-          <label class="toggle-switch" @click.stop>
-            <input v-model="newDomain.debugRedirectEnabled" type="checkbox" />
-            <span class="toggle-slider" />
-          </label>
-          <span class="toggle-label">{{ newDomain.debugRedirectEnabled ? '已启用' : '已禁用' }}</span>
-        </div>
-      </div>
-      <!-- 读取链拒绝的存量声明（如旧内置登录）：给出可操作指引，不静默降级 -->
-      <p v-if="newDomain.specInvalid" class="risk-note spec-invalid-note">
-        <span class="i-lucide-alert-triangle w-3.5 h-3.5" />{{ newDomain.specInvalid }}
-      </p>
       <div v-if="authMethodOptions.length > 1" class="form-row">
         <label>认证方式</label>
         <select class="dt-input" v-model="newDomain.loginMethod" @change="onLoginMethodChange">
@@ -1123,10 +1091,22 @@ async function runTrialLogin(): Promise<void> {
         </p>
         <p v-else-if="strategyOptions.length > 2" class="field-hint">策略库条目会出现在这里，选中即关联并套用其登录声明（保存后可再编辑环境私有副本）。</p>
       </div>
+      <LoginFormLocator
+        class="form-row"
+        ref="loginFormLocatorRef"
+        :spec="newDomain.spec"
+        :origin="formOrigin"
+        :mirrored="!!newDomain.strategyId"
+        @change="onSpecChange"
+      />
+      <!-- 读取链拒绝的存量声明（如旧内置登录）：给出可操作指引，不静默降级 -->
+      <p v-if="newDomain.specInvalid" class="risk-note spec-invalid-note">
+        <span class="i-lucide-alert-triangle w-3.5 h-3.5" />{{ newDomain.specInvalid }}
+      </p>
 
       <!-- 关联账号：勾选已有账号绑定到本环境；也可就地新增账号（保存环境时一并落盘） -->
       <div class="form-row env-accounts-row">
-        <label>关联账号 <span class="optional">（选填，保存环境时一并落盘）</span></label>
+        <label>关联账号 <span class="optional">（选填）</span></label>
         <!-- 已有账号复选列表 -->
         <div v-if="(accounts ?? []).length > 0" class="domain-chip-selector">
           <span
@@ -1165,9 +1145,11 @@ async function runTrialLogin(): Promise<void> {
             </button>
           </div>
         </div>
-        <DtButton size="sm" variant="secondary" @click="addAccountDraft">
-          <div class="i-lucide-plus w-4 h-4 mr-1" />新增账号
-        </DtButton>
+        <div class="env-account-actions">
+          <DtButton size="sm" variant="secondary" @click="addAccountDraft">
+            <div class="i-lucide-plus w-4 h-4 mr-1" />新增账号
+          </DtButton>
+        </div>
       </div>
 
       <!-- 试登录暂时隐藏，保留实现，恢复时放回完整区域
@@ -1226,14 +1208,37 @@ async function runTrialLogin(): Promise<void> {
       </div>
       -->
 
-      <!-- 高级配置（可折叠）：登录声明 / 变量覆盖 / Cookie 清理范围，各态默认收拢 -->
+      <!-- 高级配置（可折叠）：默认密码、本地 Bug 复现地址、登录声明等低频设置 -->
       <div class="advanced-settings-section">
         <button type="button" class="advanced-toggle-btn" @click="showAdvanced = !showAdvanced">
           <div :class="showAdvanced ? 'i-lucide-chevron-down w-4 h-4' : 'i-lucide-chevron-right w-4 h-4'" />
           <span>高级配置</span>
-          <span class="optional">（登录声明 / 变量覆盖等，一般无需修改）</span>
+          <span class="optional">（默认密码 / 本地复现 / 登录声明等）</span>
         </button>
         <div v-show="showAdvanced" class="advanced-content">
+          <div class="form-row">
+            <label>默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
+            <input class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
+            <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
+          </div>
+
+          <!-- 本地 Bug 复现地址：替换测试链接的域名和端口，保留后续完整 URL -->
+          <div class="form-row">
+            <label>本地 Bug 复现地址 <span class="optional">（选填，填写本地项目的完整页面 URL）</span></label>
+            <input class="dt-input" v-model="newDomain.debugRedirect" placeholder="例: http://localhost:3000/web/#/home/..." />
+            <p class="field-hint">将测试链接的域名和端口替换为本地项目的对应值，后续路径、Hash 路由和查询参数全部保留；使用测试账号登录后自动打开。</p>
+          </div>
+          <div class="form-row" v-if="newDomain.debugRedirect">
+            <label>登录后打开复现页面</label>
+            <div class="debug-redirect-toggle" @click="newDomain.debugRedirectEnabled = !newDomain.debugRedirectEnabled">
+              <label class="toggle-switch" @click.stop>
+                <input v-model="newDomain.debugRedirectEnabled" type="checkbox" />
+                <span class="toggle-slider" />
+              </label>
+              <span class="toggle-label">{{ newDomain.debugRedirectEnabled ? '已启用' : '已禁用' }}</span>
+            </div>
+          </div>
+
           <!-- 登录声明编辑器（三层视图）：内置与导入的策略都可编辑 -->
           <div class="form-row recipe-form-row">
             <label>
@@ -1375,6 +1380,36 @@ async function runTrialLogin(): Promise<void> {
 <style scoped>
 @import '../../../shared/component-styles.scss';
 @import './config-panel-shared.scss';
+
+/* 抽屉表单：统一字段节奏与控件高度，嵌套编辑器也沿用同一尺寸。 */
+.domain-form > .form-row {
+  margin-bottom: 16px;
+}
+
+.domain-form > .form-row > label {
+  margin-bottom: 6px;
+  line-height: 18px;
+}
+
+.domain-form :deep(.dt-input) {
+  box-sizing: border-box;
+  min-height: 32px;
+  line-height: 18px;
+}
+
+.domain-form :deep(textarea.dt-input) {
+  min-height: 80px;
+}
+
+.domain-form :deep(.dt-button) {
+  box-sizing: border-box;
+  min-height: 32px;
+}
+
+.domain-form :deep(.domain-chip) {
+  box-sizing: border-box;
+  min-height: 28px;
+}
 
 /* 高级配置区域 */
 .advanced-settings-section {
@@ -1555,10 +1590,20 @@ async function runTrialLogin(): Promise<void> {
   border-color: rgba(99, 102, 241, 0.12);
 }
 
-/* toggle 开关使用共享 .toggle-switch / .toggle-slider（dark-mode.css，ADR-0003 D6） */
+/* 布尔设置与开关标签保持同一行；覆盖 .form-row label 的块级样式。 */
+.strategy-bool-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  user-select: none;
+}
+
 .debug-redirect-toggle .toggle-switch,
 .strategy-bool-toggle .toggle-switch {
   flex-shrink: 0;
+  margin-bottom: 0;
 }
 
 .toggle-label {
@@ -1790,6 +1835,12 @@ async function runTrialLogin(): Promise<void> {
 }
 
 /* ===== 关联账号（环境抽屉底部） ===== */
+.env-account-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
 .env-accounts-row .domain-chip-selector {
   margin-bottom: 8px;
 }

@@ -69,7 +69,7 @@
 
 ![账号切换：从验收测试切换为交付管理员](docs/images/account-switch.gif)
 
-*真实扩展操作的连续录像；演示 Cookie 为临时会话，不含真实业务数据。*
+*真实扩展操作的连续录像；当前账号与权限视图同步变化，演示 Cookie 为临时会话，不含真实业务数据。*
 
 #### 其他接入方式
 
@@ -143,9 +143,10 @@ npm run dev:edge      # Edge
 npm run build          # Chrome 版本
 npm run build:edge     # Edge 版本
 npm run zip:edge       # 打包为 zip
+npm run zip:firefox   # 打包 Firefox 版本（含 sources zip）
 ```
 
-> **维护者发布**：`npm run release` 一键构建并提交 Chrome/Edge 双商店，需 `.env` 中的商店发布凭证（字段说明见 `.env.example`，Chrome v2 / Edge 的变量命名差异见 `Makefile` 头部注释）。Chrome 使用 Web Store API v2 的服务账号认证。普通开发、构建和 CI 不读取发布凭证。
+> **维护者发布**：`make publish` 一键构建并提交 Chrome/Edge/Firefox 三商店，需 `.env` 中的商店发布凭证（字段说明见 `.env.example`，Chrome v2 / Edge 的变量命名差异见 `Makefile` 头部注释）。Chrome 使用 Web Store API v2 的服务账号认证。普通开发、构建和 CI 不读取发布凭证。
 
 ## 技术栈
 

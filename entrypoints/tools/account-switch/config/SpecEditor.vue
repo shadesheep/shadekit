@@ -557,11 +557,11 @@ defineExpose({ errors, invalid, spec: currentSpec });
     </div>
 
     <div class="scan-bar">
+      <span class="scan-hint">扫描环境 URL 所在标签页（只读，不点击、不提交）</span>
       <DtButton size="sm" :disabled="scanning" @click="runScan">
         <div class="i-lucide-scan-search w-3.5 h-3.5 mr-1" />
         {{ scanning ? '识别中…' : '识别环境页面上的登录表单' }}
       </DtButton>
-      <span class="scan-hint">扫描环境 URL 所在标签页（只读，不点击、不提交）</span>
     </div>
 
     <p v-if="scanNotice" class="scan-warn">
@@ -572,16 +572,16 @@ defineExpose({ errors, invalid, spec: currentSpec });
     <div v-if="scanFrame" class="scan-card">
       <div class="scan-head">
         <span class="i-lucide-clipboard-check w-4 h-4" />识别结果
-        <span v-if="scanFrames.length > 1" class="optional">（命中 {{ scanFrames.length }} 个 frame）</span>
+        <span v-if="scanFrames.length > 1" class="optional">（检测到 {{ scanFrames.length }} 个登录表单）</span>
       </div>
       <label v-for="(f, i) in scanFrames" :key="`${f.frameId}-${i}`" class="scan-frame-option">
         <input v-model="scanChoice" type="radio" :value="i" />
-        <span>{{ f.frameId === 0 ? '主页面' : `frame #${f.frameId}` }} · {{ f.frameUrl || '未知地址' }}</span>
+        <span>{{ f.frameId === 0 ? '主页面' : `页面区域 #${f.frameId}` }} · {{ f.frameUrl || '未知地址' }}</span>
       </label>
       <AuthStorageSelector v-model="authStorageSelection" :candidates="authStorageCandidates" />
       <div class="scan-actions">
-        <DtButton variant="primary" @click="applyScan">
-          <div class="i-lucide-check w-3.5 h-3.5 mr-1" />回填算子
+        <DtButton size="sm" variant="primary" @click="applyScan">
+          <div class="i-lucide-check w-3.5 h-3.5 mr-1" />使用识别结果
         </DtButton>
         <DtButton size="sm" @click="closeScan">取消</DtButton>
       </div>
@@ -756,9 +756,11 @@ defineExpose({ errors, invalid, spec: currentSpec });
               <input class="dt-input" :value="op.value" placeholder="填充值，支持变量（见下方胶囊）" @input="update(index, { value: ($event.target as HTMLInputElement).value })" />
               <div class="variable-row">
                 <span class="variable-label">插入变量</span>
-                <button v-for="hint in specInputHints(currentSpec)" :key="hint.token" type="button" class="variable-pill" :title="hint.label" @click="insertVar(index, hint.token)">
-                  {{ hint.token }}
-                </button>
+                <div class="variable-options">
+                  <button v-for="hint in specInputHints(currentSpec)" :key="hint.token" type="button" class="variable-pill" :title="hint.label" @click="insertVar(index, hint.token)">
+                    {{ hint.token }}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -993,28 +995,43 @@ defineExpose({ errors, invalid, spec: currentSpec });
 @import '../../../shared/component-styles.scss';
 @import './config-panel-shared.scss';
 
-.spec-editor { display: flex; flex-direction: column; gap: 10px; }
+.spec-editor { display: flex; flex-direction: column; gap: 12px; }
+.spec-editor :deep(.dt-input) { box-sizing: border-box; min-height: 32px; line-height: 18px; }
+.spec-editor :deep(textarea.dt-input) { min-height: 80px; }
+.spec-editor :deep(.dt-button) { box-sizing: border-box; min-height: 32px; }
 .spec-notice { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; background: rgba(99,102,241,.06); border: 1px solid rgba(99,102,241,.16); font-size: 12px; color: #4f46e5; }
 [data-dt-dark] .spec-notice { background: rgba(99,102,241,.12); border-color: rgba(99,102,241,.3); color: #93c5fd; }
 
 .spec-general-errors { display: flex; flex-direction: column; gap: 2px; }
 
 .editor-view-tabs { display: flex; gap: 6px; }
-.view-tab { padding: 4px 14px; border: 1px solid #e2e8f0; border-radius: 9999px; background: #fff; font-size: 12px; color: #64748b; cursor: pointer; transition: all .15s ease-out; }
+.view-tab { box-sizing: border-box; min-height: 30px; padding: 4px 14px; border: 1px solid #e2e8f0; border-radius: 9999px; background: #fff; font-size: 12px; color: #64748b; cursor: pointer; transition: all .15s ease-out; }
 .view-tab:hover { border-color: #93c5fd; color: #3b82f6; }
 .view-tab.active { background: linear-gradient(135deg,#6366f1,#3b82f6); border-color: transparent; color: #fff; }
 .view-tab:disabled { opacity: .45; cursor: not-allowed; }
 [data-dt-dark] .view-tab { background: var(--dt-dark-surface-1); border-color: var(--dt-dark-border); color: #8b949e; }
 
-.simple-form { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.scan-warn { margin: 0; font-size: 12px; color: #b45309; }
+
+.simple-form { display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
 [data-dt-dark] .simple-form { background: var(--dt-dark-surface-1); border-color: var(--dt-dark-border); }
-.simple-row { display: flex; align-items: center; gap: 8px; }
-.simple-label { width: 52px; flex-shrink: 0; font-size: 12px; color: #64748b; }
+.simple-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 96px; align-items: start; gap: 8px; }
+.simple-row > .dt-input { grid-column: 2 / -1; }
+.simple-label { line-height: 32px; font-size: 12px; color: #64748b; }
 [data-dt-dark] .simple-label { color: #8b949e; }
-.simple-token { flex-shrink: 0; padding: 2px 8px; border-radius: 9999px; background: rgba(99,102,241,.08); font-family: var(--font-mono); font-size: 12px; color: #4f46e5; }
+.simple-token { flex-shrink: 0; justify-self: end; margin-top: 4px; padding: 2px 8px; border-radius: 9999px; background: rgba(99,102,241,.08); font-family: var(--font-mono); font-size: 12px; line-height: 18px; white-space: nowrap; color: #4f46e5; }
 [data-dt-dark] .simple-token { background: rgba(99,102,241,.16); color: #93c5fd; }
 .inline-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; cursor: pointer; }
 [data-dt-dark] .inline-check { color: #8b949e; }
+.simple-form > .inline-check, .simple-form > .login-page-warning { margin-left: 60px; }
+.simple-form > .field-error { margin: 0 0 0 60px; }
+.login-page-warning { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .simple-row { grid-template-columns: 48px minmax(0, 1fr); }
+  .simple-token { grid-column: 2; justify-self: start; margin-top: 0; }
+  .simple-form > .inline-check, .simple-form > .login-page-warning { margin-left: 56px; }
+  .simple-form > .field-error { margin-left: 56px; }
+}
 
 .op-list { display: flex; flex-direction: column; gap: 8px; }
 .op-item { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
@@ -1026,7 +1043,7 @@ defineExpose({ errors, invalid, spec: currentSpec });
 .op-index { width: 20px; height: 20px; border: none; border-radius: 9999px; background: linear-gradient(135deg,#6366f1,#3b82f6); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
 .op-sel { flex: 1; max-width: 220px; }
 .op-actions { display: flex; gap: 4px; margin-left: auto; }
-.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #64748b; cursor: pointer; transition: all .15s ease-out; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 28px; height: 32px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #64748b; cursor: pointer; transition: all .15s ease-out; }
 .icon-btn:hover:not(:disabled) { border-color: #93c5fd; color: #3b82f6; }
 .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
 .icon-btn-danger:hover:not(:disabled) { color: #dc2626; border-color: #fecaca; }
@@ -1037,16 +1054,16 @@ defineExpose({ errors, invalid, spec: currentSpec });
 .op-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #94a3b8; flex: 1; min-width: 140px; }
 .op-field input, .op-field select { width: 100%; box-sizing: border-box; }
 .op-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; }
-.op-toolbar { display: flex; gap: 8px; }
+.op-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .selection-hint { align-self: center; font-size: 12px; color: #4f46e5; }
-.variable-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.variable-label { font-size: 12px; color: #94a3b8; }
+.variable-row { display: flex; align-items: baseline; gap: 6px; }
+.variable-label { flex-shrink: 0; font-size: 12px; color: #94a3b8; }
+.variable-options { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .variable-pill { padding: 1px 8px; border: 1px solid #e2e8f0; border-radius: 9999px; background: #fff; font-family: var(--font-mono); font-size: 12px; color: #475569; cursor: pointer; transition: all .15s ease-out; }
 .variable-pill:hover { border-color: #93c5fd; color: #3b82f6; }
 [data-dt-dark] .variable-pill { background: var(--dt-dark-surface-hover); border-color: var(--dt-dark-border); color: #cbd5e1; }
-.field-error { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: #dc2626; }
+.field-error { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; color: #dc2626; }
 [data-dt-dark] .field-error { color: #f87171; }
-.scan-warn { margin: 0; font-size: 12px; color: #b45309; }
 
 .vars-section { border-top: 1px solid #e2e8f0; padding-top: 10px; }
 [data-dt-dark] .vars-section { border-top-color: var(--dt-dark-border); }
@@ -1063,8 +1080,8 @@ defineExpose({ errors, invalid, spec: currentSpec });
 [data-dt-dark] .json-textarea { background: var(--dt-dark-base); color: #f0f6fc; border-color: var(--dt-dark-border); }
 .json-issues { display: flex; flex-direction: column; gap: 2px; }
 
-.scan-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.scan-hint { font-size: 12px; color: #94a3b8; }
+.scan-bar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.scan-hint { margin-right: auto; font-size: 12px; line-height: 1.5; color: #94a3b8; }
 [data-dt-dark] .scan-hint { color: #64748b; }
 .scan-dismiss { margin-left: auto; border: none; background: transparent; padding: 0; font-size: 12px; color: inherit; opacity: .75; cursor: pointer; }
 .scan-dismiss:hover { opacity: 1; text-decoration: underline; }
@@ -1074,5 +1091,5 @@ defineExpose({ errors, invalid, spec: currentSpec });
 [data-dt-dark] .scan-head { color: #93c5fd; }
 .scan-frame-option { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #475569; cursor: pointer; }
 [data-dt-dark] .scan-frame-option { color: #cbd5e1; }
-.scan-actions { display: flex; gap: 8px; }
+.scan-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

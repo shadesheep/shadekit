@@ -34,7 +34,7 @@
 | `{password}` | 当前登录账号的密码 |
 | `{origin}` | 当前登录 origin（`https://host[:port]`） |
 | `{targetUrl}` | 快捷登录 / Bug 复现传入的目标 URL（跨 origin 导航触发 R3） |
-| `{debugRedirect}` | 环境配置的「Bug 复现地址」（跨 origin 导航触发 R3） |
+| `{debugRedirect}` | 环境配置的「本地 Bug 复现地址」（跨 origin 导航触发 R3） |
 
 ### 0.3 辅助输入（`aux`）
 

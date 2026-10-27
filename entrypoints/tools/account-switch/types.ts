@@ -88,7 +88,7 @@ export interface AuthContext {
    * 供 spec 以 `{targetUrl}` 拼跨 origin 导航；无明确目标时为空。
    */
   targetUrl?: string;
-  /** Bug 复现地址（输入命名空间 `{debugRedirect}`）：登录成功后自动进入的页面，通常来自测试反馈 */
+  /** 本地 Bug 复现页面（输入命名空间 `{debugRedirect}`）：替换测试环境域名和端口，保留路径、Hash 路由和查询参数 */
   debugRedirect?: string;
 }
 
@@ -123,8 +123,8 @@ export interface DomainConfig {
    * 导入的具名策略（如 custom-login）用自己的 `spec.template` 作显示名。
    */
   loginMethod?: string;
-  debugRedirect?: string; // Bug 复现地址：登录成功后自动进入的页面，如 http://localhost:8888/#/bug/123
-  debugRedirectEnabled?: boolean; // 「登录后自动进入」开关默认值
+  debugRedirect?: string; // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
+  debugRedirectEnabled?: boolean; // 「登录后打开复现页面」开关默认值
   defaultPassword?: string; // 快进登录默认密码
   /** 「清除本域 Cookie」是否包含父域（默认 false，仅精确 host；ADR-0012 D8） */
   cookieClearIncludeParent?: boolean;

@@ -35,23 +35,26 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers \
   /tmp/shadekit-readme-tools/node_modules/.bin/playwright install chromium
 
 # 另一个终端保持演示服务运行
-node docs/readme-demo/capture.mjs all
+PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers node docs/readme-demo/capture.mjs all
 ```
 
-脚本执行真实的「新建环境 → 识别 → 回填 → 拾取 → 确认认证键 → 保存配置与账号」，打开 Shadow DOM 账号面板，并断言 `data-current-role` 从 `tester` 变为 `admin`；同时验证认证键被清除、无关本地存储保留。录像前通过本机演示 API 建立真实 HttpOnly 测试员会话，再创建录制标签页，因此 GIF 从测试员控制台开始，不包含准备阶段的登录表单或密码提示。无头浏览器不总是分发扩展快捷键，此时通过扩展自己的后台消息唤起面板，不渲染替代 UI。面板保持产品原始尺寸。
+脚本执行真实的「新建环境 → 识别 → 使用识别结果 → 拾取 → 确认认证键 → 保存配置与账号」，打开 Shadow DOM 账号面板，并断言 `data-current-role` 从 `tester` 变为 `admin`；同时验证认证键被清除、无关本地存储保留。「添加环境」首图在表单锁定后收拢高级配置，完整展示基础字段、关联账号和添加按钮，随后重新展开高级配置继续采集。演示页和录制中的扩展控件固定使用 `data-dt-dark` 暗色模式，采集脚本同时设置扩展页 `localStorage` 与 `chrome.storage.local`，并在截图前检查主题。
+
+录像前通过本机演示 API 建立真实 HttpOnly 测试员会话，再创建录制标签页，因此 GIF 从测试员控制台开始，不包含准备阶段的登录表单或密码提示。点击前会悬停高亮目标账号；切换前后都会验证当前账号区中的姓名、邮箱、角色和权限文案，避免只验证内部角色而画面看不出变化。无头浏览器不总是分发扩展快捷键，此时通过扩展自己的后台消息唤起面板，不渲染替代 UI。面板保持产品原始尺寸。
 
 采集脚本从当前临时 Playwright 安装中解析配套 Chromium 路径，不依赖某个本机浏览器目录；`PLAYWRIGHT_BROWSERS_PATH` 需在安装和采集时保持一致。需要 MV3 扩展支持时应使用 Chrome for Testing，系统 Chrome 可能禁用侧载扩展。可用 `CHROME_PATH` 显式指定可执行文件。
 
 分开执行（按顺序复用同一个隔离 profile；若改目录，需同步修改 `SHADEKIT_DEMO_PROFILE`）：
 
 ```bash
+export PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers
 node docs/readme-demo/capture.mjs setup
 node docs/readme-demo/capture.mjs hero
 node docs/readme-demo/capture.mjs record
 node docs/readme-demo/capture.mjs tools
 ```
 
-可用环境变量：`SHADEKIT_DEMO_PROFILE`、`SHADEKIT_DEMO_RAW`、`SHADEKIT_DEMO_VIDEO`、`CHROME_PATH`。原始 PNG、WebM 和诊断文件保存在 `docs/images/raw/`（Git 忽略）或指定的 `/tmp` 目录，不作为公开素材直接引用。
+可用环境变量：`SHADEKIT_DEMO_PROFILE`、`SHADEKIT_DEMO_RAW`、`SHADEKIT_DEMO_VIDEO`、`PLAYWRIGHT_MODULE`、`PLAYWRIGHT_BROWSERS_PATH`、`CHROME_PATH`。原始 PNG、WebM 和诊断文件保存在 `docs/images/raw/`（Git 忽略）或指定的 `/tmp` 目录，不作为公开素材直接引用。
 
 ## 排版与 GIF
 
@@ -65,7 +68,9 @@ python3 docs/readme-demo/compose.py --validate
 python3 docs/readme-demo/compose.test.py
 ```
 
-当原始素材在 `/tmp` 时，补 `SHADEKIT_DEMO_RAW=/path/to/raw`；编码单独录制的标签页时补 `SHADEKIT_DEMO_SWITCH_VIDEO=/path/to/video.webm`。`all` 和 `record` 都会录像，并在开始时清除该原始目录中旧的验证清单；只有本次角色断言通过后才写入新的 `verified-switch-video.json`，排版脚本据此选择录像，显式路径也必须与该清单一致。清单只记录角色断言和本机临时路径，不含凭据。排版只做裁切、缩放、边框和文字说明，不重绘扩展界面，也不补造登录成功帧；配方图裁掉演示页的密码提示。GIF 为 1152px 宽、约 13 秒，脚本逐帧校验时长和体积。
+当原始素材在 `/tmp` 时，补 `SHADEKIT_DEMO_RAW=/path/to/raw`；编码单独录制的标签页时补 `SHADEKIT_DEMO_SWITCH_VIDEO=/path/to/video.webm`。`all` 和 `record` 都会录像，并在开始时清除该原始目录中旧的验证清单；只有本次角色与可见账号断言通过后才写入新的 `verified-switch-video.json`，排版脚本据此选择录像，显式路径也必须与该清单一致。清单只记录角色、可见账号断言和本机临时路径，不含凭据。
+
+排版只做裁切、缩放、边框和文字说明，不重绘扩展界面，也不补造登录成功帧；配方图裁掉演示页的密码提示。GIF 从 1440×900 真实录像裁出左上角为 `(240, 0)` 的 1200×750 有效区域，再缩放为 1152×720，去掉侧栏和底部闲置区域，让当前账号区与操作面板更清楚。脚本逐帧校验尺寸、8–15 秒时长和 8 MiB 体积上限。
 
 ## 验证
 

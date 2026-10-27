@@ -40,6 +40,8 @@ import DomainsPanel, { type EnvSavePayload } from "./config/DomainsPanel.vue";
 import StrategyLibrary from "./config/StrategyLibrary.vue";
 import DtButton from "../../shared/components/DtButton.vue";
 import DtDrawer from "../../shared/components/DtDrawer.vue";
+import DtPanel from "../../shared/components/DtPanel.vue";
+import DtEmptyState from "../../shared/components/DtEmptyState.vue";
 
 const props = defineProps<{ editEnv?: string }>();
 const emit = defineEmits<{ editEnvConsumed: [] }>();
@@ -928,16 +930,17 @@ function saveGlobalDefaultPassword() {
       <!-- 顶部栏：规模统计（US-7）+ 环境操作（「＋ 环境」降级为次要按钮） -->
       <div class="main-topbar">
         <span class="toolbar-count">{{ envCount }} 个环境 · {{ accountCount }} 个账号</span>
-        <span class="main-topbar-spacer" />
-        <DtButton size="sm" title="从文件导入登录策略" @click="domainsPanelRef?.openImport()">
-          <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入登录策略…
-        </DtButton>
-        <DtButton size="sm" @click="domainsPanelRef?.openCreate()">
-          <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />环境
-        </DtButton>
-        <DtButton size="sm" @click="addAccountToView">
-          <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />账号
-        </DtButton>
+        <div class="main-topbar-actions">
+          <DtButton size="sm" title="从文件导入登录策略" @click="domainsPanelRef?.openImport()">
+            <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入登录策略…
+          </DtButton>
+          <DtButton size="sm" @click="domainsPanelRef?.openCreate()">
+            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />环境
+          </DtButton>
+          <DtButton size="sm" @click="addAccountToView">
+            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />账号
+          </DtButton>
+        </div>
       </div>
 
       <!-- 账号表单（右侧抽屉：＋ 账号 / 编辑 / 克隆 / 换环境 / 绑定到环境 共用） -->
@@ -1012,20 +1015,24 @@ function saveGlobalDefaultPassword() {
       </DtDrawer>
 
       <!-- 空态（US-6）：无环境无账号时的引导 -->
-      <div v-if="isEmptyState" class="form-card">
-        <div class="empty-list">
-          <div class="i-lucide-globe w-8 h-8 text-slate-300 dark:text-slate-600 mb-2" />
-          <p class="empty-title">还没有任何环境与账号</p>
-          <p class="empty-hint">
-            先点「＋ 环境」登记环境，环境里可以直接勾选已有账号或就地新增账号。
-          </p>
-          <div class="empty-actions">
+      <DtPanel v-if="isEmptyState">
+        <DtEmptyState class="environment-empty-state">
+          <template #icon>
+            <div class="empty-state-icon">
+              <div class="i-lucide-globe w-8 h-8" />
+            </div>
+          </template>
+          <span class="empty-title">还没有任何环境与账号</span>
+          <template #hint>
+            <span class="empty-hint">先创建一个环境，再在里面勾选已有账号或就地新增账号。</span>
+          </template>
+          <template #actions>
             <DtButton variant="primary" @click="domainsPanelRef?.openCreate()">
               <div class="i-lucide-plus w-4 h-4 mr-1" />新建环境
             </DtButton>
-          </div>
-        </div>
-      </div>
+          </template>
+        </DtEmptyState>
+      </DtPanel>
 
       <!-- 主视图：表格 + 环境轨道（原型 ?variant=B；环境退化为左侧筛选轨道）。空态下隐藏骨架，避免与引导卡重复 -->
       <div v-else class="env-rail-layout">
@@ -1467,50 +1474,95 @@ function saveGlobalDefaultPassword() {
 .main-topbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
-.main-topbar-spacer {
-  flex: 1;
+.main-topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
 }
 
-/* 空态引导卡：标题与行动按钮（初次进入时替代空的轨道+表格骨架） */
+/* 空态引导卡：使用共享 Panel / EmptyState，保持与其他工具页一致。 */
+.environment-empty-state {
+  box-sizing: border-box;
+  min-height: 320px;
+  padding: 40px 24px;
+}
+
+.environment-empty-state :deep(.dt-empty-state-icon) {
+  margin-bottom: 16px;
+  opacity: 1;
+}
+
+.environment-empty-state :deep(.dt-empty-state-hint) {
+  margin: 8px 0 0;
+  opacity: 1;
+}
+
+.environment-empty-state :deep(.dt-empty-state-actions) {
+  margin-top: 20px;
+}
+
+.empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 16px;
+  background: rgba(99, 102, 241, 0.08);
+  color: #6366f1;
+}
+
+[data-dt-dark] .empty-state-icon {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(129, 140, 248, 0.28);
+  color: #93c5fd;
+}
+
 .empty-title {
-  margin: 0 0 4px;
-  font-size: 14px;
+  display: block;
+  font-size: 16px;
+  line-height: 24px;
   font-weight: 600;
-  color: #334155;
+  color: #0f172a;
 }
 
 [data-dt-dark] .empty-title {
-  color: #c9d1d9;
-}
-
-.empty-actions {
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.empty-hint code {
-  padding: 1px 5px;
-  font-size: 12px;
-  background: rgba(99, 102, 241, 0.08);
-  border-radius: 4px;
-  user-select: all;
-}
-
-[data-dt-dark] .empty-hint code {
-  background: rgba(99, 102, 241, 0.18);
+  color: #f1f5f9;
 }
 
 .empty-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #94a3b8;
-  max-width: 420px;
+  display: block;
+  max-width: 460px;
+  font-size: 13px;
+  line-height: 1.7;
+  text-wrap: balance;
+  color: #64748b;
+}
+
+[data-dt-dark] .empty-hint {
+  color: #8b949e;
+}
+
+@media (max-width: 640px) {
+  .main-topbar-actions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .environment-empty-state {
+    min-height: 280px;
+    padding: 32px 16px;
+  }
 }
 
 /* ===== 环境卡片 ===== */

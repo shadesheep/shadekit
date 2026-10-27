@@ -29,8 +29,8 @@ npm run dev          # Chrome 开发模式（dev:firefox / dev:edge 对应其他
 | `npm run format` | Biome 格式化 |
 | `npm run test` | Vitest 单元测试 |
 | `npm run build` / `build:edge` | 构建 Chrome / Edge 版本 |
-| `npm run zip` / `zip:edge` | 打包商店 zip |
-| `npm run release` | 双商店发布（**仅维护者**，需 `.env` 发布凭证，见 `.env.example`） |
+| `npm run zip` / `zip:edge` / `zip:firefox` | 打包 Chrome / Edge / Firefox 商店 zip |
+| `make publish` / `npm run release` | 三商店发布（**仅维护者**，需 `.env` 发布凭证，见 `.env.example`） |
 
 提交 PR 前请确保 `check`、`lint`、`test` 全部通过——CI 会执行同样三道关卡加构建。
 

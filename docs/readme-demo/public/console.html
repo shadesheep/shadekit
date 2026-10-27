@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-dt-dark>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -29,6 +29,18 @@
       <div class="identity-menu" id="identity-menu" hidden><b>{{displayName}}</b><span>{{role}}@shadesheep.test</span><button type="button" id="logout-button">退出登录 ↗</button></div>
 
       <div class="console-content">
+        <section class="current-account" id="current-account" aria-label="当前登录账号">
+          <div class="current-account-identity">
+            <span class="current-account-avatar" aria-hidden="true">{{localName}}</span>
+            <div>
+              <p class="current-account-kicker"><span></span>CURRENT ACCOUNT / 当前登录账号</p>
+              <div class="current-account-name"><strong id="current-account-name">{{localName}}</strong><span>{{title}}</span></div>
+              <p class="current-account-email" id="current-account-email">{{role}}@shadesheep.test</p>
+            </div>
+          </div>
+          <div class="current-account-scope"><span>当前权限视图</span><strong id="current-account-scope">全部项目 · 发布与权限管理</strong></div>
+        </section>
+
         <section class="page-heading"><div><p class="eyebrow">DELIVERY OVERVIEW <span> / </span> WEEK 43</p><h1 id="welcome-heading">{{localName}}，交付尽在掌握。</h1><p id="role-description">{{title}}</p></div><div class="heading-actions"><button type="button" class="quiet-button" id="export-button"><span data-icon="download"></span>导出周报</button><button type="button" class="dark-button" id="new-delivery"><span>＋</span>新建交付</button></div></section>
 
         <section class="metric-grid" aria-label="交付核心指标">

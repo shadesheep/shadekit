@@ -277,7 +277,7 @@ const VARIABLE_LABELS: Record<RecipeVariableName, string> = {
   username: "账号",
   password: "密码",
   origin: "环境 origin",
-  debugRedirect: "Bug 复现地址",
+  debugRedirect: "本地 Bug 复现地址",
 };
 
 export interface VariableHint {

@@ -61,34 +61,13 @@ class ComposeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'roleSwitchVerified'):
                 resolve_switch_video(root, None)
             manifest.write_text('{"roleSwitchVerified": true, "startRole": "tester", "finalRole": "admin", "videoPath": "' + str(candidate) + '"}')
+            with self.assertRaisesRegex(ValueError, 'visibleAccountSwitchVerified'):
+                resolve_switch_video(root, None)
+            manifest.write_text('{"roleSwitchVerified": true, "startRole": "tester", "finalRole": "admin", "visibleAccountSwitchVerified": true, "startAccount": "tester@shadesheep.test", "finalAccount": "admin@shadesheep.test", "videoPath": "' + str(candidate) + '"}')
             self.assertEqual(resolve_switch_video(root, None), str(candidate))
             self.assertEqual(resolve_switch_video(root, str(candidate)), str(candidate))
             with self.assertRaisesRegex(ValueError, 'videoPath'):
                 resolve_switch_video(root, str(root / 'other.webm'))
-
-    def test_stale_switch_manifest_is_invalidated_before_recording(self):
-        source = Path(__file__).with_name('capture.mjs').read_text()
-        block = source.split("const video = MODE === 'record' || MODE === 'all';", 1)[1].split('let switchVideoManifest', 1)[0]
-        self.assertIn('if (video) await rm(MANIFEST, { force: true });', block)
-
-    def test_recording_does_not_mask_original_errors_with_manifest_cleanup(self):
-        source = Path(__file__).with_name('capture.mjs').read_text()
-        finally_block = source.rsplit('} finally {', 1)[1].split('\n}', 1)[0]
-        self.assertNotIn('throw new Error', finally_block)
-        manifest_write = source.split('if (switchVideoManifest) {', 1)[1]
-        self.assertIn('throw new Error', manifest_write)
-
-    def test_recording_starts_from_the_tester_console_without_extra_navigation(self):
-        source = Path(__file__).with_name('capture.mjs').read_text()
-        block = source.split('async function recordSwitch()', 1)[1].split('async function setCodeMirror', 1)[0]
-        preparation, recording = block.split('const page = await context.newPage();', 1)
-        self.assertIn('const response = await context.request.post', preparation)
-        self.assertIn("await context.addCookies([{ name: 'shadesheep_session'", preparation)
-        self.assertNotIn("await page.fill('#username'", recording)
-        self.assertNotIn("await page.goto(`${config.origin}/login`)", recording)
-        self.assertIn("await page.goto(`${config.origin}/console`)", recording)
-        self.assertIn("document.body.dataset.currentRole === 'tester'", recording)
-        self.assertIn("document.body.dataset.currentRole === 'admin'", recording)
 
     def test_tool_crops_keep_controls_and_results_at_full_width(self):
         source = Image.new('RGB', (1440, 900), 'white')

@@ -39,7 +39,7 @@ const context = await chromium.launchPersistentContext(PROFILE, {
   executablePath,
   headless: true,
   viewport: { width: 1440, height: 900 },
-  deviceScaleFactor: 1,
+  colorScheme: "dark",
   ...(video
     ? { recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } } }
     : {}),
@@ -52,10 +52,21 @@ const context = await chromium.launchPersistentContext(PROFILE, {
     "--no-first-run",
   ],
 });
+// Extension pages read localStorage; content-script controls read chrome.storage.local.
+await context.addInitScript(() => {
+  if (location.protocol === "chrome-extension:")
+    localStorage.setItem("devtools-theme", "dark");
+});
 
 const pageErrors = [];
 const recordedPages = [];
 const shot = async (page, name) => {
+  if (
+    !(await page.evaluate(() =>
+      document.documentElement.hasAttribute("data-dt-dark"),
+    ))
+  )
+    throw new Error(`Dark mode was not active before capturing ${name}`);
   await page.screenshot({
     path: resolve(OUT, `${name}.png`),
     animations: "disabled",
@@ -81,7 +92,7 @@ try {
           envBadge: cfg.envBadge,
           tabOrder: ["users", "quicklogin"],
         },
-        "devtools-theme": "light",
+        "devtools-theme": "dark",
       });
     }, config);
   }
@@ -112,11 +123,39 @@ try {
       if (!host.shadowRoot?.querySelector(".as-account-card"))
         throw new Error("ShadeKit account cards did not render");
     });
+    const panelIsDark = await page
+      .locator("#devtools-panel")
+      .evaluate(
+        (host) =>
+          host.hasAttribute("data-dt-dark") &&
+          Boolean(
+            host.shadowRoot?.querySelector(".dt-shadow-ui[data-dt-dark]"),
+          ),
+      );
+    if (!panelIsDark)
+      throw new Error("ShadeKit account panel is not in dark mode");
+  }
+
+  async function waitForVisibleAccount(page, expected) {
+    await page.waitForFunction(
+      ({ name, email, title, scope }) => {
+        const text =
+          document.querySelector("#current-account")?.textContent || "";
+        return [name, email, title, scope].every((value) =>
+          text.includes(value),
+        );
+      },
+      expected,
+      { timeout: 30000 },
+    );
   }
 
   async function setupRecipe() {
     for (const page of context.pages()) await page.close();
-    await worker.evaluate(() => chrome.storage.local.clear());
+    await worker.evaluate(async () => {
+      await chrome.storage.local.clear();
+      await chrome.storage.local.set({ "devtools-theme": "dark" });
+    });
     const demo = await context.newPage();
     await demo.goto(`${config.origin}/login`);
     await demo.evaluate(() => {
@@ -145,7 +184,7 @@ try {
       throw new Error("Non-auth storage key was offered for cleanup");
     }
     await drawer
-      .getByRole("button", { name: "锁定所选表单", exact: true })
+      .getByRole("button", { name: "使用识别结果", exact: true })
       .click();
     await drawer.locator(".locator-state-locked").waitFor();
     const autoLoginUrl = await drawer
@@ -161,6 +200,8 @@ try {
     await drawer.locator(".locator-warning").waitFor({ state: "detached" });
     await drawer.locator(".login-page-warning").waitFor({ state: "detached" });
     console.log("Verified automatic form lock login page:", autoLoginUrl);
+    await drawer.getByRole("button", { name: /高级配置/ }).click();
+    await drawer.locator(".advanced-content").waitFor({ state: "hidden" });
     await pause(250);
     await drawer.locator(".dt-drawer-body").evaluate((el) => {
       el.scrollTop = 0;
@@ -170,6 +211,8 @@ try {
       animations: "disabled",
     });
     console.log("captured recipe-01-environment.png");
+    await drawer.getByRole("button", { name: /高级配置/ }).click();
+    await drawer.locator(".advanced-content").waitFor({ state: "visible" });
 
     await drawer
       .getByRole("button", { name: "识别环境页面上的登录表单" })
@@ -182,7 +225,9 @@ try {
       animations: "disabled",
     });
     console.log("captured recipe-02-scan.png");
-    await drawer.getByRole("button", { name: "回填算子", exact: true }).click();
+    await drawer
+      .getByRole("button", { name: "使用识别结果", exact: true })
+      .click();
     await drawer.locator(".scan-card").waitFor({ state: "detached" });
     const fieldValues = await drawer
       .locator(".target-value")
@@ -269,18 +314,44 @@ try {
         op: "clear.storage",
         area: "local",
         range: [
-          "token", "accessToken", "access_token", "refreshToken", "refresh_token",
-          "idToken", "id_token", "authToken", "auth_token", "sessionToken", "jwt",
-          "Authorization", "expireAt", "expiresAt", "expireTime", "expiration",
-          "expiresIn", "userInfo", "user_info", "tokenType",
+          "token",
+          "accessToken",
+          "access_token",
+          "refreshToken",
+          "refresh_token",
+          "idToken",
+          "id_token",
+          "authToken",
+          "auth_token",
+          "sessionToken",
+          "jwt",
+          "Authorization",
+          "expireAt",
+          "expiresAt",
+          "expireTime",
+          "expiration",
+          "expiresIn",
+          "userInfo",
+          "user_info",
+          "tokenType",
         ],
       },
       {
         op: "clear.storage",
         area: "session",
         range: [
-          "token", "accessToken", "access_token", "refreshToken", "refresh_token",
-          "idToken", "id_token", "authToken", "auth_token", "sessionToken", "jwt", "Authorization",
+          "token",
+          "accessToken",
+          "access_token",
+          "refreshToken",
+          "refresh_token",
+          "idToken",
+          "id_token",
+          "authToken",
+          "auth_token",
+          "sessionToken",
+          "jwt",
+          "Authorization",
         ],
       },
     ];
@@ -417,22 +488,38 @@ try {
     await page.waitForFunction(
       () => document.body.dataset.currentRole === "tester",
     );
+    await waitForVisibleAccount(page, {
+      name: "周然",
+      email: "tester@shadesheep.test",
+      title: "验收测试",
+      scope: "验收任务 · 回归与结果提交",
+    });
     await page.locator("#shadekit-env-badge-host").waitFor();
     await pause(1800);
     await shot(page, "switch-01-before");
     await openPanel(page);
-    await pause(2000);
+    await pause(1200);
+    const adminCardHandle = await page
+      .locator("#devtools-panel")
+      .evaluateHandle((host) => {
+        const card = [
+          ...host.shadowRoot.querySelectorAll(".as-account-card"),
+        ].find((el) => el.textContent.includes("林屿"));
+        if (!card) throw new Error("Admin account not found in the real panel");
+        return card;
+      });
+    const adminCard = adminCardHandle.asElement();
+    if (!adminCard) throw new Error("Admin account handle was not an element");
+    await adminCard.hover();
+    await pause(1000);
     await shot(page, "switch-02-panel");
-    const clicked = await page.locator("#devtools-panel").evaluate((host) => {
-      const card = [
-        ...host.shadowRoot.querySelectorAll(".as-account-card"),
-      ].find((el) => el.textContent.includes("林屿"));
-      if (!card) throw new Error("Admin account not found in the real panel");
+    const clicked = await adminCard.evaluate((card) => {
       card.dispatchEvent(
         new MouseEvent("click", { bubbles: true, composed: true }),
       );
       return card.textContent;
     });
+    await adminCard.dispose();
     console.log("clicked real account card:", clicked);
     try {
       await page.waitForFunction(
@@ -440,6 +527,12 @@ try {
         null,
         { timeout: 30000 },
       );
+      await waitForVisibleAccount(page, {
+        name: "林屿",
+        email: "admin@shadesheep.test",
+        title: "交付管理员",
+        scope: "全部项目 · 发布与权限管理",
+      });
     } catch (error) {
       await shot(page, "switch-failure");
       const state = await page.evaluate(() => ({
@@ -491,9 +584,12 @@ try {
       roleSwitchVerified: true,
       startRole: "tester",
       finalRole: "admin",
+      visibleAccountSwitchVerified: true,
+      startAccount: "tester@shadesheep.test",
+      finalAccount: "admin@shadesheep.test",
       videoPath: await page.video()?.path(),
     };
-    console.log("Verified actual role switch: tester → admin");
+    console.log("Verified visible account switch: tester → admin");
     const storageAfterSwitch = await page.evaluate(() => ({
       token: localStorage.getItem("token"),
       theme: localStorage.getItem("themePreference"),

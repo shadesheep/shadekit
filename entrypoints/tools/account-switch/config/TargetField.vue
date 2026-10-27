@@ -204,7 +204,7 @@ async function pick(): Promise<void> {
 
 <template>
   <div class="target-field">
-    <div class="target-row">
+    <div class="target-row" :class="{ 'target-row-auto': isAuto }">
       <select
         class="dt-input target-kind"
         :value="kind"
@@ -314,9 +314,16 @@ async function pick(): Promise<void> {
 }
 
 .target-kind {
-  max-width: 130px;
-  flex-shrink: 0;
+  width: 156px;
+  max-width: 100%;
+  flex: 0 0 156px;
 }
+.target-row-auto .target-kind {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 
 .target-value {
   flex: 1;
@@ -324,6 +331,8 @@ async function pick(): Promise<void> {
 }
 
 .pick-btn {
+  box-sizing: border-box;
+  min-height: 32px;
   flex-shrink: 0;
   font-size: 12px;
 }
@@ -332,8 +341,9 @@ async function pick(): Promise<void> {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  box-sizing: border-box;
+  width: 30px;
+  height: 32px;
   flex-shrink: 0;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
@@ -450,7 +460,9 @@ async function pick(): Promise<void> {
 }
 
 .target-hint {
+  margin: 0;
   font-size: 12px;
+  line-height: 1.5;
   font-family: var(--font-mono);
   color: #94a3b8;
 }
