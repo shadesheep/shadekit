@@ -1,0 +1,2 @@
+# spike 生成的转译产物（由 esbuild 从 entrypoints/ 现有源码生成）
+.gen-*.mjs
