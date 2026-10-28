@@ -18,6 +18,7 @@ import {
   injectStylesIntoShadowRoot,
   preloadShadowStyles,
 } from "./shadow-style-injector";
+import { getFloatPanelPosition } from "./float-panel-position";
 // 样式经标准 Vite 管线打包为 content-scripts/content.css
 // （cssInjectionMode: 'ui' → 不注入页面，由 shadow-style-injector 运行时
 // fetch 后注入各 Shadow Root）。导入顺序即最终 CSS 级联顺序。
@@ -130,9 +131,26 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-/** 浮动面板的外部点击/键盘关闭监听器引用（用于清理） */
+/** 浮动面板监听器与动态定位资源（关闭时统一清理） */
 let floatPanelOutsideClick: ((e: MouseEvent) => void) | null = null;
 let floatPanelEscHandler: ((e: KeyboardEvent) => void) | null = null;
+let floatPanelRepositionHandler: (() => void) | null = null;
+let floatPanelResizeObserver: ResizeObserver | null = null;
+let floatPanelPositionFrame: number | null = null;
+
+function positionFloatPanel(
+  panelHost: HTMLDivElement,
+  anchor: { x: number; y: number },
+): void {
+  // offsetWidth/Height 不受入场 scale 动画影响，避免动画期间测得偏小。
+  const position = getFloatPanelPosition(
+    anchor,
+    { width: panelHost.offsetWidth, height: panelHost.offsetHeight },
+    { width: window.innerWidth, height: window.innerHeight },
+  );
+  panelHost.style.left = `${position.x}px`;
+  panelHost.style.top = `${position.y}px`;
+}
 
 async function openAccountSwitcherAtMouse() {
   const tool = allTools.find((t) => t.id === "account-switch");
@@ -154,7 +172,7 @@ async function openAccountSwitcherAtMouse() {
   const panelHost = document.createElement("div");
   panelHost.id = "devtools-panel";
   panelHost.className = "panel-host devtools-panel devtools-panel-float";
-  panelHost.style.left = `${Math.min(x + 12, window.innerWidth - 320)}px`;
+  panelHost.style.left = `${x + 12}px`;
   panelHost.style.top = `${Math.max(y - 10, 8)}px`;
 
   // 创建 Shadow Root 并注入样式
@@ -185,7 +203,7 @@ async function openAccountSwitcherAtMouse() {
   // 在 Shadow Root 内创建面板结构
   const titleBar = document.createElement("div");
   titleBar.className = "devtools-panel-title";
-  titleBar.innerHTML = `<span>${tool.contentScript.panel.title}</span><button class="devtools-panel-close">&times;</button>`;
+  titleBar.innerHTML = `<span>${tool.contentScript.panel.title}</span><button type="button" class="devtools-panel-close" title="关闭账号切换面板" aria-label="关闭账号切换面板">&times;</button>`;
   (titleBar.querySelector(
     ".devtools-panel-close",
   ) as HTMLButtonElement)!.onclick = () => {
@@ -215,6 +233,23 @@ async function openAccountSwitcherAtMouse() {
 
   activePanel = { toolId: "account-switch-float", el: panelHost };
 
+  // 内容异步加载、搜索过滤和窗口缩放都会改变可用空间，统一合并到下一帧定位。
+  const anchor = { x, y };
+  const reposition = () => {
+    if (floatPanelPositionFrame !== null) {
+      cancelAnimationFrame(floatPanelPositionFrame);
+    }
+    floatPanelPositionFrame = requestAnimationFrame(() => {
+      floatPanelPositionFrame = null;
+      if (panelHost.isConnected) positionFloatPanel(panelHost, anchor);
+    });
+  };
+  floatPanelRepositionHandler = reposition;
+  window.addEventListener("resize", reposition);
+  floatPanelResizeObserver = new ResizeObserver(reposition);
+  floatPanelResizeObserver.observe(panelHost);
+  reposition();
+
   // 点击外部关闭 — 使用 composedPath 穿透 Shadow DOM 边界
   floatPanelOutsideClick = (e: MouseEvent) => {
     const path = e.composedPath();
@@ -236,12 +271,14 @@ async function openAccountSwitcherAtMouse() {
   try {
     const mod = await tool.contentScript.panel.component();
     const comp = mod.default || mod.__default;
+    if (activePanel?.el !== panelHost) return;
     if (!comp || (typeof comp !== "function" && typeof comp !== "object")) {
       content.textContent = "组件加载失败";
       return;
     }
     const app = createApp(comp);
     app.mount(content);
+    reposition();
   } catch (e) {
     content.textContent = "加载失败";
     systemLog.error("Float panel load error", {
@@ -256,6 +293,16 @@ function closeFloatPanel() {
     activePanel.el.remove();
   }
   activePanel = null;
+  if (floatPanelPositionFrame !== null) {
+    cancelAnimationFrame(floatPanelPositionFrame);
+    floatPanelPositionFrame = null;
+  }
+  floatPanelResizeObserver?.disconnect();
+  floatPanelResizeObserver = null;
+  if (floatPanelRepositionHandler) {
+    window.removeEventListener("resize", floatPanelRepositionHandler);
+    floatPanelRepositionHandler = null;
+  }
   if (floatPanelOutsideClick) {
     document.removeEventListener("mousedown", floatPanelOutsideClick);
     floatPanelOutsideClick = null;

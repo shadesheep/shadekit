@@ -21,7 +21,6 @@ describe("loginRecoveryFor", () => {
   it("classifies automatic form failures with actionable primary messages", () => {
     expect(loginRecoveryFor(ErrorCodes.LOGIN_FORM_NOT_FOUND)).toEqual({
       message: "未找到可用的登录表单。请确认页面已打开并完成加载后重试。",
-      retry: true,
       manualLocate: true,
     });
     expect(
@@ -39,7 +38,6 @@ describe("loginRecoveryFor", () => {
       ErrorCodes.FRAME_NOT_FOUND,
     ]) {
       expect(loginRecoveryFor(code)).toEqual({
-        retry: true,
         manualLocate: true,
       });
     }
@@ -51,7 +49,6 @@ describe("loginRecoveryFor", () => {
     ).toEqual({
       message:
         "未找到登录表单元素，且当前环境未设置登录页地址。请编辑环境，填写登录页 URL 或调整表单定位。",
-      retry: true,
       manualLocate: true,
       editEnvironment: true,
     });
@@ -68,7 +65,6 @@ describe("loginRecoveryFor", () => {
 
     for (const spec of [undefined, withGoto, advanced]) {
       expect(loginRecoveryFor(ErrorCodes.ELEMENT_NOT_FOUND, spec)).toEqual({
-        retry: true,
         manualLocate: true,
       });
     }
@@ -88,14 +84,12 @@ describe("loginRecoveryFor", () => {
 });
 
 describe("showLoginRecoveryToast", () => {
-  it("keeps retry, manual location and copy details as separate actions", async () => {
-    const onRetry = vi.fn();
+  it("keeps manual location and copy details without a retry action", async () => {
     showLoginRecoveryToast({
       prefix: "登录失败",
       error: "internal target detail",
       errorCode: ErrorCodes.LOGIN_FORM_NOT_FOUND,
       envKey: "https://example.test/login",
-      onRetry,
       detail: { action: "SWITCH_ACCOUNT" },
     });
 
@@ -105,14 +99,11 @@ describe("showLoginRecoveryToast", () => {
       "未找到可用的登录表单。请确认页面已打开并完成加载后重试。",
     );
     expect(toast.actions.map((action) => action.label)).toEqual([
-      "重试",
       "手动定位",
       "复制详情",
     ]);
 
-    toast.actions[0].onClick();
-    expect(onRetry).toHaveBeenCalledTimes(1);
-    await toast.actions[1].onClick();
+    await toast.actions[0].onClick();
     expect(sendMessage).toHaveBeenCalledWith({
       type: "OPEN_ACCOUNT_ENVIRONMENT",
       envKey: "https://example.test/login",
@@ -128,7 +119,6 @@ describe("showLoginRecoveryToast", () => {
       errorCode: ErrorCodes.ELEMENT_NOT_FOUND,
       envKey: "https://example.test",
       spec: defaultLoginSpec(),
-      onRetry: vi.fn(),
       detail: { action: "SWITCH_ACCOUNT" },
     });
 
@@ -137,12 +127,11 @@ describe("showLoginRecoveryToast", () => {
       "未找到登录表单元素，且当前环境未设置登录页地址",
     );
     expect(toast.actions.map((action) => action.label)).toEqual([
-      "重试",
       "编辑环境",
       "复制详情",
     ]);
 
-    await toast.actions[1].onClick();
+    await toast.actions[0].onClick();
     expect(sendMessage).toHaveBeenCalledWith({
       type: "OPEN_ACCOUNT_ENVIRONMENT",
       envKey: "https://example.test",
@@ -155,15 +144,11 @@ describe("showLoginRecoveryToast", () => {
       error: "成功条件未满足",
       errorCode: ErrorCodes.SUCCESS_CONDITION_UNMET,
       envKey: "https://example.test/login",
-      onRetry: vi.fn(),
       detail: {},
     });
 
     const toast = useToast().toasts.value[0];
     expect(toast.message).toContain("成功条件未满足");
-    expect(toast.actions.map((action) => action.label)).toEqual([
-      "重试",
-      "复制详情",
-    ]);
+    expect(toast.actions.map((action) => action.label)).toEqual(["复制详情"]);
   });
 });

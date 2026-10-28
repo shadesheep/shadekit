@@ -111,6 +111,15 @@ export interface BackgroundMessageMap {
     response: LoginFormLockResult;
   };
 
+  /**
+   * 打开设置页（账号切换 section）。content script 无法调用
+   * chrome.runtime.openOptionsPage，需 background 代开。
+   */
+  OPEN_ACCOUNT_SETTINGS: {
+    payload: Record<string, never>;
+    response: { success: boolean; error?: string };
+  };
+
   OPEN_ACCOUNT_ENVIRONMENT: {
     payload: { envKey: string };
     response: { success: boolean; error?: string };

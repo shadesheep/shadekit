@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { setSpecLoginUrl, toSpecLoginUrl, type LoginSpec } from "../spec";
+import DtButton from "../../../shared/components/DtButton.vue";
+import { sendBgMessage } from "../../../shared/messages";
+import { type LoginSpec, setSpecLoginUrl, toSpecLoginUrl } from "../spec";
 import { applyLoginFormFrame } from "../spec/auto-login";
+import type { AuthStorageSelection } from "../strategies/auth-storage";
 import {
+  type FormScanFrame,
   resolveAutoLoginScan,
   SCAN_ERROR_TEXT,
-  type FormScanFrame,
 } from "../strategies/login-form-scan";
-import { sendBgMessage } from "../../../shared/messages";
-import DtButton from "../../../shared/components/DtButton.vue";
-import { rankPickerTabs } from "./target-picker";
-import { loginFormLocatorView } from "./login-form-locator-model";
+import { waitForTabLoaded } from "../utils/tab-load";
 import AuthStorageSelector from "./AuthStorageSelector.vue";
-import type { AuthStorageSelection } from "../strategies/auth-storage";
+import { loginFormLocatorView } from "./login-form-locator-model";
+import { rankPickerTabs } from "./target-picker";
 
 const props = defineProps<{
   spec: LoginSpec;
@@ -36,6 +37,22 @@ const authStorageSelection = ref<AuthStorageSelection>({
   session: [],
 });
 const view = computed(() => loginFormLocatorView(props.spec));
+const loginPageUrl = computed(() => {
+  const configuredUrl = props.spec.ops
+    .find((op) => op.op === "goto")
+    ?.url.trim();
+  const value = (configuredUrl || props.origin)?.replaceAll(
+    "{origin}",
+    props.origin ?? "",
+  );
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+});
 const hint = computed(
   () =>
     ({
@@ -104,13 +121,29 @@ async function runScan(): Promise<void> {
     const tabs = await chrome.tabs.query({ currentWindow: true });
     const origin = props.origin;
     const ranked = rankPickerTabs(tabs, origin, own?.id);
-    const candidate = origin
+    let candidate = origin
       ? ranked.find((tab) => sameOriginForScan(tab.url, origin))
       : ranked.find((tab) => /^https?:\/\//.test(tab.url ?? ""));
     if (!candidate || candidate.id === undefined) {
-      notice.value =
-        "请先打开环境登录页，再识别；也可以直接保存，登录时自动定位";
-      return;
+      if (!loginPageUrl.value) {
+        notice.value =
+          "没有可打开的登录页，请先填写环境地址；也可以直接保存，登录时自动定位";
+        return;
+      }
+      notice.value = "正在打开登录页，加载完成后自动识别…";
+      try {
+        candidate = await chrome.tabs.create({
+          url: loginPageUrl.value,
+          active: false,
+        });
+      } catch {
+        throw new Error("自动打开登录页失败，请检查环境地址后重试");
+      }
+      if (candidate.id === undefined) {
+        throw new Error("登录页打开失败，请检查环境地址后重试");
+      }
+      await waitForTabLoaded(candidate.id);
+      notice.value = null;
     }
     const res = await sendBgMessage("SCAN_LOGIN_FORM", {
       tabId: candidate.id,
@@ -184,7 +217,7 @@ defineExpose({ focus });
         {{ scanning ? '识别中…' : '识别登录表单' }}
       </DtButton>
     </div>
-    <p class="locator-hint">{{ scanning ? '只读取当前环境页面，不会提交表单' : hint }}</p>
+    <p class="locator-hint">{{ scanning ? '如有需要会自动打开登录页；只读取页面，不会提交表单' : hint }}</p>
     <p v-if="mirrored" class="locator-hint">锁定只修改本环境，此后不再跟随策略库的定位修改；可重置镜像恢复。</p>
     <p v-if="notice" class="locator-notice" role="status">{{ notice }}</p>
     <div v-if="loginPageMissing" class="locator-warning">

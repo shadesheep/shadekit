@@ -82,6 +82,23 @@ export function buildEnvGroups(
   return { groups, unbound };
 }
 
+/** 删除环境时同步清除账号引用，避免重建同地址环境后旧绑定复活。 */
+export function removeEnvironment(
+  config: Pick<AccountSwitchConfig, "accounts" | "domains">,
+  key: string,
+): Pick<AccountSwitchConfig, "accounts" | "domains"> {
+  const domains = { ...config.domains };
+  delete domains[key];
+  return {
+    domains,
+    accounts: config.accounts.map((account) =>
+      account.domains.includes(key)
+        ? { ...account, domains: account.domains.filter((domain) => domain !== key) }
+        : account,
+    ),
+  };
+}
+
 // ============================================================
 // 环境类型（tag）推断与颜色
 // ============================================================

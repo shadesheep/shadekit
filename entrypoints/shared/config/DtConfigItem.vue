@@ -16,7 +16,9 @@
  * 整块内容(颜色图例等)用 stack 变体,控件区占满整行:
  *   <DtConfigItem label="差异颜色说明" layout="stack">…</DtConfigItem>
  */
-withDefaults(
+import { computed, provide } from 'vue';
+
+const props = withDefaults(
   defineProps<{
     /** 设置项标题 */
     label?: string;
@@ -26,6 +28,11 @@ withDefaults(
     layout?: 'row' | 'stack';
   }>(),
   { label: undefined, hint: undefined, layout: 'row' },
+);
+
+provide(
+  'dt-config-item-label',
+  computed(() => props.label),
 );
 </script>
 

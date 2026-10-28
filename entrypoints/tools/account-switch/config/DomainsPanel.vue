@@ -35,6 +35,7 @@ import { deriveEnvName, deriveEnvTag, normalizeEnvTag, type EnvTag } from '../ac
 import DtDrawer from '../../../shared/components/DtDrawer.vue';
 import DtButton from '../../../shared/components/DtButton.vue';
 import { useOverlayClose } from '../../../shared/use-overlay-close';
+import { showToast } from '../../../shared/use-toast';
 
 /**
  * 环境（域名）表单与配置包导入向导 — 从 Config.vue 拆出的子组件
@@ -117,6 +118,7 @@ const newDomain = ref({
   vars: {} as Record<string, string>,
 });
 const editingDomain = ref<string | null>(null);
+const cloningDomain = ref(false);
 const savingDomain = ref(false);
 
 // ============================================================
@@ -296,8 +298,9 @@ function setEnvVar(name: string, value: string): void {
 /** 声明被编辑：读取链的旧错误已不再描述当前表单，清掉提示 */
 function onSpecChange(spec: LoginSpec): void {
   newDomain.value.spec = spec;
-  newDomain.value.specInvalid = '';
+  specValidationError.value = '';
 }
+const specValidationError = ref('');
 
 /**
  * 用户切换登录方式：套用所选预设的声明。
@@ -355,6 +358,9 @@ function saveToLibrary(): void {
 }
 
 // 高级配置展开状态
+const domainDrawerTitle = computed(() =>
+  cloningDomain.value ? '克隆环境' : editingDomain.value ? '编辑环境' : '新建环境',
+);
 const showAdvanced = ref(false);
 const loginFormLocatorRef = ref<{ focus: () => void } | null>(null);
 
@@ -369,6 +375,7 @@ function resetDomainForm() {
   boundAccountIds.value = new Set();
   initialBoundAccountIds.value = new Set();
   newAccountDrafts.value = [];
+  specValidationError.value = '';
   newDomain.value = {
     url: '',
     name: '',
@@ -402,8 +409,7 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
   newDomain.value.debugRedirectEnabled = d.debugRedirectEnabled ?? false;
   newDomain.value.defaultPassword = d.defaultPassword || '';
   newDomain.value.cookieClearIncludeParent = d.cookieClearIncludeParent === true;
-  // 关联账号：编辑态把「domains 含当前 url」的账号 id 作为初始勾选集合；
-  // 克隆态（url !== 原 key）由 cloneDomain 在调用前已 resetDomainForm，天然为空
+  // 编辑与克隆都继承原账号关联；克隆通过独立新建提交，不会改动原绑定。
   const initialBound = new Set<string>();
   for (const a of props.accounts ?? []) {
     if (a.domains.includes(url)) initialBound.add(a.id);
@@ -548,19 +554,29 @@ const formOrigin = computed(() => {
  * 保存前的结构校验：错误已在编辑器内逐行展示，这里只负责拦截。
  * 执行只认 `strategyConfig.spec`，导入的具名策略同样要过校验。
  */
-function recipeInvalid(): boolean {
-  return validateLoginSpec(newDomain.value.spec).length > 0;
+function validateRecipeForSave(): boolean {
+  const issues = validateLoginSpec(newDomain.value.spec);
+  specValidationError.value = issues[0]
+    ? `登录声明校验失败：${issues[0].message}`
+    : '';
+  if (issues.length === 0) return true;
+  showAdvanced.value = true;
+  showToast(specValidationError.value, 'error');
+  return false;
 }
 
 // 环境增删改查
 function cloneDomain(url: string) {
   const d = props.domains[url];
   if (!d) return;
-  editingDomain.value = url;
+  editingDomain.value = null;
+  cloningDomain.value = true;
   urlTouched.value = false;
   showDomainForm.value = true;
-  showAdvanced.value = false; // 「高级」默认收拢，需要时手动展开
-  fillFormFromDomain(url + '-clone', d);
+  showAdvanced.value = false;
+  resetDomainForm();
+  fillFormFromDomain(url, d);
+  newDomain.value.url = url + '-clone';
   newDomain.value.name = d.name + ' (副本)';
   domainFormHighlight.value = true;
   setTimeout(() => {
@@ -571,7 +587,7 @@ function cloneDomain(url: string) {
 async function addDomain() {
   urlTouched.value = true;
   if (savingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
-  if (recipeInvalid()) return;
+  if (!validateRecipeForSave()) return;
   savingDomain.value = true;
   try {
     const entry = buildDomainEntry();
@@ -607,16 +623,17 @@ function editDomain(url: string) {
   const d = props.domains[url];
   if (!d) return;
   editingDomain.value = url;
+  cloningDomain.value = false;
   urlTouched.value = false;
   showDomainForm.value = true;
-  showAdvanced.value = false; // 「高级」默认收拢，需要时手动展开
+  showAdvanced.value = false;
   fillFormFromDomain(url, d);
 }
 
 function saveEditDomain() {
   urlTouched.value = true;
   if (!editingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
-  if (recipeInvalid()) return;
+  if (!validateRecipeForSave()) return;
   const entry = buildDomainEntry();
   const previousKey = editingDomain.value;
   const next = { ...props.domains };
@@ -703,6 +720,7 @@ function buildSavePayload(args: {
 
 function cancelEditDomain() {
   editingDomain.value = null;
+  cloningDomain.value = false;
   resetDomainForm();
   showDomainForm.value = false;
 }
@@ -710,8 +728,9 @@ function cancelEditDomain() {
 /** 打开「新建环境」空表单（主视图「＋ 环境」入口） */
 function openCreate() {
   editingDomain.value = null;
+  cloningDomain.value = false;
   resetDomainForm();
-  showAdvanced.value = false; // 新建态只填 URL，「高级」默认收拢
+  showAdvanced.value = false;
   showDomainForm.value = true;
 }
 
@@ -761,14 +780,9 @@ function downloadText(filename: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
-/** 配置包操作的错误提示（与文件内既有 alert 模式一致） */
+/** 配置包操作统一使用全局可见 Toast。 */
 function toast(message: string, type: 'success' | 'error' = 'success') {
-  if (type === 'error') {
-    alert(message);
-  } else {
-    // eslint-disable-next-line no-console
-    console.log('[config-package]', message);
-  }
+  showToast(message, type);
 }
 
 /** 需要随包分发的变量 = spec.vars 里非 secret 的全部名字（接收方都可填写） */
@@ -1042,11 +1056,12 @@ async function runTrialLogin(): Promise<void> {
 
 <template>
   <div>
-    <DtDrawer :show="showDomainForm" :title="editingDomain ? '编辑环境' : '添加环境'" @close="cancelEditDomain">
+    <DtDrawer :show="showDomainForm" :title="domainDrawerTitle" @close="cancelEditDomain">
       <div class="form-card domain-form" :class="{ 'form-card-highlight': domainFormHighlight }">
       <div class="form-row">
-        <label>域名 / URL</label>
+        <label for="domain-url">域名 / URL</label>
         <input
+          id="domain-url"
           class="dt-input"
           :class="{ 'input-invalid': showUrlError }"
           v-model="newDomain.url"
@@ -1058,36 +1073,39 @@ async function runTrialLogin(): Promise<void> {
         </p>
       </div>
       <div class="form-row">
-        <label>名称</label>
-        <input class="dt-input" v-model="newDomain.name" @input="nameTouched = true" placeholder="留空按 URL 的 host 自动填充" />
+        <label for="domain-name">名称</label>
+        <input id="domain-name" class="dt-input" v-model="newDomain.name" @input="nameTouched = true" placeholder="留空按 URL 的 host 自动填充" />
       </div>
       <div class="form-row">
-        <label>标签</label>
-        <div class="domain-chip-selector">
-          <span
+        <label id="domain-tags-label">标签</label>
+        <div class="domain-chip-selector" role="group" aria-labelledby="domain-tags-label">
+          <button
             v-for="p in ENV_TAG_PRESETS"
             :key="p.value"
+            type="button"
             :class="['domain-chip', { selected: isEnvTagActive(p.value) }]"
+            :aria-pressed="isEnvTagActive(p.value)"
+            :aria-label="`环境标签：${p.label}`"
             @click="toggleEnvTag(p.value)"
-          >{{ p.label }}</span>
+          >{{ p.label }}</button>
           <span v-for="t in customTags" :key="t" class="env-tag" title="存量自定义标签（只读）">{{ t }}</span>
         </div>
       </div>
-      <div v-if="authMethodOptions.length > 1" class="form-row">
-        <label>认证方式</label>
-        <select class="dt-input" v-model="newDomain.loginMethod" @change="onLoginMethodChange">
+      <div v-if="authMethodOptions.length > 0" class="form-row">
+        <label for="domain-login-strategy">登录策略</label>
+        <select id="domain-login-strategy" class="dt-input" v-model="newDomain.loginMethod" @change="onLoginMethodChange">
           <option v-for="opt in loginMethodChoice" :key="opt.key" :value="opt.key">{{ opt.title }}</option>
         </select>
         <!-- 关联策略库时的状态与解除入口（ADR-0019）：解绑只摘引用，不产生环境 -->
         <p v-if="selectedStrategyId" class="field-hint strategy-bound-hint">
           <span class="i-lucide-link w-3 h-3 mr-1" />
           <template v-if="specDiverged">
-            已关联策略库条目，但本环境的声明已被修改（快照偏离库内容）；库里的「同步」会覆盖这些修改。
+            已关联策略库条目，但本环境的登录声明已修改并保存为环境私有版本，仅本环境生效；库里的「重置镜像」会覆盖这些修改。
           </template>
           <template v-else>
-            已关联策略库条目；当前声明是执行快照，编辑库不会自动改动本环境。
+            已关联策略库条目；当前登录声明未偏离库版本，会继续跟随库版本更新。
           </template>
-          <a class="strategy-unbind" @click="unbindStrategy">解除关联</a>
+          <button type="button" class="strategy-unbind" @click="unbindStrategy">解除关联</button>
         </p>
         <p v-else-if="strategyOptions.length > 2" class="field-hint">策略库条目会出现在这里，选中即关联并套用其登录声明（保存后可再编辑环境私有副本）。</p>
       </div>
@@ -1106,16 +1124,19 @@ async function runTrialLogin(): Promise<void> {
 
       <!-- 关联账号：勾选已有账号绑定到本环境；也可就地新增账号（保存环境时一并落盘） -->
       <div class="form-row env-accounts-row">
-        <label>关联账号 <span class="optional">（选填）</span></label>
+        <label id="domain-accounts-label">关联账号 <span class="optional">（选填）</span></label>
         <!-- 已有账号复选列表 -->
-        <div v-if="(accounts ?? []).length > 0" class="domain-chip-selector">
-          <span
+        <div v-if="(accounts ?? []).length > 0" class="domain-chip-selector" role="group" aria-labelledby="domain-accounts-label">
+          <button
             v-for="a in accounts"
             :key="a.id"
+            type="button"
             :class="['domain-chip', { selected: boundAccountIds.has(a.id) }]"
             :title="a.username"
+            :aria-pressed="boundAccountIds.has(a.id)"
+            :aria-label="`关联账号：${a.name || a.username}`"
             @click="toggleBoundAccount(a.id)"
-          >{{ a.name || a.username }}</span>
+          >{{ a.name || a.username }}</button>
         </div>
         <p v-else class="field-hint">还没有账号；可以在下面就地新增，保存时一并创建并绑定到本环境。</p>
 
@@ -1126,6 +1147,7 @@ async function runTrialLogin(): Promise<void> {
               class="dt-input"
               v-model="d.username"
               placeholder="用户名"
+              :aria-label="`新账号 ${i + 1} 的用户名`"
               autocomplete="off"
             />
             <input
@@ -1133,12 +1155,14 @@ async function runTrialLogin(): Promise<void> {
               v-model="d.password"
               type="password"
               placeholder="密码（留空走环境/全局默认）"
+              :aria-label="`新账号 ${i + 1} 的密码`"
               autocomplete="off"
             />
             <button
               type="button"
               class="env-account-draft-remove"
               title="移除该草稿"
+              :aria-label="`移除新账号草稿 ${i + 1}`"
               @click="removeAccountDraft(i)"
             >
               <div class="i-lucide-x w-4 h-4" />
@@ -1147,7 +1171,7 @@ async function runTrialLogin(): Promise<void> {
         </div>
         <div class="env-account-actions">
           <DtButton size="sm" variant="secondary" @click="addAccountDraft">
-            <div class="i-lucide-plus w-4 h-4 mr-1" />新增账号
+            <div class="i-lucide-plus w-4 h-4 mr-1" />新建账号
           </DtButton>
         </div>
       </div>
@@ -1210,29 +1234,29 @@ async function runTrialLogin(): Promise<void> {
 
       <!-- 高级配置（可折叠）：默认密码、本地 Bug 复现地址、登录声明等低频设置 -->
       <div class="advanced-settings-section">
-        <button type="button" class="advanced-toggle-btn" @click="showAdvanced = !showAdvanced">
+        <button type="button" class="advanced-toggle-btn" :aria-expanded="showAdvanced" aria-controls="domain-advanced-settings" @click="showAdvanced = !showAdvanced">
           <div :class="showAdvanced ? 'i-lucide-chevron-down w-4 h-4' : 'i-lucide-chevron-right w-4 h-4'" />
           <span>高级配置</span>
           <span class="optional">（默认密码 / 本地复现 / 登录声明等）</span>
         </button>
-        <div v-show="showAdvanced" class="advanced-content">
+        <div id="domain-advanced-settings" v-show="showAdvanced" class="advanced-content">
           <div class="form-row">
-            <label>默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
-            <input class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
+            <label for="domain-default-password">默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
+            <input id="domain-default-password" class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
             <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
           </div>
 
           <!-- 本地 Bug 复现地址：替换测试链接的域名和端口，保留后续完整 URL -->
           <div class="form-row">
-            <label>本地 Bug 复现地址 <span class="optional">（选填，填写本地项目的完整页面 URL）</span></label>
-            <input class="dt-input" v-model="newDomain.debugRedirect" placeholder="例: http://localhost:3000/web/#/home/..." />
+            <label for="domain-debug-redirect">本地 Bug 复现地址 <span class="optional">（选填，填写本地项目的完整页面 URL）</span></label>
+            <input id="domain-debug-redirect" class="dt-input" v-model="newDomain.debugRedirect" placeholder="例: http://localhost:3000/web/#/home/..." />
             <p class="field-hint">将测试链接的域名和端口替换为本地项目的对应值，后续路径、Hash 路由和查询参数全部保留；使用测试账号登录后自动打开。</p>
           </div>
           <div class="form-row" v-if="newDomain.debugRedirect">
-            <label>登录后打开复现页面</label>
-            <div class="debug-redirect-toggle" @click="newDomain.debugRedirectEnabled = !newDomain.debugRedirectEnabled">
-              <label class="toggle-switch" @click.stop>
-                <input v-model="newDomain.debugRedirectEnabled" type="checkbox" />
+            <label for="domain-debug-redirect-enabled">登录后打开复现页面</label>
+            <div class="debug-redirect-toggle">
+              <label class="toggle-switch">
+                <input id="domain-debug-redirect-enabled" v-model="newDomain.debugRedirectEnabled" type="checkbox" />
                 <span class="toggle-slider" />
               </label>
               <span class="toggle-label">{{ newDomain.debugRedirectEnabled ? '已启用' : '已禁用' }}</span>
@@ -1241,15 +1265,17 @@ async function runTrialLogin(): Promise<void> {
 
           <!-- 登录声明编辑器（三层视图）：内置与导入的策略都可编辑 -->
           <div class="form-row recipe-form-row">
-            <label>
+            <label id="domain-spec-label">
               登录声明
-              <a
+              <button
                 v-if="canSaveToLibrary"
+                type="button"
                 class="strategy-save-link"
                 :title="specDiverged ? '把修改后的声明另存为一条新策略' : '把这份声明存入策略库，供其它环境复用（不产生环境记录）'"
                 @click="saveToLibrary"
-              >{{ specDiverged ? '另存为新策略' : '存入策略库' }}</a>
+              >{{ specDiverged ? '另存为新策略' : '存入策略库' }}</button>
             </label>
+            <p v-if="specValidationError" class="field-error" role="alert">{{ specValidationError }}</p>
             <SpecEditor
               :spec="newDomain.spec"
               :origin="formOrigin"
@@ -1259,10 +1285,11 @@ async function runTrialLogin(): Promise<void> {
           </div>
           <!-- 环境级变量覆盖（ADR-0019）：同一份策略绑多个环境时，差异放这里 -->
           <div v-if="overridableVars.length > 0" class="form-row">
-            <label>变量覆盖 <span class="optional">（选填，优先于声明里的默认值，只影响本环境）</span></label>
+            <label id="domain-vars-label">变量覆盖 <span class="optional">（选填，优先于声明里的默认值，只影响本环境）</span></label>
             <div v-for="variable in overridableVars" :key="variable.name" class="env-var-row">
-              <span class="env-var-name" :title="variable.name">{{ variable.title || variable.name }}</span>
+              <label class="env-var-name" :for="`domain-var-${variable.name}`" :title="variable.name">{{ variable.title || variable.name }}</label>
               <input
+                :id="`domain-var-${variable.name}`"
                 class="dt-input"
                 :value="newDomain.vars[variable.name] ?? ''"
                 :placeholder="variable.default ? `默认：${variable.default}` : '未设置'"
@@ -1272,10 +1299,10 @@ async function runTrialLogin(): Promise<void> {
           </div>
           <!-- 本域 Cookie 清理范围（ADR-0012 D8）：声明里有 clear.cookies 才展示 -->
           <div v-if="hasClearCookies" class="form-row">
-            <label>清除 Cookie 时包含父域</label>
-            <div class="strategy-bool-toggle" @click="newDomain.cookieClearIncludeParent = !newDomain.cookieClearIncludeParent">
-              <label class="toggle-switch" @click.stop>
-                <input v-model="newDomain.cookieClearIncludeParent" type="checkbox" />
+            <label for="domain-cookie-parent">清除 Cookie 时包含父域</label>
+            <div class="strategy-bool-toggle">
+              <label class="toggle-switch">
+                <input id="domain-cookie-parent" v-model="newDomain.cookieClearIncludeParent" type="checkbox" />
                 <span class="toggle-slider" />
               </label>
               <span class="toggle-label">{{ newDomain.cookieClearIncludeParent ? '含父域' : '仅当前域名' }}</span>
@@ -1289,12 +1316,10 @@ async function runTrialLogin(): Promise<void> {
       </div>
       <div class="form-actions">
         <DtButton v-if="!editingDomain" variant="primary" :disabled="savingDomain" @click="addDomain">
-          <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : '添加' }}
+          <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : cloningDomain ? '创建副本' : '添加环境' }}
         </DtButton>
-        <template v-else>
-          <DtButton variant="primary" @click="saveEditDomain">保存</DtButton>
-          <DtButton variant="secondary" @click="cancelEditDomain">取消</DtButton>
-        </template>
+        <DtButton v-else variant="primary" @click="saveEditDomain">保存环境</DtButton>
+        <DtButton variant="secondary" :disabled="savingDomain" @click="cancelEditDomain">取消</DtButton>
       </div>
       </div>
     </DtDrawer>
@@ -1341,10 +1366,11 @@ async function runTrialLogin(): Promise<void> {
               <!-- 字面 {origin} 占位：策略把真实地址留空，需用户填写，落地才有关联上的实际 key -->
               <div v-if="item.needsEnvUrl" class="import-vars">
                 <div class="import-var-row">
-                  <label>
+                  <label :for="`import-env-url-${idx}`">
                     环境地址<span class="optional">（登录/API 根地址）</span>
                   </label>
                   <input
+                    :id="`import-env-url-${idx}`"
                     class="dt-input"
                     type="text"
                     placeholder="填写真实登录/API 地址，如 https://app.example.com"
@@ -1354,11 +1380,11 @@ async function runTrialLogin(): Promise<void> {
               </div>
               <div v-if="item.requiredVars.length > 0" class="import-vars">
                 <div v-for="rv in item.requiredVars" :key="rv.name" class="import-var-row">
-                  <label>
+                  <label :for="`import-var-${idx}-${rv.name}`">
                     {{ rv.title || rv.name }}
                     <span class="optional">（{{ rv.name }}）</span>
                   </label>
-                  <input class="dt-input" :type="rv.name.toLowerCase().includes('key') || rv.name.toLowerCase().includes('secret') ? 'password' : 'text'"
+                  <input :id="`import-var-${idx}-${rv.name}`" class="dt-input" :type="rv.name.toLowerCase().includes('key') || rv.name.toLowerCase().includes('secret') ? 'password' : 'text'"
                     :placeholder="`填写 ${rv.title || rv.name}`" v-model="item.values[rv.name]" />
                 </div>
               </div>
@@ -1416,6 +1442,9 @@ async function runTrialLogin(): Promise<void> {
   margin-top: 16px;
   border-top: 1px solid #e2e8f0;
   padding-top: 12px;
+}
+.domain-form button.domain-chip {
+  font: inherit;
 }
 
 [data-dt-dark] .advanced-settings-section {
@@ -1715,6 +1744,14 @@ async function runTrialLogin(): Promise<void> {
   color: #60a5fa;
 }
 
+.strategy-unbind,
+.strategy-save-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+
 .strategy-unbind {
   margin-left: 4px;
   color: #dc2626;
@@ -1722,7 +1759,7 @@ async function runTrialLogin(): Promise<void> {
   text-decoration: underline;
 }
 
-/* 「存入策略库」链接（ADR-0019）：与字段标签同行，弱化为主操作之外的可选动作 */
+/* 「存入策略库」按钮：与字段标签同行，弱化为主操作之外的可选动作 */
 .strategy-save-link {
   margin-left: 8px;
   font-size: 12px;

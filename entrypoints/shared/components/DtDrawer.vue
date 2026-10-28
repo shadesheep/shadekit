@@ -15,11 +15,14 @@
  *   v-if 动态块切换导致 target 落到 overlay 时误关抽屉）、Escape（焦点在
  *   输入元素内时放行，不打断输入法/自动完成的取消）。
  */
-import { onMounted, onUnmounted } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { useOverlayClose } from '../use-overlay-close';
 
 const emit = defineEmits<{ close: [] }>();
 const props = defineProps<{ title: string; show?: boolean }>();
+const drawerRef = ref<HTMLElement | null>(null);
+const titleId = `dt-drawer-title-${useId()}`;
+let previousActiveElement: HTMLElement | null = null;
 
 /**
  * 遮罩空白处点击关闭：见 useOverlayClose 的说明（@click.self 在内部有
@@ -35,6 +38,28 @@ const { onOverlayMousedown, onOverlayClick } = useOverlayClose(() =>
  * 不应顺带把抽屉整个关掉。
  */
 function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Tab' && props.show) {
+    const focusable = Array.from(
+      drawerRef.value?.querySelectorAll<HTMLElement>(
+        'input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) return;
+    const active = document.activeElement;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    } else if (!drawerRef.value?.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+    return;
+  }
   if (e.key !== 'Escape' || !props.show) return;
   const t = e.target as HTMLElement | null;
   if (t) {
@@ -51,8 +76,43 @@ function handleKeydown(e: KeyboardEvent) {
   emit('close');
 }
 
+function restoreFocus() {
+  if (previousActiveElement?.isConnected) {
+    previousActiveElement.focus({ preventScroll: true });
+  }
+  previousActiveElement = null;
+}
+
+watch(
+  () => props.show,
+  async (show) => {
+    if (show) {
+      previousActiveElement =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      await nextTick();
+      const initialFocus = drawerRef.value
+        ?.querySelector('.dt-drawer-body')
+        ?.querySelector<HTMLElement>(
+          '[autofocus], input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])',
+        );
+      (initialFocus ?? drawerRef.value?.querySelector<HTMLElement>('.dt-drawer-close'))?.focus({
+        preventScroll: true,
+      });
+      return;
+    }
+    await nextTick();
+    restoreFocus();
+  },
+  { immediate: true },
+);
+
 onMounted(() => document.addEventListener('keydown', handleKeydown));
-onUnmounted(() => document.removeEventListener('keydown', handleKeydown));
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown);
+  restoreFocus();
+});
 </script>
 
 <template>
@@ -62,17 +122,25 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown));
     @mousedown="onOverlayMousedown"
     @click="onOverlayClick"
   >
-      <aside class="dt-drawer" data-dt-root>
+      <aside
+        ref="drawerRef"
+        class="dt-drawer"
+        data-dt-root
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="titleId"
+      >
         <header class="dt-drawer-head">
-          <div class="i-lucide-pen-line w-4 h-4" />
-          <h3 class="dt-drawer-title">{{ title }}</h3>
+          <div class="i-lucide-pen-line w-4 h-4" aria-hidden="true" />
+          <h3 :id="titleId" class="dt-drawer-title">{{ title }}</h3>
           <button
             class="dt-drawer-close"
             type="button"
             title="关闭"
+            aria-label="关闭"
             @click="emit('close')"
           >
-            <div class="i-lucide-x w-4 h-4" />
+            <div class="i-lucide-x w-4 h-4" aria-hidden="true" />
           </button>
         </header>
         <div class="dt-drawer-body">

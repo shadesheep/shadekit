@@ -17,14 +17,12 @@ export function showLoginRecoveryToast(input: {
   errorCode?: ErrorCode;
   envKey?: string;
   spec?: LoginSpec;
-  onRetry: () => void;
   detail: ErrorDetailContext;
 }): void {
   const code = input.errorCode ?? ErrorCodes.UNKNOWN;
   const recovery = loginRecoveryFor(input.errorCode, input.spec);
   const message = recovery.message ?? input.error;
   const actions: ToastAction[] = [];
-  if (recovery.retry) actions.push({ label: "重试", onClick: input.onRetry });
   if (recovery.manualLocate && input.envKey) {
     actions.push({
       label: recovery.editEnvironment ? "编辑环境" : "手动定位",

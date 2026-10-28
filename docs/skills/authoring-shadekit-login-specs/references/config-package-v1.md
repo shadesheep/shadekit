@@ -1,5 +1,7 @@
 # dt-login-config/v1 策略包
 
+**导入入口：ShadeKit「账号切换 → 环境与账号 → 导入登录策略包」，选择 `dt-login-config.json`。** 独立 `login-spec.json`、行为夹具和验证结果 JSON 都不是登录策略包，不要导入。
+
 ## 结构
 
 ```ts

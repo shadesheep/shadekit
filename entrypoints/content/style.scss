@@ -125,16 +125,32 @@ $dark-border-hover: #58a6ff;
 }
 
 /* ========== 快捷键浮动面板 ========== */
-.devtools-panel-float {
+:host(.devtools-panel-float) {
   position: fixed !important;
   bottom: auto !important;
   right: auto !important;
+  display: flex;
+  flex-direction: column;
   width: 300px;
-  max-height: 400px;
+  max-height: min(400px, calc(100dvh - 16px));
   z-index: 9999999;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.08);
   animation: float-panel-in 0.15s ease-out;
+}
+
+:host(.devtools-panel-float) .dt-shadow-ui {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+:host(.devtools-panel-float) .devtools-panel-title {
+  flex-shrink: 0;
+}
+
+:host(.devtools-panel-float) .devtools-panel-content {
+  min-height: 0;
 }
 
 @keyframes float-panel-in {
@@ -148,7 +164,7 @@ $dark-border-hover: #58a6ff;
   }
 }
 
-:host([data-dt-dark]) .devtools-panel-float {
+:host(.devtools-panel-float[data-dt-dark]) {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3) !important;
 }
 

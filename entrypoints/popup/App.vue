@@ -117,19 +117,20 @@ onUnmounted(() => {
 // ↑↓ 移动选中、Enter 打开；仅在工具列表视图（无子面板）时响应
 const handleListKeydown = (e: KeyboardEvent) => {
   if (activeTool.value) return;
-  // 焦点在按钮等交互元素上时不劫持按键（如引导条的「去设置」按钮）
-  if (e.target instanceof HTMLElement && e.target.closest('button, a, input, textarea')) {
-    return;
-  }
+  const target = e.target instanceof HTMLElement ? e.target : null;
+  const toolItem = target?.closest('.tool-item');
+  // 焦点在其他交互元素上时不劫持按键；工具按钮保留 ↑↓ 导航和原生 Enter 激活。
+  if (target?.closest('button, a, input, textarea') && !toolItem) return;
+  if (e.key === 'Enter' && toolItem) return;
   const action = listNavKeydown(e.key, selectedIndex.value, tools.value.length);
   if (!action) return;
   e.preventDefault();
   if (action.type === 'move') {
     selectedIndex.value = action.index;
     nextTick(() => {
-      toolListEl.value
-        ?.querySelector('.tool-item.focused')
-        ?.scrollIntoView({ block: 'nearest' });
+      const focusedTool = toolListEl.value?.querySelector<HTMLElement>('.tool-item.focused');
+      focusedTool?.focus({ preventScroll: true });
+      focusedTool?.scrollIntoView({ block: 'nearest' });
     });
   } else {
     const tool = tools.value[action.index];
@@ -191,23 +192,24 @@ const goBack = () => {
   <div class="popup-container" data-dt-root>
     <!-- Header -->
     <div class="header">
-      <button v-if="activeTool" class="btn-back" @click="goBack" title="返回">
-        <div class="i-lucide-chevron-left w-4 h-4" />
+      <button v-if="activeTool" type="button" class="btn-back" title="返回" aria-label="返回" @click="goBack">
+        <div class="i-lucide-chevron-left w-4 h-4" aria-hidden="true" />
       </button>
       <span class="title">
         <img :src="logoUrl" class="logo-img" alt="ShadeKit" />
         ShadeKit
       </span>
-      <button class="btn-settings" @click="openOptions" title="设置">
-        <div class="i-lucide-settings w-4 h-4" />
+      <button type="button" class="btn-settings" title="设置" aria-label="设置" @click="openOptions">
+        <div class="i-lucide-settings w-4 h-4" aria-hidden="true" />
       </button>
     </div>
 
     <!-- Tool list -->
     <div v-if="!activeTool" ref="toolListEl" class="tool-list">
-      <div
+      <button
         v-for="(tool, index) in tools"
         :key="tool.id"
+        type="button"
         class="tool-item"
         :class="{ focused: index === selectedIndex }"
         :title="tool.openInTabUrl ? '中键点击可在新标签页打开' : undefined"
@@ -228,7 +230,7 @@ const goBack = () => {
         </kbd>
         <div v-if="tool.openInTabUrl" class="i-lucide-external-link w-3.5 h-3.5 text-slate-300 dark:text-slate-600" />
         <div v-else class="i-lucide-chevron-right w-4 h-4 text-slate-300 dark:text-slate-600" />
-      </div>
+      </button>
 
       <div v-if="tools.length === 0" class="empty-state">
         <div class="i-lucide-inbox w-12 h-12 text-slate-300 dark:text-slate-600 mb-3 animate-pulse" />
@@ -239,14 +241,15 @@ const goBack = () => {
         <button class="dt-btn-primary" @click="openOptions">前往设置</button>
       </div>
 
-      <div
+      <button
         v-else-if="disabledCount > 0"
+        type="button"
         class="disabled-hint"
         @click="openOptions"
       >
-        <div class="i-lucide-eye-off w-3.5 h-3.5" />
+        <div class="i-lucide-eye-off w-3.5 h-3.5" aria-hidden="true" />
         <span>{{ disabledCount }} 个工具已禁用</span>
-      </div>
+      </button>
 
       <!-- 账号切换快捷键未注册/被占用时的引导（空串 = 已查询但未生效） -->
       <div v-if="shortcut === '' && hasAccountSwitch" class="shortcut-missing-hint">
@@ -368,6 +371,11 @@ const goBack = () => {
   cursor: pointer;
   transition: all var(--transition-normal);
   border: 1px solid transparent;
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .tool-item:hover {
@@ -468,6 +476,10 @@ const goBack = () => {
   cursor: pointer;
   border-radius: var(--radius-md);
   transition: all var(--transition-normal);
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
 }
 
 .disabled-hint:hover {

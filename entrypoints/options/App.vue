@@ -22,6 +22,7 @@ import {subscribeOptionsRoute} from './options-route';
 type View = 'market' | string;
 
 const logoUrl = ref('');
+const allConfigFileInput = ref<HTMLInputElement | null>(null);
 const themeMode = ref<ThemeMode>(getStoredTheme());
 // 仓库地址统一取扩展元数据（wxt.config.ts manifest.homepage_url），避免多处硬编码
 const repoUrl = chrome.runtime.getManifest().homepage_url ?? '';
@@ -215,15 +216,35 @@ onUnmounted(() => {
 
       <!-- 全局配置操作（全部工具设置：跨工具整包） -->
       <div class="header-actions">
-        <label class="btn-import" title="导入全部工具的设置（整包覆盖）">
-          <div class="i-lucide-download w-4 h-4"/>
+        <button
+          type="button"
+          class="btn-import"
+          title="导入全部工具的设置（整包覆盖）"
+          @click="allConfigFileInput?.click()"
+        >
+          <div class="i-lucide-download w-4 h-4" aria-hidden="true"/>
           导入全部工具设置
-          <input type="file" accept=".json" @change="importAllConfig" class="hidden-file"/>
-        </label>
-        <button class="btn-export" @click="exportAllConfig" title="导出全部工具的设置">
-          <div class="i-lucide-upload w-4 h-4"/>
+        </button>
+        <input
+          ref="allConfigFileInput"
+          type="file"
+          accept=".json"
+          class="hidden-file"
+          @change="importAllConfig"
+        />
+        <button
+          type="button"
+          class="btn-export"
+          title="导出全部工具的设置"
+          aria-describedby="export-backup-warning"
+          @click="exportAllConfig"
+        >
+          <div class="i-lucide-upload w-4 h-4" aria-hidden="true"/>
           导出全部工具设置
         </button>
+        <p id="export-backup-warning" class="export-warning">
+          导出文件包含明文账号密码，请勿随意分享。
+        </p>
       </div>
     </div>
 
@@ -231,41 +252,48 @@ onUnmounted(() => {
       <!-- Sidebar -->
       <div class="sidebar">
         <div class="sidebar-nav">
-          <div
+          <button
+              type="button"
               :class="['sidebar-item', { active: activeView === 'market' }]"
+              :aria-current="activeView === 'market' ? 'page' : undefined"
               @click="activeView = 'market'"
           >
-            <div class="i-lucide-puzzle sidebar-icon"/>
+            <div class="i-lucide-puzzle sidebar-icon" aria-hidden="true"/>
             <span class="sidebar-label">工具总览</span>
-          </div>
-          <div
+          </button>
+          <button
               v-for="section in sections"
               :key="section.id"
+              type="button"
               :class="['sidebar-item', { active: activeView === section.id }]"
+              :aria-current="activeView === section.id ? 'page' : undefined"
               @click="activeView = section.id"
           >
-            <div :class="[section.icon, 'sidebar-icon']"/>
+            <div :class="[section.icon, 'sidebar-icon']" aria-hidden="true"/>
             <span class="sidebar-label">{{ section.label }}</span>
-          </div>
+          </button>
 
           <!-- 开发者模式入口 -->
           <template v-if="devMode">
             <div class="sidebar-divider"/>
-            <div
+            <button
+                type="button"
                 :class="['sidebar-item dev-mode', { active: activeView === 'dev-logs' }]"
+                :aria-current="activeView === 'dev-logs' ? 'page' : undefined"
                 @click="activeView = 'dev-logs'"
             >
-              <div class="i-lucide-bug sidebar-icon"/>
+              <div class="i-lucide-bug sidebar-icon" aria-hidden="true"/>
               <span class="sidebar-label">调试日志</span>
-            </div>
-            <div
+            </button>
+            <button
+                type="button"
                 class="sidebar-item dev-mode-exit"
-                @click="handleExitDevMode"
                 title="点击退出开发者模式"
+                @click="handleExitDevMode"
             >
-              <div class="i-lucide-log-out sidebar-icon"/>
+              <div class="i-lucide-log-out sidebar-icon" aria-hidden="true"/>
               <span class="sidebar-label">退出开发者模式</span>
-            </div>
+            </button>
           </template>
         </div>
 
@@ -278,6 +306,8 @@ onUnmounted(() => {
                 :key="m"
                 :class="['theme-btn', { active: themeMode === m }]"
                 @click="changeTheme(m)"
+                :aria-label="m === 'system' ? '跟随系统' : m === 'light' ? '浅色' : '深色'"
+                :aria-pressed="themeMode === m"
                 :title="m === 'system' ? '跟随系统' : m === 'light' ? '浅色' : '深色'"
             >
               <div v-if="m === 'system'" class="i-lucide-monitor w-3.5 h-3.5"/>
@@ -391,11 +421,28 @@ onUnmounted(() => {
 /* Header actions */
 .header-actions {
   margin-left: auto;
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
+
+.export-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: #b45309;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+[data-dt-dark] .export-warning {
+  color: #fbbf24;
+}
 .btn-export, .btn-import {
   display: inline-flex;
   align-items: center;
@@ -561,6 +608,11 @@ onUnmounted(() => {
   color: #374151;
   transition: all 0.2s ease-out;
   position: relative;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
 }
 
 [data-dt-dark] .sidebar-item {

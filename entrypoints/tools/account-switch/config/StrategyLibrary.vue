@@ -7,7 +7,7 @@
  * - 列表：名称 / 变量数 / 已关联环境数 / 最近更新时间；
  * - 编辑：保存后**镜像环境立即生效**（它们不持声明拷贝）；脱镜环境（在环境
  *   里改过声明）不受影响；
- * - 同步：把脱镜环境**重置回镜像**（丢弃其私有声明），恢复「库一改即生效」；
+ * - 重置镜像：把脱镜环境**重置回镜像**（丢弃其私有声明），恢复「库一改即生效」；
  * - 删除：直接摘绑定——脱镜环境的私有声明原样保留，镜像环境回到「未配置」。
  *
  * 只 emit 变更，落盘由 Config.vue 统一走 updateConfig。
@@ -67,15 +67,26 @@ function saveEdit(): void {
 function syncToEnvironments(item: StrategyListItem): void {
   const bound = boundEnvironments(props.domains, item.id);
   if (bound.length === 0) return;
+  const privateCount = bound.filter(
+    (url) => props.domains[url]?.strategyConfig?.spec !== undefined,
+  ).length;
+  if (
+    privateCount > 0 &&
+    !confirm(
+      `确定重置登录策略「${item.name}」的镜像？\n` +
+        `这将覆盖 ${privateCount} 个环境的私有修改，且无法恢复。`,
+    )
+  )
+    return;
   const result = syncBoundEnvironments(props.domains, item.id, item);
   if (result.updated === 0) {
-    emit('saveDomains', props.domains, '所有已关联环境都在镜像库版本');
+    emit('saveDomains', props.domains, '所有已关联环境都已跟随库版本，无需重置');
     return;
   }
   emit(
     'saveDomains',
     result.domains,
-    `已把 ${result.updated} 个环境重置回镜像`,
+    `已重置 ${result.updated} 个环境的镜像，后续将跟随库版本`,
   );
 }
 
@@ -125,8 +136,8 @@ function formatTime(ts: number): string {
       登录策略库
     </h3>
     <p class="settings-hint">
-      策略是可分享的登录声明，独立于环境。环境通过「认证方式」关联策略，关联不产生额外环境；
-      未改过声明的环境镜像库条目（库一改即生效），删除策略会让这些镜像环境回到未配置状态。
+      策略是可分享的登录声明，独立于环境。环境通过「登录策略」关联策略，关联不产生额外环境；
+      未偏离库版本的环境会持续跟随库版本；在本环境修改并保存声明后，仅本环境生效。删除策略会让镜像环境回到未配置状态。
     </p>
 
     <div v-if="items.length === 0" class="strategy-empty">

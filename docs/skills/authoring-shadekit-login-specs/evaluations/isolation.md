@@ -42,3 +42,12 @@ Date: 2026-10-25
 - 此验收不执行真实导入、真实表单、真实会话写入或真实登录，均保持 `NOT_RUN`。
 - DOM/页面/failure 轮询不在数据平面模拟范围内。
 - fresh-context 模型重复测试未由此隔离 CLI 验收替代；其限制另记录于 `baseline.md`。
+
+## 重复切换能力回归
+
+Date: 2026-10-28
+
+- 新增已有 `auth` Cookie 导致第二次登录失败的评测场景，要求请求前按证据清理旧认证状态。
+- `node scripts/test.mjs`：38/38 PASS，0 FAIL；包含旧内存会话清理、新会话写入及 `includeParent` 的 `NOT_SIMULATED` 边界。
+- `simulate.mjs` + `api-repeat-switch.json`：`PASS`，旧 Cookie/Storage 不残留，仅保留门控放行的新会话。
+- 真实浏览器 Cookie domain/path、真实导入和真实重复登录未执行，保持 `NOT_RUN`。

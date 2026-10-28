@@ -81,6 +81,17 @@ type SettleCondition =
 
 `goto.waitForLoad` 默认 true；`waitForTarget` 在导航后轮询等待唯一可见的表单目标，超时报告当前地址及重定向 / 本地登录态检查提示；`when` 为 `undefined/null/false/""/0` 时跳过。
 
+`clear.*` 必须在首个登录请求或页面导航前执行。`auth.write` 只在响应后写会话，不能清除请求已经携带的旧 Cookie。优先按证据使用认证键白名单，例如：
+
+```json
+[
+  { "op": "clear.cookies", "range": ["auth"] },
+  { "op": "clear.storage", "area": "local", "range": ["auth"] }
+]
+```
+
+Cookie 与 Storage 是不同状态区；只清 localStorage 不会移除 Cookie。不要默认清理 CSRF/挑战 Cookie；确实依赖既有会话或旧 token 参与签名时，以目标系统契约为准。
+
 ### HTTP 与请求改写
 
 ```ts
@@ -101,6 +112,7 @@ type SettleCondition =
 - GET 不发送 body。JSON/ref 按声明 key 序无空格序列化。
 - `apply.set` 作用于其后最近的 `http.execute`，随后清空。body 改写支持点路径，不能用于 raw。
 - HTTP 2xx 只代表传输/状态符合预期，不证明业务成功或浏览器会话存在。
+- 已有认证 Cookie 可能改变再次登录的服务端校验；静态合法与首次请求重放成功都不能证明可重复切换。
 
 ### 数据变换
 
@@ -159,6 +171,20 @@ interface AuthSpec {
 ```
 
 `mode:"page"` 时 auth.write 是空操作。engine Storage 写入要求当前 tab 位于目标 origin。Cookie expiry 的 epochS/epochMs 是秒/毫秒时间戳，relativeSeconds 相对当前时间。
+
+离线行为夹具可用 `initialSession` 注入目标 origin 的旧内存会话，验证 `clear.cookies` / `clear.storage` 和白名单范围：
+
+```json
+{
+  "initialSession": {
+    "cookies": [{ "name": "auth", "value": "old-fixture-token" }],
+    "localStorage": { "auth": "old-fixture-auth" },
+    "sessionStorage": {}
+  }
+}
+```
+
+这里只模拟名称、键和值在内存中的变化，不模拟真实浏览器 Cookie domain/path、同源存储或网络自动携带行为；`clear.cookies.includeParent: true` 返回 `NOT_SIMULATED`。真实重复切换仍需单独授权并保持 `NOT_RUN`，直到实际执行。
 
 ### DOM 与逃生舱
 

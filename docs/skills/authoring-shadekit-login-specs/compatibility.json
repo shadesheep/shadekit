@@ -3,5 +3,5 @@
   "configPackageFormat": "dt-login-config/v1",
   "shadekitSourceRevision": "7f7e094",
   "runtimeSimulation": "data-plane-only",
-  "toolFormatVersion": 1
+  "toolFormatVersion": 2
 }

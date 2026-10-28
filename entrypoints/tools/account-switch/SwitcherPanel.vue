@@ -37,6 +37,7 @@ const origin = ref("");
 const matchedEnv = ref<DomainConfig | null>(null);
 const matchedEnvKey = ref("");
 const strategies = ref<AccountSwitchConfig["strategies"]>({});
+const configLoadFailed = ref(false);
 
 // 搜索 & 筛选
 const searchQuery = ref("");
@@ -68,10 +69,8 @@ const availableRoles = computed(() => {
   return collectRoles(filterAccounts(accounts.value, { origin: origin.value }));
 });
 
-onMounted(async () => {
-  // 获取当前域名（popup 环境需通过 chrome.tabs.query 获取）
-  origin.value = await getCurrentOrigin();
-
+const loadConfig = async () => {
+  configLoadFailed.value = false;
   try {
     // getConfig + defaults：享受旧 key 迁移与缺失字段补齐（ADR-0003 D5）
     const cfg = await getConfig<AccountSwitchConfig>(
@@ -96,7 +95,7 @@ onMounted(async () => {
     quickLoginDefaultDomain.value = cfg?.quickLoginDefaultDomain || "";
     globalDefaultPassword.value = cfg?.globalDefaultPassword || "";
   } catch (e) {
-    // 静默降级：配置读取失败时不影响面板展示
+    configLoadFailed.value = true;
     console.warn("[account-switch] Failed to load config:", e);
   }
 
@@ -108,7 +107,21 @@ onMounted(async () => {
   ) {
     searchInput.value?.focus();
   }
+};
+
+onMounted(async () => {
+  // 获取当前域名（popup 环境需通过 chrome.tabs.query 获取）
+  origin.value = await getCurrentOrigin();
+  await loadConfig();
 });
+
+const openAccountSettings = async () => {
+  // content script 无 chrome.runtime.openOptionsPage 权限，由 background 代开
+  const res = await sendBgMessage("OPEN_ACCOUNT_SETTINGS");
+  if (!res?.success) {
+    showToast(res?.error || "无法打开设置页", "error");
+  }
+};
 
 // 登录防重：登录进行中的账号 id，非 null 时所有卡片置灰禁用
 const switchingAccountId = ref<string | null>(null);
@@ -123,7 +136,7 @@ const showLoginErrorToast = (
   err: string,
   errorCode: ErrorCode | undefined,
   ctx: ErrorDetailContext,
-  recovery: { envKey?: string; spec?: LoginSpec; onRetry: () => void },
+  recovery: { envKey?: string; spec?: LoginSpec },
 ) => {
   showLoginRecoveryToast({
     prefix,
@@ -131,7 +144,6 @@ const showLoginErrorToast = (
     errorCode,
     envKey: recovery.envKey,
     spec: recovery.spec,
-    onRetry: recovery.onRetry,
     detail: {
       envName: matchedEnv.value?.name,
       origin: origin.value,
@@ -176,11 +188,29 @@ const switchAccount = async (account: Account) => {
               ? (readSpecFromConfig(matchedEnv.value, strategies.value).spec ??
                 undefined)
               : undefined,
-            onRetry: () => switchAccount(account),
           },
         );
       }
     }
+  } catch {
+    // 请求发送失败也要给出与业务失败一致的可见反馈。
+    showLoginErrorToast(
+      "切换失败",
+      "请求发送失败",
+      ErrorCodes.UNKNOWN,
+      {
+        action: "SWITCH_ACCOUNT",
+        accountName: account.name,
+        username: account.username,
+      },
+      {
+        envKey: matchedEnvKey.value || origin.value,
+        spec: matchedEnv.value
+          ? (readSpecFromConfig(matchedEnv.value, strategies.value).spec ??
+            undefined)
+          : undefined,
+      },
+    );
   } finally {
     // 登录结束（成功/失败/超时）后恢复卡片可点击
     switchingAccountId.value = null;
@@ -207,20 +237,28 @@ const isHighlighted = (localIndex: number): boolean => {
   return highlightedIndex.value === localIndex;
 };
 
-// 键盘导航
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === "/") {
-    e.preventDefault();
-    searchInput.value?.focus();
-    return;
-  }
-
   if (e.key === "Escape") {
     if (searchQuery.value || activeRole.value) {
       clearSearch();
     } else {
       closePanel();
     }
+    return;
+  }
+
+  // 输入控件需要保留字符输入、光标移动和原生 Enter 行为。
+  const target = e.target;
+  if (
+    target instanceof Element &&
+    target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')
+  ) {
+    return;
+  }
+
+  if (e.key === "/") {
+    e.preventDefault();
+    searchInput.value?.focus();
     return;
   }
 
@@ -246,7 +284,7 @@ const selectRole = (role: string | null) => {
 };
 
 // ============================================================
-// 快速登录：粘贴测试信息，自动解析并执行登录+跳转
+// 快捷登录：粘贴测试信息，自动解析并执行登录+跳转
 // ============================================================
 
 const quickLoginText = ref("");
@@ -257,7 +295,7 @@ const redirectEnabled = ref(false);
 const quickLoginMatchedEnv = ref<DomainConfig | null>(null);
 const quickLoginMatchedEnvKey = ref("");
 
-/** 从粘贴的快速登录文本中提取域名（仅 URL） */
+/** 从粘贴的快捷登录文本中提取域名（仅 URL） */
 function extractOriginFromText(text: string): string | null {
   const parsed = parseLoginText(text, "");
   if (!parsed?.url) return null;
@@ -272,7 +310,7 @@ function extractOriginFromText(text: string): string | null {
 }
 
 const handleQuickLogin = async () => {
-  // 登录期间拒绝重复触发（Ctrl+Enter 不受按钮 disabled 约束）
+  // 登录期间拒绝重复触发（Ctrl/Cmd+Enter 不受按钮 disabled 约束）
   if (quickLoginLoading.value) return;
   const parsed = parseLoginText(
     quickLoginText.value,
@@ -322,7 +360,7 @@ const handleQuickLogin = async () => {
       debugRedirect,
     });
     if (response?.success) {
-      showToast("登录成功，正在跳转...", "success");
+      showToast("登录成功，正在跳转…", "success");
       await new Promise((r) => setTimeout(r, 500));
       closePanel();
     } else {
@@ -348,7 +386,6 @@ const handleQuickLogin = async () => {
             envKey: isPureAccount
               ? matchedEnvKey.value
               : quickLoginMatchedEnvKey.value,
-            onRetry: handleQuickLogin,
           },
         );
       }
@@ -367,7 +404,6 @@ const handleQuickLogin = async () => {
         envKey: isPureAccount
           ? matchedEnvKey.value
           : quickLoginMatchedEnvKey.value,
-        onRetry: handleQuickLogin,
       },
     );
   } finally {
@@ -378,6 +414,7 @@ const handleQuickLogin = async () => {
 const handleQuickLoginKeydown = (e: KeyboardEvent) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
+    e.stopPropagation();
     handleQuickLogin();
   }
 };
@@ -385,7 +422,7 @@ const handleQuickLoginKeydown = (e: KeyboardEvent) => {
 // 根据粘贴文本中的 URL 匹配环境
 watch(quickLoginText, async () => {
   const textOrigin = extractOriginFromText(quickLoginText.value);
-  if (!textOrigin || !accounts.value.length) {
+  if (!textOrigin) {
     quickLoginMatchedEnv.value = null;
     quickLoginMatchedEnvKey.value = "";
     redirectEnabled.value = false;
@@ -443,26 +480,26 @@ const quickLoginPreview = computed(() => {
   if (parsed.hasUrl) {
     try {
       const u = new URL(parsed.url);
-      parts.push(`🌐 ${u.host}`);
+      parts.push(`环境：${u.host}`);
     } catch {
-      parts.push(`🌐 ${parsed.url}`);
+      parts.push(`环境：${parsed.url}`);
     }
   } else if (matchedEnv.value) {
-    parts.push(`🌐 ${matchedEnv.value.name}`);
+    parts.push(`环境：${matchedEnv.value.name}`);
   }
-  parts.push(`👤 ${parsed.username}`);
+  parts.push(`账号：${parsed.username}`);
   if (password) {
     if (parsed.password) {
-      parts.push("🔑 已输入密码");
+      parts.push("密码：已输入");
     } else if (currentEnvPassword) {
-      parts.push(`🔑 使用${matchedEnv.value?.name || "当前环境"}默认密码`);
+      parts.push(`密码：使用${matchedEnv.value?.name || "当前环境"}默认密码`);
     } else if (textEnvPassword) {
-      parts.push(`🔑 使用目标环境默认密码`);
+      parts.push("密码：使用目标环境默认密码");
     } else {
-      parts.push("🔑 使用全局默认密码");
+      parts.push("密码：使用全局默认密码");
     }
   } else {
-    parts.push("⚠️ 未找到密码");
+    parts.push("密码：未配置");
   }
 
   return { ok: true, parts };
@@ -473,24 +510,35 @@ const quickLoginPreview = computed(() => {
   <div @keydown="handleKeydown" tabindex="0" class="as-panel" data-dt-root>
     <!-- Tab bar: env indicator + tab buttons -->
     <div class="as-tab-bar">
-      <div v-if="origin" class="as-tab-env" :title="matchedEnv ? matchedEnv.name : '未配置环境'">
+      <div v-if="origin" class="as-tab-env" :title="configLoadFailed ? '配置加载失败' : (matchedEnv ? matchedEnv.name : '未配置环境')">
         <div class="i-lucide-globe w-3.5 h-3.5 as-tab-env-icon" />
-        <span class="as-tab-env-label">{{ matchedEnv ? matchedEnv.name : '未配置环境' }}</span>
+        <span class="as-tab-env-label">{{ configLoadFailed ? '配置加载失败' : (matchedEnv ? matchedEnv.name : '未配置环境') }}</span>
       </div>
       <template v-if="matchedEnv">
         <button
           v-for="tabKey in tabOrder"
           :key="tabKey"
+          type="button"
           :class="['as-tab-btn', { active: activeTab === tabKey }]"
+          :aria-pressed="activeTab === tabKey"
           @click="activeTab = tabKey"
         >
           <div :class="tabKey === 'users' ? 'i-lucide-users w-3.5 h-3.5 mr-1' : 'i-lucide-zap w-3.5 h-3.5 mr-1'" />
-          {{ tabKey === 'users' ? '选择账号' : '快速登录' }}
+          {{ tabKey === 'users' ? '选择账号' : '快捷登录' }}
         </button>
       </template>
-      <button v-else class="as-tab-btn active" disabled>
+      <button v-else type="button" class="as-tab-btn active" disabled>
         <div class="i-lucide-zap w-3.5 h-3.5 mr-1" />
-        快速登录
+        快捷登录
+      </button>
+    </div>
+
+    <div v-if="configLoadFailed" class="as-empty" role="alert">
+      <div class="i-lucide-alert-circle w-10 h-10 as-empty-icon" />
+      <p class="as-empty-text">账号配置加载失败</p>
+      <p class="as-empty-hint">请重试，读取失败不代表尚未配置账号或环境</p>
+      <button type="button" class="as-role-chip as-empty-action" @click="loadConfig">
+        重试
       </button>
     </div>
 
@@ -504,8 +552,9 @@ const quickLoginPreview = computed(() => {
           v-model="searchQuery"
           placeholder="搜索账号（名称/用户名）"
           class="as-search-input"
+          aria-label="搜索账号名称或用户名"
         />
-        <button v-if="searchQuery || activeRole" class="as-search-clear" @click="clearSearch" title="清除">
+        <button v-if="searchQuery || activeRole" type="button" class="as-search-clear" aria-label="清除账号筛选" title="清除" @click="clearSearch">
           <div class="i-lucide-x w-3 h-3" />
         </button>
       </div>
@@ -513,7 +562,9 @@ const quickLoginPreview = computed(() => {
       <!-- Role filter chips -->
       <div v-if="availableRoles.length > 1" class="as-role-filter">
         <button
+          type="button"
           :class="['as-role-chip', { active: activeRole === null }]"
+          :aria-pressed="activeRole === null"
           @click="selectRole(null)"
         >
           全部
@@ -521,7 +572,9 @@ const quickLoginPreview = computed(() => {
         <button
           v-for="role in availableRoles"
           :key="role"
+          type="button"
           :class="['as-role-chip', { active: activeRole === role }]"
+          :aria-pressed="activeRole === role"
           :style="activeRole === role ? { borderColor: roleColor(role), backgroundColor: roleColor(role) + '18' } : {}"
           @click="selectRole(role)"
         >
@@ -529,24 +582,35 @@ const quickLoginPreview = computed(() => {
         </button>
       </div>
 
-      <div v-if="filteredAccounts.length === 0" class="as-empty">
-        <div v-if="searchQuery || activeRole" class="i-lucide-search-x w-10 h-10 as-empty-icon" />
-        <div v-else class="i-lucide-user-x w-10 h-10 as-empty-icon animate-pulse" />
-        <p v-if="searchQuery || activeRole" class="as-empty-text">
-          没有找到匹配的账号
-        </p>
-        <p v-else class="as-empty-text">该环境下没有配置账号</p>
+      <div v-if="!configLoadFailed && filteredAccounts.length === 0" class="as-empty">
+        <template v-if="searchQuery || activeRole">
+          <div class="i-lucide-search-x w-10 h-10 as-empty-icon" />
+          <p class="as-empty-text">没有找到匹配的账号</p>
+          <button type="button" class="as-role-chip as-empty-action" @click="clearSearch">
+            清除筛选
+          </button>
+        </template>
+        <template v-else>
+          <div class="i-lucide-user-x w-10 h-10 as-empty-icon" />
+          <p class="as-empty-text">该环境下没有配置账号</p>
+          <button type="button" class="as-role-chip as-empty-action" @click="openAccountSettings">
+            打开设置添加账号
+          </button>
+        </template>
       </div>
 
-      <div v-else :class="['as-account-list', { compact: isCompact }]">
-        <div
+      <div v-if="filteredAccounts.length > 0" :class="['as-account-list', { compact: isCompact }]">
+        <button
           v-for="(acc, idx) in filteredAccounts"
           :key="acc.id"
+          type="button"
           :class="['as-account-card', {
             highlighted: isHighlighted(idx),
             disabled: switchingAccountId !== null,
             loading: switchingAccountId === acc.id,
           }]"
+          :disabled="switchingAccountId !== null"
+          :aria-label="`切换至 ${acc.name}`"
           @click="switchAccount(acc)"
         >
           <div class="as-accent" :style="{ backgroundColor: roleColor(acc.roles[0] || '') }" />
@@ -565,18 +629,26 @@ const quickLoginPreview = computed(() => {
             </div>
           </div>
           <div v-if="switchingAccountId === acc.id" class="as-card-spinner" />
-        </div>
+        </button>
       </div>
     </div>
 
-    <!-- 快速登录 Tab 内容 -->
+    <!-- 快捷登录 Tab 内容 -->
     <div v-show="activeTab === 'quicklogin' || !matchedEnv" class="as-quicklogin-tab">
+      <div v-if="!matchedEnv && !configLoadFailed" class="as-empty">
+        <div class="i-lucide-globe w-10 h-10 as-empty-icon" />
+        <p class="as-empty-text">当前站点未配置环境</p>
+        <p class="as-empty-hint">添加环境后可使用环境默认密码与 Bug 页配置</p>
+        <button type="button" class="as-role-chip as-empty-action" @click="openAccountSettings">
+          打开设置添加环境
+        </button>
+      </div>
       <div class="as-quicklogin-inner">
         <!-- 标题区 -->
         <div class="as-ql-header">
           <div class="i-lucide-zap w-4 h-4 as-ql-header-icon" />
           <div>
-            <div class="as-ql-title">快速登录</div>
+            <div class="as-ql-title">快捷登录</div>
             <div class="as-ql-desc">粘贴测试信息，自动解析并跳转</div>
           </div>
         </div>
@@ -586,13 +658,14 @@ const quickLoginPreview = computed(() => {
           v-model="quickLoginText"
           @keydown="handleQuickLoginKeydown"
           class="as-ql-input"
-          placeholder="在此粘贴测试信息&#10;Ctrl+Enter 快速登录"
+          placeholder="在此粘贴测试信息&#10;Ctrl/Cmd+Enter 快捷登录"
           rows="5"
           spellcheck="false"
+          aria-label="快捷登录信息"
         />
 
         <!-- 实时解析预览 -->
-        <div v-if="quickLoginPreview" class="as-ql-preview" :class="{ error: !quickLoginPreview.ok }">
+        <div v-if="quickLoginPreview" class="as-ql-preview" :class="{ error: !quickLoginPreview.ok }" aria-live="polite">
           <template v-if="quickLoginPreview.ok && quickLoginPreview.parts">
             <div class="i-lucide-check-circle w-3 h-3 as-ql-preview-icon" />
             <span v-for="(part, i) in quickLoginPreview.parts" :key="i" class="as-ql-preview-part">
@@ -612,8 +685,12 @@ const quickLoginPreview = computed(() => {
         </div>
 
         <!-- Bug 复现开关：登录成功后自动进入该环境配置的反馈页面 -->
-        <div
+        <button
           v-if="quickLoginMatchedEnv?.debugRedirect"
+          type="button"
+          role="switch"
+          :aria-checked="redirectEnabled"
+          aria-label="登录后进入 Bug 页"
           class="as-ql-redirect-toggle"
           @click="redirectEnabled = !redirectEnabled"
         >
@@ -624,17 +701,18 @@ const quickLoginPreview = computed(() => {
             登录后进入 Bug 页
             <span class="as-ql-toggle-target">{{ quickLoginMatchedEnv.debugRedirect }}</span>
           </span>
-        </div>
+        </button>
 
         <!-- 操作按钮 -->
         <button
+          type="button"
           class="as-ql-btn"
           :disabled="quickLoginLoading || !quickLoginText.trim()"
           @click="handleQuickLogin"
         >
           <div v-if="quickLoginLoading" class="as-ql-spinner" />
           <div v-else class="i-lucide-log-in w-3.5 h-3.5" />
-          {{ quickLoginLoading ? '登录中...' : '登录并跳转' }}
+          {{ quickLoginLoading ? '登录中…' : '登录并跳转' }}
         </button>
 
         <!-- 格式提示 -->
@@ -904,6 +982,10 @@ const quickLoginPreview = computed(() => {
   margin: 0;
 }
 
+.as-empty-action {
+  margin-top: 12px;
+}
+
 /* ===== Account list ===== */
 .as-account-list {
   display: flex;
@@ -923,10 +1005,14 @@ const quickLoginPreview = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   padding: 10px 12px 10px 16px;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition:
     transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
@@ -1457,6 +1543,9 @@ const quickLoginPreview = computed(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   user-select: none;
   padding: 6px 10px;

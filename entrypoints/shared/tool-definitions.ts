@@ -78,6 +78,14 @@ export const allTools: ToolDefinition[] = [
           tabId: msg.tabId,
         });
       },
+      // 动态导入：本注册表被 popup/options/content 共用，静态导入会把
+      // background 专用依赖树打进所有 bundle（同其余 handler 的既有模式）。
+      OPEN_ACCOUNT_SETTINGS: async () => {
+        const { handleOpenAccountSettings } = await import(
+          "../tools/account-switch/background-handler"
+        );
+        return handleOpenAccountSettings();
+      },
       OPEN_ACCOUNT_ENVIRONMENT: async (msg) => {
         const { handleOpenAccountEnvironment } = await import(
           "../tools/account-switch/background-handler"

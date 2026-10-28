@@ -10,6 +10,8 @@ import {
 
 const SUPPORTED_OPS = new Set([
   "http.execute",
+  "clear.cookies",
+  "clear.storage",
   "apply.set",
   "digest",
   "crypto.encrypt",
@@ -30,6 +32,33 @@ function emptySession() {
   return { cookies: [], localStorage: {}, sessionStorage: {} };
 }
 
+function createInitialSession(fixture) {
+  const session = emptySession();
+  const initial = fixture.initialSession;
+  if (!initial || typeof initial !== "object") return session;
+  session.cookies = structuredClone(initial.cookies ?? []);
+  for (const area of ["localStorage", "sessionStorage"]) {
+    for (const [key, value] of Object.entries(initial[area] ?? {})) {
+      Object.defineProperty(session[area], key, { value, writable: true, enumerable: true, configurable: true });
+    }
+  }
+  return session;
+}
+
+function clearSession(op, session) {
+  if (op.range === "none") return;
+  if (op.op === "clear.cookies") {
+    session.cookies = op.range === "all" ? [] : session.cookies.filter((cookie) => !op.range.includes(cookie.name));
+    return;
+  }
+  const area = op.area === "local" ? "localStorage" : "sessionStorage";
+  if (op.range === "all") {
+    session[area] = {};
+    return;
+  }
+  for (const key of op.range) delete session[area][key];
+}
+
 function unsupportedResult(reason) {
   return { status: "NOT_SIMULATED", requests: [], session: emptySession(), issues: [reason] };
 }
@@ -47,6 +76,7 @@ function preflight(spec) {
   for (const [index, op] of spec.ops.entries()) {
     if (!op || !SUPPORTED_OPS.has(op.op)) return `第 ${index + 1} 步 ${op?.op ?? "unknown"} 不属于数据平面模拟范围`;
     if (op.op === "extract" && typeof op.default !== "string") return `第 ${index + 1} 步 extract 只有字面量 default 可在离线模拟`;
+    if (op.op === "clear.cookies" && op.includeParent === true) return `第 ${index + 1} 步 clear.cookies.includeParent 的真实浏览器域匹配不属于离线模拟范围`;
   }
   return undefined;
 }
@@ -210,7 +240,7 @@ function compareExpectation(result, expect, consumed, total) {
 export async function simulateLoginSpec(spec, fixture) {
   const unsupported = preflight(spec);
   if (unsupported) return unsupportedResult(unsupported);
-  const result = { status: "FAIL", success: false, requests: [], session: emptySession(), issues: [] };
+  const result = { status: "FAIL", success: false, requests: [], session: createInitialSession(fixture), issues: [] };
   const bindings = {};
   const inputs = buildInputs(spec, fixture.inputs);
   const ctx = { inputs, bindings };
@@ -228,6 +258,7 @@ export async function simulateLoginSpec(spec, fixture) {
       else if (op.op === "payload.build") bindings[op.as] = runPayloadBuild(ctx, op);
       else if (op.op === "map") bindings[op.as] = runMap(ctx, op);
       else if (op.op === "extract") bindings[op.as] = op.default;
+      else if (op.op === "clear.cookies" || op.op === "clear.storage") clearSession(op, result.session);
       else if (op.op === "auth.write") writeSession(spec, ctx, result.session, inputs.origin);
     }
     result.success = spec.success.every((signal) => evaluateSignal(signal, bindings));

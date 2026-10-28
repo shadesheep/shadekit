@@ -9,7 +9,7 @@ import {
   roleColorStyle,
 } from "./account-view";
 import { accountInitial } from "./account-palette";
-import { buildEnvGroups, normalizeEnvTag, tagColor } from "./account-env-view";
+import { buildEnvGroups, normalizeEnvTag, removeEnvironment, tagColor } from "./account-env-view";
 import { sendBgMessage } from "../../shared/messages";
 import { validateLoginSpec } from "./spec/validate";
 import { readSpecFromConfig } from "./spec/migrate";
@@ -91,6 +91,11 @@ const customRoleInput = ref("");
 const showCustomRole = ref(false);
 const showAccountPassword = ref(false);
 const showGlobalPassword = ref(false);
+const accountFormError = ref("");
+
+watch(() => newAccount.value.username, () => {
+  accountFormError.value = "";
+});
 
 // 预定义角色与角色色同源（account-view，ADR-0004 D6）
 // 新增账号表单的 chip 列表直接用 roleChipOptions（预设 + 已用自定义，
@@ -101,6 +106,7 @@ function cloneAccount(id: string) {
   if (!acc) return;
   editingAccount.value = null;
   showAccountPassword.value = false;
+  accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
     name: acc.name + " (副本)",
@@ -297,7 +303,12 @@ function removeRole(role: string) {
  */
 function accountFormValues(): { name: string; username: string } | null {
   const username = newAccount.value.username.trim();
-  if (!username) return null;
+  if (!username) {
+    accountFormError.value = "请输入登录用户名";
+    void nextTick(() => document.getElementById("account-username")?.focus());
+    return null;
+  }
+  accountFormError.value = "";
   return { name: newAccount.value.name.trim() || username, username };
 }
 
@@ -330,6 +341,7 @@ function editAccount(id: string) {
   if (!acc) return;
   editingAccount.value = id;
   showAccountPassword.value = false;
+  accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
     name: acc.name,
@@ -376,6 +388,7 @@ function cancelEditAccount() {
     domains: [],
   };
   customRoleInput.value = "";
+  accountFormError.value = "";
 }
 
 async function deleteAccount(id: string) {
@@ -451,6 +464,24 @@ const filteredAccounts = computed(() => {
     return true;
   });
 });
+
+const hasAccountFilters = computed(() => Boolean(query.value.trim() || roleFilter.value));
+const emptyAccountMessage = computed(() => {
+  if (hasAccountFilters.value) return "没有符合搜索或角色筛选的账号";
+  if (envFilter.value === "unbound") return "所有账号都已关联环境";
+  if (envFilter.value !== "all") return "该环境还没有关联账号";
+  return "还没有账号";
+});
+
+function clearAccountFilters() {
+  query.value = "";
+  roleFilter.value = "";
+}
+
+function handleEmptyAccountAction() {
+  if (hasAccountFilters.value) clearAccountFilters();
+  else addAccountToView();
+}
 
 /** 账号绑定的环境列表（多对多反查 config.domains，按绑定顺序） */
 function accEnvList(acc: Account): Array<{ key: string; env: DomainConfig }> {
@@ -582,10 +613,10 @@ async function deleteEnv(key: string) {
     )
   )
     return;
-  const next = { ...config.value.domains };
-  delete next[key];
-  config.value.domains = next;
-  await saveWithFeedback({ domains: next }, `环境「${env.name}」已删除`);
+  const next = removeEnvironment(config.value, key);
+  config.value.domains = next.domains;
+  config.value.accounts = next.accounts;
+  await saveWithFeedback(next, `环境「${env.name}」已删除`);
 }
 
 /** 「＋ 账号」：卡内直接给该环境加账号（环境预填为当前卡） */
@@ -605,25 +636,57 @@ function closeAccountForm() {
 // 避免 absolute 菜单把定高滚动容器「撑长」（滚动条随菜单出现被拉高）。
 const openMenu = ref<string | null>(null);
 const menuPos = ref<{ top: number; right: number } | null>(null);
+let menuTrigger: HTMLElement | null = null;
 
 function toggleMenu(key: string, ev: MouseEvent) {
   if (openMenu.value === key) {
-    openMenu.value = null;
-    menuPos.value = null;
+    closeMenu();
     return;
   }
-  const btn = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+  const trigger = ev.currentTarget as HTMLElement;
+  const btn = trigger.getBoundingClientRect();
+  menuTrigger = trigger;
   menuPos.value = {
     top: Math.round(btn.bottom + 4),
     right: Math.round(window.innerWidth - btn.right),
   };
   openMenu.value = key;
+  void nextTick(() => {
+    document.getElementById(`${key}:menu`)?.querySelector("button")?.focus();
+  });
 }
 
-function closeMenu() {
+function closeMenu(restoreFocus = false) {
   openMenu.value = null;
   menuPos.value = null;
+  if (restoreFocus) menuTrigger?.focus();
+  if (restoreFocus) menuTrigger = null;
 }
+
+function handleMenuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu(true);
+    return;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const menu = event.currentTarget as HTMLElement;
+  const items = Array.from(menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+  if (items.length === 0) return;
+  event.preventDefault();
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  const next = event.key === "Home"
+    ? 0
+    : event.key === "End"
+      ? items.length - 1
+      : event.key === "ArrowDown"
+        ? (current + 1 + items.length) % items.length
+        : (current - 1 + items.length) % items.length;
+  items[next].focus();
+}
+
+const handleDocumentClick = () => closeMenu();
 
 // ----- 指示器开关（per-env，落地为 envBadge.whitelist 增删） -----
 const DEFAULT_ENV_BADGE: EnvBadgeConfig = {
@@ -653,9 +716,13 @@ async function toggleEnvBadge(key: string) {
   } else {
     whitelist = [...current.whitelist, key];
   }
+  if (current.whitelist.length > 0 && whitelist.length === 0) {
+    showToast("至少保留 1 个环境；如需全部关闭，请在「设置 → 环境角标」中关闭总开关", "info");
+    return;
+  }
   const next: EnvBadgeConfig = { ...current, whitelist };
   config.value.envBadge = next;
-  await saveWithFeedback({ envBadge: next }, "角标显示范围已保存");
+  await saveWithFeedback({ envBadge: next }, "环境角标显示范围已保存");
 }
 
 // ----- 设置页：环境指示器区块（Config Kit / ADR-0007 Auto-save 范式） -----
@@ -674,7 +741,7 @@ const badgeScope = computed<"all" | "selected">(() =>
 
 async function saveEnvBadge(next: EnvBadgeConfig) {
   config.value.envBadge = next;
-  await saveWithFeedback({ envBadge: next }, "✓ 已保存");
+  await saveWithFeedback({ envBadge: next }, "设置已保存");
 }
 
 function setEnvBadgeEnabled(enabled: boolean) {
@@ -705,6 +772,10 @@ function toggleWhitelist(key: string) {
   const whitelist = current.whitelist.includes(key)
     ? current.whitelist.filter((k) => k !== key)
     : [...current.whitelist, key];
+  if (whitelist.length === 0) {
+    showToast("至少保留 1 个环境；如需全部关闭，请关闭「启用环境角标」", "info");
+    return;
+  }
   void saveEnvBadge({ ...current, whitelist });
 }
 
@@ -735,6 +806,17 @@ function resolveRowPassword(env: DomainConfig, acc: Account): string {
   );
 }
 
+function accountPasswordState(acc: Account): { label: string; missing: boolean } {
+  if (acc.password) return { label: "已配置", missing: false };
+  if (accEnvList(acc).some(({ env }) => env.defaultPassword)) {
+    return { label: "环境默认", missing: false };
+  }
+  if (globalDefaultPassword.value) {
+    return { label: "全局默认", missing: false };
+  }
+  return { label: "未配置", missing: true };
+}
+
 async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   const k = verifyKey(envKey, acc.id);
   if (verifyStates.value[k]?.status === "running") return;
@@ -753,7 +835,7 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   if (issues.length > 0) {
     verifyStates.value[k] = {
       status: "fail",
-      message: "登录声明校验未过：" + issues[0].message,
+      message: "登录配置有误：" + issues[0].message,
     };
     return;
   }
@@ -761,7 +843,7 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   if (!password) {
     verifyStates.value[k] = {
       status: "fail",
-      message: "缺密码（账号、环境与全局均未配置）",
+      message: "未配置密码：请填写账号密码，或设置环境/全局默认密码",
     };
     return;
   }
@@ -775,8 +857,8 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
       // writeSession 缺省 false：只发请求验证，不写会话
     });
     verifyStates.value[k] = res.ok
-      ? { status: "ok", message: res.sessionWritten ? "已登录" : "能换到凭据" }
-      : { status: "fail", message: res.error || "验证失败" };
+      ? { status: "ok", message: res.sessionWritten ? "当前已是该账号" : "账号密码可用" }
+      : { status: "fail", message: res.error || "检查失败" };
   } catch (e) {
     verifyStates.value[k] = {
       status: "fail",
@@ -857,7 +939,6 @@ async function loginAccount(envKey: string, acc: Account) {
           errorCode: response?.errorCode,
           envKey,
           spec: spec ?? undefined,
-          onRetry: () => loginAccount(envKey, acc),
           detail: {
             action: "SWITCH_ACCOUNT",
             envName: config.value.domains[envKey]?.name,
@@ -880,11 +961,11 @@ onMounted(async () => {
   configReady.value = true;
   void refresh();
   // 「⋯」菜单：点页面任意处关闭（⋯ 按钮自身 @click.stop 除外）
-  document.addEventListener("click", closeMenu);
+  document.addEventListener("click", handleDocumentClick);
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", closeMenu);
+  document.removeEventListener("click", handleDocumentClick);
 });
 
 /**
@@ -898,14 +979,14 @@ function handleSettingsClick() {
 function saveQuickLoginDefaultDomain() {
   void saveWithFeedback(
     { quickLoginDefaultDomain: quickLoginDefaultDomain.value },
-    "✓ 已保存",
+    "设置已保存",
   );
 }
 
 function saveGlobalDefaultPassword() {
   void saveWithFeedback(
     { globalDefaultPassword: globalDefaultPassword.value },
-    "✓ 已保存",
+    "设置已保存",
   );
 }
 </script>
@@ -931,14 +1012,14 @@ function saveGlobalDefaultPassword() {
       <div class="main-topbar">
         <span class="toolbar-count">{{ envCount }} 个环境 · {{ accountCount }} 个账号</span>
         <div class="main-topbar-actions">
-          <DtButton size="sm" title="从文件导入登录策略" @click="domainsPanelRef?.openImport()">
-            <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入登录策略…
+          <DtButton size="sm" variant="primary" @click="domainsPanelRef?.openCreate()">
+            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />新建环境
           </DtButton>
-          <DtButton size="sm" @click="domainsPanelRef?.openCreate()">
-            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />环境
+          <DtButton size="sm" variant="secondary" @click="addAccountToView">
+            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />新建账号
           </DtButton>
-          <DtButton size="sm" @click="addAccountToView">
-            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />账号
+          <DtButton size="sm" variant="secondary" title="从文件导入可复用的登录方式，不包含账号密码" @click="domainsPanelRef?.openImport()">
+            <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入策略
           </DtButton>
         </div>
       </div>
@@ -947,70 +1028,89 @@ function saveGlobalDefaultPassword() {
       <DtDrawer :show="showAccountForm" :title="editingAccount ? '编辑账号' : '添加账号'" @close="closeAccountForm">
         <div class="form-card" :class="{ 'form-card-highlight': formHighlight }">
           <div class="form-row">
-          <label>名称</label>
-          <input class="dt-input" v-model="newAccount.name" placeholder="留空默认 = 用户名" />
-        </div>
-        <div class="form-row">
-          <label>用户名</label>
-          <input class="dt-input" v-model="newAccount.username" placeholder="登录用户名" />
-        </div>
-        <div class="form-row">
-          <label>密码</label>
-          <div class="password-input-wrapper">
-            <input class="dt-input password-input" v-model="newAccount.password" :type="showAccountPassword ? 'text' : 'password'" placeholder="可留空：走环境默认 / 全局默认密码" />
-            <button class="password-toggle" type="button" @click="showAccountPassword = !showAccountPassword" :title="showAccountPassword ? '隐藏密码' : '显示密码'">
-              <div :class="showAccountPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
-            </button>
+            <label for="account-name">显示名称 <span class="optional">（选填）</span></label>
+            <input id="account-name" class="dt-input" v-model="newAccount.name" placeholder="留空时使用用户名" />
           </div>
-          <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
-        </div>
-        <div class="form-row">
-          <label>角色</label>
-          <div class="role-selector">
-            <div class="role-presets">
-              <span
+          <div class="form-row">
+            <label for="account-username">用户名 <span class="required" aria-hidden="true">*</span></label>
+            <input
+              id="account-username"
+              class="dt-input"
+              v-model="newAccount.username"
+              placeholder="登录时使用的用户名"
+              required
+              :aria-invalid="Boolean(accountFormError)"
+              :aria-describedby="accountFormError ? 'account-username-error' : undefined"
+            />
+            <p v-if="accountFormError" id="account-username-error" class="field-error" role="alert">
+              <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ accountFormError }}
+            </p>
+          </div>
+          <div class="form-row">
+            <label for="account-password">密码 <span class="optional">（选填）</span></label>
+            <div class="password-input-wrapper">
+              <input id="account-password" class="dt-input password-input" v-model="newAccount.password" :type="showAccountPassword ? 'text' : 'password'" placeholder="留空时使用环境或全局默认密码" />
+              <button class="password-toggle" type="button" @click="showAccountPassword = !showAccountPassword" :title="showAccountPassword ? '隐藏密码' : '显示密码'" :aria-label="showAccountPassword ? '隐藏账号密码' : '显示账号密码'" :aria-pressed="showAccountPassword">
+                <div :class="showAccountPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
+              </button>
+            </div>
+            <p class="field-hint">使用时依次读取：账号密码 → 环境默认密码 → 全局默认密码。</p>
+          </div>
+          <div class="form-row">
+            <label id="account-roles-label">角色 <span class="optional">（选填，用于筛选）</span></label>
+            <div class="role-selector">
+              <div class="role-presets" role="group" aria-labelledby="account-roles-label">
+                <button
                   v-for="r in roleChipOptions"
                   :key="r"
+                  type="button"
                   :class="['role-chip', { active: newAccount.roles.includes(r) }]"
+                  :aria-pressed="newAccount.roles.includes(r)"
                   @click="toggleRole(r)"
-              >{{ r }}</span>
-              <span class="role-chip" @click="showCustomRole = !showCustomRole">
-                {{ showCustomRole ? '收起' : '更多' }}
-              </span>
-            </div>
-            <input
+                >{{ r }}</button>
+                <button type="button" class="role-chip" :aria-expanded="showCustomRole" aria-controls="account-custom-role" @click="showCustomRole = !showCustomRole">
+                  {{ showCustomRole ? '收起自定义角色' : '自定义角色' }}
+                </button>
+              </div>
+              <input
                 v-if="showCustomRole"
+                id="account-custom-role"
                 class="dt-input role-custom-input"
                 v-model="customRoleInput"
+                aria-label="自定义角色名"
                 @keydown.enter.prevent="addCustomRole"
-                placeholder="输入新角色名，回车添加"
-            />
-            <div class="role-selected-list" v-if="newAccount.roles.length > 0">
-              <span v-for="r in newAccount.roles" :key="r" class="role-chip selected" :style="roleColorStyle(r)">
-                {{ r }}
-                <a class="role-remove" @click="removeRole(r)">&times;</a>
-              </span>
+                placeholder="输入角色名，按回车添加"
+              />
+              <div class="role-selected-list" v-if="newAccount.roles.length > 0">
+                <span v-for="r in newAccount.roles" :key="r" class="role-chip selected" :style="roleColorStyle(r)">
+                  {{ r }}
+                  <button type="button" class="role-remove" :aria-label="`移除角色「${r}」`" :title="`移除角色「${r}」`" @click="removeRole(r)">&times;</button>
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="form-row">
-          <label>关联环境</label>
-          <div class="domain-chip-selector">
-            <span
+          <div class="form-row">
+            <label id="account-domains-label">关联环境 <span class="optional">（至少关联 1 个才会出现在网页切换面板）</span></label>
+            <div class="domain-chip-selector" role="group" aria-labelledby="account-domains-label">
+              <button
                 v-for="opt in domainOptions"
                 :key="opt.url"
+                type="button"
                 :class="['domain-chip', { selected: newAccount.domains.includes(opt.url) }]"
+                :aria-pressed="newAccount.domains.includes(opt.url)"
+                :title="opt.url"
                 @click="toggleDomain(opt.url)"
-            >{{ opt.name }}</span>
+              >{{ opt.name }}</button>
+            </div>
+            <p v-if="domainOptions.length === 0" class="field-hint">还没有环境。可先保存账号，再新建环境并关联。</p>
           </div>
-        </div>
-        <div class="form-actions">
-          <DtButton v-if="!editingAccount" variant="primary" @click="addAccount">
-            <div class="i-lucide-plus w-4 h-4 mr-1" />添加
-          </DtButton>
-          <DtButton v-else variant="primary" @click="saveEditAccount">保存</DtButton>
-          <DtButton variant="secondary" @click="closeAccountForm">取消</DtButton>
-        </div>
+          <div class="form-actions">
+            <DtButton v-if="!editingAccount" variant="primary" @click="addAccount">
+              <div class="i-lucide-plus w-4 h-4 mr-1" />添加账号
+            </DtButton>
+            <DtButton v-else variant="primary" @click="saveEditAccount">保存修改</DtButton>
+            <DtButton variant="secondary" @click="closeAccountForm">取消</DtButton>
+          </div>
         </div>
       </DtDrawer>
 
@@ -1024,7 +1124,7 @@ function saveGlobalDefaultPassword() {
           </template>
           <span class="empty-title">还没有任何环境与账号</span>
           <template #hint>
-            <span class="empty-hint">先创建一个环境，再在里面勾选已有账号或就地新增账号。</span>
+            <span class="empty-hint">只需两步：先添加环境网址，再在环境中添加账号。之后即可在网页中一键切换。</span>
           </template>
           <template #actions>
             <DtButton variant="primary" @click="domainsPanelRef?.openCreate()">
@@ -1072,12 +1172,12 @@ function saveGlobalDefaultPassword() {
             @click="envFilter = 'unbound'; closeMenu()"
           >
             <span class="rail-dot none" />
-            <span class="rail-label">未绑定</span>
+            <span class="rail-label">未关联环境</span>
             <span class="rail-count">{{ envGroups.unbound.length }}</span>
           </button>
 
           <div class="rail-note">
-            指示器：{{ badgeEnabledCount }} / {{ envGroups.groups.length }} 个环境开启
+            {{ envBadge.enabled ? `环境角标：${badgeEnabledCount} / ${envGroups.groups.length} 个环境开启` : '环境角标：未启用' }}
           </div>
         </aside>
 
@@ -1089,32 +1189,32 @@ function saveGlobalDefaultPassword() {
             <span class="item-name">{{ envOfKey(envFilter).name }}</span>
             <span class="item-sub">{{ envFilter }}</span>
             <span class="context-spacer" />
-            <label class="toggle-switch" :class="{ 'toggle-disabled': !envBadge.enabled }" title="该环境是否显示角标">
+            <DtButton v-if="!envBadge.enabled" size="sm" variant="secondary" title="前往设置启用环境角标" @click="activeTab = 'settings'">启用角标</DtButton>
+            <label v-else class="toggle-switch" :title="`在「${envOfKey(envFilter).name}」页面显示环境角标`">
               <input
                 type="checkbox"
                 :checked="envBadgeOn(envFilter)"
-                :disabled="!envBadge.enabled"
+                :aria-label="`在「${envOfKey(envFilter).name}」页面显示环境角标`"
                 @change="toggleEnvBadge(envFilter)"
               />
               <span class="toggle-slider" />
             </label>
-            <!-- 「验证环境」暂无时间场景，隐藏（保留 verifyEnv 实现，待有需求再放回）
-            <button class="btn-toolbar" @click="verifyEnv(envFilter, envOfKey(envFilter), groupsOfKey(envFilter))" title="检查登录声明校验与账号凭据齐全性，不发请求">
-              <div class="i-lucide-shield-check w-3.5 h-3.5 mr-1" />验证环境
-            </button>
-            -->
             <div class="more-wrap">
-              <DtButton size="sm" class="more-btn" title="更多" @click.stop="toggleMenu('env:' + envFilter, $event)">⋯</DtButton>
+              <DtButton size="sm" class="more-btn" title="环境操作" :aria-label="`环境「${envOfKey(envFilter).name}」的其他操作`" :aria-expanded="openMenu === 'env:' + envFilter" :aria-controls="openMenu === 'env:' + envFilter ? 'env:' + envFilter + ':menu' : undefined" @click.stop="toggleMenu('env:' + envFilter, $event)">⋯</DtButton>
               <Teleport to="body">
                 <div
                   v-if="openMenu === 'env:' + envFilter && menuPos"
+                  :id="'env:' + envFilter + ':menu'"
                   class="more-menu"
+                  role="menu"
+                  :aria-label="`环境「${envOfKey(envFilter).name}」操作`"
                   :style="{ top: menuPos.top + 'px', right: menuPos.right + 'px' }"
+                  @keydown="handleMenuKeydown"
                 >
-                  <button class="more-item" @click="closeMenu(); domainsPanelRef?.openEdit(envFilter)">编辑</button>
-                  <button class="more-item" @click="closeMenu(); domainsPanelRef?.openClone(envFilter)">克隆</button>
-                  <button class="more-item" @click="closeMenu(); domainsPanelRef?.exportPackage(envFilter)">导出登录策略包</button>
-                  <button class="more-item more-danger" @click="closeMenu(); deleteEnv(envFilter)">删除</button>
+                  <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); domainsPanelRef?.openEdit(envFilter)">编辑环境</button>
+                  <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); domainsPanelRef?.openClone(envFilter)">创建副本</button>
+                  <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); domainsPanelRef?.exportPackage(envFilter)">导出登录策略包</button>
+                  <button type="button" role="menuitem" class="more-item more-danger" @click="closeMenu(true); deleteEnv(envFilter)">删除环境</button>
                 </div>
               </Teleport>
             </div>
@@ -1133,6 +1233,7 @@ function saveGlobalDefaultPassword() {
             <input
               class="dt-input env-search"
               v-model="query"
+              aria-label="搜索账号名称或用户名"
               placeholder="搜索名称或用户名…"
             />
             <!-- 角色 pill 筛选：按现有数据中的角色动态生成（预设在前，自定义在后） -->
@@ -1144,6 +1245,7 @@ function saveGlobalDefaultPassword() {
                 class="pill"
                 :class="{ active: roleFilter === r }"
                 :style="roleColorStyle(r)"
+                :aria-pressed="roleFilter === r"
                 @click="roleFilter = roleFilter === r ? '' : r"
               >{{ r }}</button>
             </div>
@@ -1185,12 +1287,12 @@ function saveGlobalDefaultPassword() {
                     v-else-if="rowVerify(acc)?.status === 'running'"
                     class="verify-line verify-running"
                   >
-                    验证中…
+                    检查中…
                   </div>
                 </td>
                 <td class="col-envs">
                   <div v-if="accEnvList(acc).length === 0" class="env-cell">
-                    <span class="rail-dot none" /><span class="cell-hint">未绑定</span>
+                    <span class="rail-dot none" /><span class="cell-hint">未关联环境</span>
                   </div>
                   <div v-else class="env-multi">
                     <template
@@ -1205,30 +1307,31 @@ function saveGlobalDefaultPassword() {
                   </div>
                 </td>
                 <td class="col-password">
-                  <span class="pw-state" :class="{ 'pw-missing': !acc.password }">
-                    <div class="i-lucide-lock w-3 h-3 inline mr-0.5" />{{ acc.password ? '已配置' : '缺密码' }}
+                  <span class="pw-state" :class="{ 'pw-missing': accountPasswordState(acc).missing }" title="密码优先级：账号密码 → 环境默认密码 → 全局默认密码">
+                    <div class="i-lucide-lock w-3 h-3 inline mr-0.5" />{{ accountPasswordState(acc).label }}
                   </span>
                 </td>
                 <td class="col-actions">
                   <div class="item-actions">
                     <div class="more-wrap">
-                      <DtButton size="sm" class="more-btn" title="更多" @click.stop="toggleMenu('acc:' + acc.id, $event)">⋯</DtButton>
+                      <DtButton size="sm" class="more-btn" title="账号操作" :aria-label="`账号「${acc.name}」的其他操作`" :aria-expanded="openMenu === 'acc:' + acc.id" :aria-controls="openMenu === 'acc:' + acc.id ? 'acc:' + acc.id + ':menu' : undefined" @click.stop="toggleMenu('acc:' + acc.id, $event)">⋯</DtButton>
                       <Teleport to="body">
                         <div
                           v-if="openMenu === 'acc:' + acc.id && menuPos"
+                          :id="'acc:' + acc.id + ':menu'"
                           class="more-menu"
+                          role="menu"
+                          :aria-label="`账号「${acc.name}」操作`"
                           :style="{ top: menuPos.top + 'px', right: menuPos.right + 'px' }"
+                          @keydown="handleMenuKeydown"
                         >
                           <template v-if="accFallbackEnv(acc)">
-                            <button class="more-item" @click="closeMenu(); verifyMenuAccount(acc)">验证</button>
-                            <!-- 「登录」暂时隐藏，保留 loginAccount 实现
-                            <button class="more-item" :disabled="!!switchingAccountId" @click="closeMenu(); loginMenuAccount(acc)">登录</button>
-                            -->
+                            <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); verifyMenuAccount(acc)">检查配置</button>
                             <div class="more-sep" />
                           </template>
-                          <button class="more-item" @click="closeMenu(); editAccount(acc.id)">编辑</button>
-                          <button class="more-item" @click="closeMenu(); cloneAccount(acc.id)">克隆</button>
-                          <button class="more-item more-danger" @click="closeMenu(); deleteAccount(acc.id)">删除</button>
+                          <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); editAccount(acc.id)">编辑账号</button>
+                          <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); cloneAccount(acc.id)">创建副本</button>
+                          <button type="button" role="menuitem" class="more-item more-danger" @click="closeMenu(true); deleteAccount(acc.id)">删除账号</button>
                         </div>
                       </Teleport>
                     </div>
@@ -1237,7 +1340,10 @@ function saveGlobalDefaultPassword() {
               </tr>
               <tr v-if="filteredAccounts.length === 0">
                 <td colspan="4" class="table-empty">
-                  没有匹配的账号<span v-if="envFilter === 'unbound'">（未绑定账号为空）</span>
+                  <p>{{ emptyAccountMessage }}</p>
+                  <DtButton v-if="hasAccountFilters || envFilter !== 'unbound'" size="sm" variant="secondary" @click="handleEmptyAccountAction">
+                    {{ hasAccountFilters ? '清除筛选' : '新建账号' }}
+                  </DtButton>
                 </td>
               </tr>
             </tbody>
@@ -1304,12 +1410,12 @@ function saveGlobalDefaultPassword() {
       <div class="form-card">
         <h3>
           <div class="i-lucide-map-pin w-4 h-4" />
-          环境指示器
+          环境角标
         </h3>
-        <p class="settings-hint">在匹配环境的页面角落显示环境角标。主视图环境卡头的开关与本页「显示范围」写同一份配置（不勾选任何环境 = 全部显示）。</p>
+        <p class="settings-hint">在匹配环境的页面角落显示环境名称，帮助区分本地、测试和生产环境。更改后，已打开的页面需刷新才会生效。</p>
 
         <div class="settings-items">
-          <DtConfigItem label="启用指示器" hint="关闭后所有页面都不再显示角标">
+          <DtConfigItem label="启用环境角标" hint="关闭后所有页面都不再显示角标">
             <DtToggle
               :model-value="envBadge.enabled"
               @update:model-value="setEnvBadgeEnabled"
@@ -1322,7 +1428,7 @@ function saveGlobalDefaultPassword() {
               @update:model-value="setEnvBadgePosition"
             />
           </DtConfigItem>
-          <DtConfigItem label="显示范围" hint="「仅这些环境」时仅勾选的环境显示角标" layout="stack">
+          <DtConfigItem label="显示范围" hint="「仅这些环境」至少保留 1 个；若要全部关闭，请关闭上方总开关" layout="stack">
             <DtSegmented
               :model-value="badgeScope"
               :options="[
@@ -1363,9 +1469,10 @@ function saveGlobalDefaultPassword() {
         <p class="settings-hint">当快捷登录文本不含 URL 时，使用此处配置作为目标。全局默认密码在环境未配置默认密码时作为最后回退。</p>
 
         <div class="form-row">
-          <label>默认环境</label>
+          <label for="quick-login-default-domain">默认环境</label>
           <template v-if="domainOptions.length > 0">
             <select
+              id="quick-login-default-domain"
               class="dt-select"
               v-model="quickLoginDefaultDomain"
               @change="saveQuickLoginDefaultDomain()"
@@ -1390,16 +1497,17 @@ function saveGlobalDefaultPassword() {
           </template>
         </div>
         <div class="form-row">
-          <label>全局默认密码</label>
+          <label for="global-default-password">全局默认密码</label>
           <div class="password-input-wrapper">
             <input
-                class="dt-input password-input"
-                v-model="globalDefaultPassword"
-                :type="showGlobalPassword ? 'text' : 'password'"
-                @change="saveGlobalDefaultPassword()"
-                placeholder="留空表示不使用全局默认密码"
+              id="global-default-password"
+              class="dt-input password-input"
+              v-model="globalDefaultPassword"
+              :type="showGlobalPassword ? 'text' : 'password'"
+              @change="saveGlobalDefaultPassword()"
+              placeholder="留空表示不使用全局默认密码"
             />
-            <button class="password-toggle" type="button" @click="showGlobalPassword = !showGlobalPassword" :title="showGlobalPassword ? '隐藏密码' : '显示密码'">
+            <button class="password-toggle" type="button" @click="showGlobalPassword = !showGlobalPassword" :title="showGlobalPassword ? '隐藏密码' : '显示密码'" :aria-label="showGlobalPassword ? '隐藏全局默认密码' : '显示全局默认密码'" :aria-pressed="showGlobalPassword">
               <div :class="showGlobalPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
             </button>
           </div>
@@ -1924,9 +2032,11 @@ select[multiple] option {
 
 .role-remove {
   cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: transparent;
   font-size: 14px;
   line-height: 1;
-  text-decoration: none;
   color: #94a3b8;
   margin-left: 2px;
 }
@@ -1943,6 +2053,24 @@ select[multiple] option {
 
 .role-custom-input {
   margin-top: 4px;
+}
+
+.required,
+.field-error {
+  color: #dc2626;
+}
+
+.field-error {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+[data-dt-dark] .required,
+[data-dt-dark] .field-error {
+  color: #f87171;
 }
 
 /* 设置页 */
@@ -2431,6 +2559,7 @@ select[multiple] option {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+  font-size: 13px;
 }
 
 /* 用户名过长时省略，不把名称挤成一字一行 */
@@ -2483,6 +2612,10 @@ select[multiple] option {
   text-align: center;
   color: #94a3b8;
   padding: 24px 12px;
+}
+
+.table-empty p {
+  margin: 0 0 12px;
 }
 
 .env-multi {

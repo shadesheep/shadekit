@@ -3,11 +3,12 @@ import {
   finalizeNewEnvironmentSave,
   lockPreparedLoginForm,
   newEnvironmentSaveMessage,
-  prepareLoginFormLock,
   type PreparedLoginFormLock,
+  prepareLoginFormLock,
 } from "../entrypoints/tools/account-switch/login-form-lock";
 import { defaultLoginSpec } from "../entrypoints/tools/account-switch/spec/editor";
 import type { LoginSpec } from "../entrypoints/tools/account-switch/spec/types";
+import { DEFAULT_AUTH_STORAGE_SELECTION } from "../entrypoints/tools/account-switch/strategies/auth-storage";
 import type {
   AccountSwitchConfig,
   DomainConfig,
@@ -249,14 +250,26 @@ describe("lockPreparedLoginForm", () => {
     const current = readConfig().domains[ENV_KEY];
     const ops = current.strategyConfig!.spec!.ops;
     expect(ops[0]).toEqual(spec.ops[0]);
-    expect(ops[1]).toEqual({
+    expect(ops.slice(1, 3)).toEqual([
+      {
+        op: "clear.storage",
+        area: "local",
+        range: DEFAULT_AUTH_STORAGE_SELECTION.local,
+      },
+      {
+        op: "clear.storage",
+        area: "session",
+        range: DEFAULT_AUTH_STORAGE_SELECTION.session,
+      },
+    ]);
+    expect(ops[3]).toEqual({
       op: "goto",
       url: "{origin}/login",
       waitForLoad: true,
       waitForTarget: "#u",
     });
-    expect(ops[5]).toEqual(spec.ops[4]);
-    expect(ops.slice(2, 5)).toEqual([
+    expect(ops[7]).toEqual(spec.ops[4]);
+    expect(ops.slice(4, 7)).toEqual([
       {
         op: "fill",
         target: "#u",
@@ -307,7 +320,7 @@ describe("lockPreparedLoginForm", () => {
     expect(result.status).toBe("locked");
     const current = readConfig().domains[ENV_KEY];
     expect(current.strategyId).toBe("shared");
-    expect(current.strategyConfig?.spec?.ops[2]).toMatchObject({
+    expect(current.strategyConfig?.spec?.ops[4]).toMatchObject({
       target: "#u",
     });
     expect(readConfig().strategies).toEqual(libraryBefore);

@@ -10,7 +10,7 @@
   "homepage": "https://github.com/shadesheep/shadekit",
   "bugs": "https://github.com/shadesheep/shadekit/issues",
   "private": true,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "type": "module",
   "engines": {
     "node": ">=20"

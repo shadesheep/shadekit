@@ -110,9 +110,10 @@ interface LoginSpec {
 
 自动识别或锁定标准登录表单时，会同时记录实际标签页的登录页地址；同域地址
 保存为 `{origin}/...`，并在前导 `clear.*` 后生成 `goto(waitForLoad: true)`。
-扫描只枚举 localStorage / sessionStorage 键名，用户在确认卡片中勾选高置信度认证键，
-生成精准的 `clear.storage`，不读取键值也不默认清空全部存储。`waitForTarget` 会在
-导航后等待实际用户名输入框出现，避免 SPA 渲染与旧登录态重定向竞态。
+扫描只枚举 localStorage / sessionStorage 键名，不读取键值也不默认清空全部存储。
+手动识别由用户在确认卡片中勾选高置信度认证键；直接添加环境的唯一表单自动锁定
+复用同一扫描与固化流程，并写入同一组高置信度认证键，生成精准的 `clear.storage`。
+`waitForTarget` 会在导航后等待实际用户名输入框出现，避免 SPA 渲染与旧登录态重定向竞态。
 高级多步声明不被识别回填隐式重排；明确留空登录页的简易声明仍保留当前页 / SPA 用法，并显示软提示。
 
 其他系统由用户通过「导入登录策略包…」导入 `dt-login-config/v1`，存入
@@ -196,7 +197,7 @@ interface LoginSpec {
 
 **自动定位与可选锁定**：默认标准三步使用 `{ auto: "login" }`，登录时由 `runSpec` 复用同一扫描器解析，无需先打开高级配置。只有同 frame 三项齐全且 Target 全唯一才执行；同 frame 多表单、多 frame、缺项或歧义均不猜测。首个自动算子前 `noPassword` 最多刷新重试一次，运行结果只存于本次 `RunState`。
 
-环境 URL 下的「识别并锁定登录表单」是可选优化；新建保存先在 1500ms 内只读准备，基础保存成功后才由后台重读配置、重扫页面并条件回写当前环境。镜像只脱镜当前环境，不改策略库或其它镜像。trace 以 `auto → Target` / `resolution` 记录来源，不记录填充值、Cookie 或 token。
+环境 URL 下的「识别并锁定登录表单」是可选优化；新建保存先在 1500ms 内只读准备，基础保存成功后才由后台重读配置、重扫页面并条件回写当前环境，固化具体 Target、登录页导航、表单等待与认证存储清理。无法唯一识别时保留运行时自动定位。镜像只脱镜当前环境，不改策略库或其它镜像。trace 以 `auto → Target` / `resolution` 记录来源，不记录填充值、Cookie 或 token。
 
 ---
 
@@ -219,13 +220,15 @@ interface LoginSpec {
 
 | # | 场景 | 触发方式 | 行为 |
 |---|------|----------|------|
-| 1 | Popup 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl+Enter` | 解析文本，执行登录并跳转 |
-| 2 | Content Script 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl+Enter` | 同上（快捷键面板中） |
+| 1 | Popup 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl/Cmd+Enter` | 解析文本，执行登录并跳转 |
+| 2 | Content Script 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl/Cmd+Enter` | 同上（快捷键面板中） |
 | 3 | 快捷键选中文字 | `Alt+Shift+A` (有选中文本) | 解析选中文本，新标签页快捷登录 |
 | 4 | 右键菜单快捷登录 | 选中文本 → 右键 → 「快捷登录」 | 同上，新标签页快捷登录 |
 | 5 | Bug 复现跳转 | 文本含 URL 且环境配置了 `debugRedirect` | 登录成功后自动进入反馈的 Bug 页面 |
 | 6 | 无 URL 模式 | 文本不含 URL + 配置了 `quickLoginDefaultDomain` | 使用默认域名作为目标 |
 | 7 | 默认密码快进 | 文本含 URL + 账号（无密码）+ 环境配置了 `defaultPassword` | 自动填充环境的默认密码执行登录 |
+
+环境匹配只依赖输入的 URL 与环境配置；即使尚未保存任何账号，也能使用环境默认密码和 Bug 页配置。
 
 ### 4.3 快捷登录支持的文本格式
 
@@ -415,7 +418,7 @@ entrypoints/tools/account-switch/
 │   ├── TargetField.vue           # 定位输入组件（kind + 拾取 + 候选胶囊 + 命中提示）
 │   ├── recipe-editor-model.ts    # 旧配方编辑器纯函数模型（TargetField 复用）
 │   ├── login-form-scan.ts        # 配置层兼容出口（实现归 strategies/login-form-scan.ts）
-│   ├── LoginFormLocator.vue      # URL 下可选识别锁定与状态展示
+│   ├── LoginFormLocator.vue      # 自动打开登录页、等待加载、识别锁定与状态展示
 │   └── target-picker.ts          # 定位拾取器（候选列表 + 元素元信息 / 交互四态）
 ├── EnvIndicator.ts               # 环境指示器 (页面右下角标签)
 ├── spec/

@@ -14,6 +14,7 @@ import {
   buildEnvGroups,
   deriveEnvTag,
   normalizeEnvTag,
+  removeEnvironment,
   tagColor,
   ENV_TAG_FALLBACK_COLOR,
 } from '../entrypoints/tools/account-switch/account-env-view';
@@ -123,6 +124,30 @@ describe('buildEnvGroups — 主视图环境分组', () => {
       groups: [],
       unbound: [],
     });
+  });
+});
+
+describe('removeEnvironment — 删除环境与账号绑定', () => {
+  it('同步清除账号引用且不改原数据，重建同地址环境不会恢复旧绑定', () => {
+    const key = 'http://localhost:8888';
+    const other = 'https://test.example.com';
+    const original = {
+      domains: { [key]: env({ name: '本地' }), [other]: env({ name: '测试' }) },
+      accounts: [
+        acc({ id: 'a1', domains: [key, other] }),
+        acc({ id: 'a2', domains: [other] }),
+      ],
+    };
+
+    const next = removeEnvironment(original, key);
+
+    expect(next.domains).toEqual({ [other]: original.domains[other] });
+    expect(next.accounts[0].domains).toEqual([other]);
+    expect(next.accounts[1]).toBe(original.accounts[1]);
+    expect(original.accounts[0].domains).toEqual([key, other]);
+
+    next.domains[key] = env({ name: '重建的本地环境' });
+    expect(buildEnvGroups(next).groups.find((group) => group.key === key)?.accounts).toEqual([]);
   });
 });
 

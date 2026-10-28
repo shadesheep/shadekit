@@ -7,9 +7,23 @@
  *
  * 用法:<DtConfigItem label="自动对比" hint="…"><DtToggle v-model="config.autoCompare" /></DtConfigItem>
  */
-defineProps<{
+import { computed, inject, useSlots } from 'vue';
+import type { ComputedRef } from 'vue';
+
+const props = defineProps<{
   modelValue: boolean;
+  /** 独立使用时为图标开关提供可访问名称。 */
+  label?: string;
 }>();
+
+const slots = useSlots();
+const configItemLabel = inject<ComputedRef<string | undefined>>(
+  'dt-config-item-label',
+  computed(() => undefined),
+);
+const accessibleLabel = computed(
+  () => props.label || configItemLabel.value || (slots.default ? undefined : '开关'),
+);
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean];
@@ -18,13 +32,14 @@ const emit = defineEmits<{
 
 <template>
   <button
+    class="dt-toggle"
     type="button"
     role="switch"
     :aria-checked="modelValue"
-    class="dt-toggle"
+    :aria-label="accessibleLabel"
     @click="emit('update:modelValue', !modelValue)"
   >
-    <span class="dt-toggle-track" :class="{ on: modelValue }">
+    <span class="dt-toggle-track" :class="{ on: modelValue }" aria-hidden="true">
       <span class="dt-toggle-knob" />
     </span>
     <span v-if="$slots.default" class="dt-toggle-text"><slot /></span>

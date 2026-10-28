@@ -362,14 +362,13 @@ export async function handleLockLoginForm(input: PreparedLoginFormLock) {
   return lockPreparedLoginForm(input);
 }
 
-/** 打开或聚焦 options，并只通过 query 传环境 key。 */
-export async function handleOpenAccountEnvironment(
-  envKey: string,
+/** 打开或聚焦 options 页；已打开时激活并更新 URL（携带 query 定位）。 */
+async function openOptionsPage(
+  query: string,
 ): Promise<{ success: boolean; error?: string }> {
-  if (!envKey) return { success: false, error: "缺少环境 key" };
   try {
     const base = chrome.runtime.getURL("options.html");
-    const url = `${base}?${accountEnvironmentOptionsQuery(envKey)}`;
+    const url = query ? `${base}?${query}` : base;
     const tabs = await chrome.tabs.query({});
     const existing = tabs.find((tab) => tab.url?.startsWith(base));
     if (existing?.id !== undefined) {
@@ -389,6 +388,24 @@ export async function handleOpenAccountEnvironment(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/** 打开或聚焦 options 的账号切换 section（网页面板「打开设置」入口）。 */
+export async function handleOpenAccountSettings(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  return openOptionsPage(
+    new URLSearchParams({ section: "account-switch" }).toString(),
+  );
+}
+
+/** 打开或聚焦 options，并只通过 query 传环境 key。 */
+export async function handleOpenAccountEnvironment(
+  envKey: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!envKey) return { success: false, error: "缺少环境 key" };
+  return openOptionsPage(accountEnvironmentOptionsQuery(envKey));
 }
 
 /**

@@ -196,6 +196,23 @@ test("offline API success records requests, AND/OR signals and memory session wi
   assert.ok(!JSON.stringify(result.issues).includes("good"));
 });
 
+test("repeat switch clears previous auth state before writing the accepted session", async () => {
+  const spec = await readJson("fixtures/valid/api-repeat-switch.json");
+  const fixture = await readJson("fixtures/behavior/api-repeat-switch.json");
+  assert.deepEqual(validateLoginSpecSnapshot(spec), []);
+  assert.deepEqual(findSessionGateIssues(spec), []);
+  const result = await simulateLoginSpec(spec, fixture);
+  assert.equal(result.status, "PASS", JSON.stringify(result));
+  assert.equal(result.success, true);
+  assert.deepEqual(result.session, fixture.expect.session);
+  assert.ok(!JSON.stringify(result.session).includes("old-fixture"));
+
+  const parentSpec = structuredClone(spec);
+  parentSpec.ops[0].includeParent = true;
+  const parentResult = await simulateLoginSpec(parentSpec, fixture);
+  assert.equal(parentResult.status, "NOT_SIMULATED");
+});
+
 test("top-level success signals are AND", async () => {
   const spec = await readJson("fixtures/valid/api-gated.json");
   spec.success.push({ token: { from: "accepted", path: "missing" } });

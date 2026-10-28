@@ -8,11 +8,12 @@ import {
 } from "./spec/auto-login";
 import { readSpecFromConfig } from "./spec/migrate";
 import type { LoginSpec } from "./spec/types";
+import { scanAuthStorage } from "./strategies/auth-storage";
 import {
-  resolveAutoLoginScan,
-  scanLoginForm,
   type AutoLoginResolution,
+  resolveAutoLoginScan,
   type ScanLoginFormResult,
+  scanLoginForm,
 } from "./strategies/login-form-scan";
 import type { AccountSwitchConfig, DomainConfig } from "./types";
 
@@ -183,6 +184,7 @@ export async function lockPreparedLoginForm(
   ) {
     return { status: "skipped", reason: "候选表单已不再唯一完整" };
   }
+  const storage = await scanAuthStorage(input.tabId);
   const frame = candidate.scan.frames[0];
   let skipReason = "环境已删除或声明已变化";
   const transaction = await updateConfigTransaction<AccountSwitchConfig>(
@@ -193,6 +195,7 @@ export async function lockPreparedLoginForm(
       const lockedSpec = applyLoginFormFrame(currentSpec, frame, {
         pageUrl: loginUrl,
         origin: envUrl.origin,
+        storage,
       });
       if (!lockedSpec) return null;
       const currentEnv = latest.domains[input.envKey];

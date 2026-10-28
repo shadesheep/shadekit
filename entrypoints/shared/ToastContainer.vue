@@ -23,8 +23,11 @@ function iconForType(type: Toast['type']): string {
         v-for="toast in toasts"
         :key="toast.id"
         :class="['toast-item', `toast-${toast.type}`]"
+        :role="toast.type === 'error' ? 'alert' : 'status'"
+        :aria-live="toast.type === 'error' ? 'assertive' : 'polite'"
+        aria-atomic="true"
       >
-        <div :class="[iconForType(toast.type), 'toast-icon']" />
+        <div :class="[iconForType(toast.type), 'toast-icon']" aria-hidden="true" />
         <span class="toast-message">{{ toast.message }}</span>
         <button
           v-for="action in toast.actions"
@@ -34,8 +37,14 @@ function iconForType(type: Toast['type']): string {
         >
           {{ action.label }}
         </button>
-        <button class="toast-close" @click="dismissToast(toast.id)" title="关闭">
-          <div class="i-lucide-x w-3 h-3" />
+        <button
+          class="toast-close"
+          type="button"
+          title="关闭"
+          aria-label="关闭通知"
+          @click="dismissToast(toast.id)"
+        >
+          <div class="i-lucide-x w-3 h-3" aria-hidden="true" />
         </button>
       </div>
     </TransitionGroup>

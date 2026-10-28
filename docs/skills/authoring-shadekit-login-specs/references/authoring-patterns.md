@@ -9,6 +9,7 @@
 | CSRF/nonce/挑战值从哪里来？ | 页面提取、前置请求或引擎 aux 的明确对应 |
 | 业务成功和失败分别是什么？ | 响应分支代码、服务端测试、成功与失败样例 |
 | 会话由谁建立、写到哪里？ | 应用读取位置、Set-Cookie 证据、页面表单/HttpOnly 行为 |
+| 已有会话如何退出、清理并影响再次登录？ | 退出/reset 代码、无登录态与已有登录态 HAR、第二次登录响应 |
 
 HTTP 200、响应存在 token、接口名称包含 login 都不是完整证据。缺少关键行时提出针对性问题，不扫描其他目录或猜测。
 
@@ -16,12 +17,14 @@ HTTP 200、响应存在 token、接口名称包含 login 都不是完整证据�
 
 适用于请求、成功条件和 Cookie/Storage 效果都能由 LoginSpec 表达的流程。
 
-1. 用 extract/default、payload.build、digest、crypto.encrypt、map、apply.set 构造请求。
-2. 用业务代码证明的 response.equals 作为成功信号。
-3. 在 auth.write 前以无 default map 仅放行成功响应。
-4. 所有会话值和 expiry 从门控绑定或其派生绑定读取。
-5. 保留 response 成功信号；不要把它理解为会在算子前提前阻断。
-6. 用成功与 2xx 业务拒绝夹具验证，拒绝时 Cookie/Storage 都为零。
+1. 从退出/reset 代码或对比请求确认旧 Cookie、Storage、token header 与签名输入是否影响再次登录。
+2. 在首个登录请求或导航前按证据最小清理认证 Cookie/Storage；`auth.write` 不能替代请求前清理。
+3. 用 extract/default、payload.build、digest、crypto.encrypt、map、apply.set 构造请求。
+4. 用业务代码证明的 response.equals 作为成功信号。
+5. 在 auth.write 前以无 default map 仅放行成功响应。
+6. 所有会话值和 expiry 从门控绑定或其派生绑定读取。
+7. 保留 response 成功信号；不要把它理解为会在算子前提前阻断。
+8. 用成功、2xx 业务拒绝及带旧会话的重复切换夹具验证；拒绝时不得写入新会话，切换时不得残留旧认证状态。
 
 如果响应失败也带 token，直接 `$login.data.token` 会污染会话。复杂 AND/anyOf 条件、无法证明 map 覆盖成功条件时，当前 Skill lint 会 fail closed，应 BLOCKED 而不是绕过。
 
@@ -51,5 +54,6 @@ HTTP 200、响应存在 token、接口名称包含 login 都不是完整证据�
 - 必须依赖 script 才能工作。
 - 业务成功无法形成安全会话门控。
 - 关键请求、成功或会话证据缺失。
+- 已有会话的清理方式或其对再次登录的影响缺失，且策略需要在登录态下切换。
 
 输出 `BLOCKED`、具体缺口和能解除该缺口的一个问题；不要交付伪完整双文件。

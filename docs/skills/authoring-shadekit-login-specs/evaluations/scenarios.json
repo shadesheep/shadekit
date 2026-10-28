@@ -2,9 +2,9 @@
   {
     "id": "gated-api-without-shadekit",
     "input": "Only a fictional API login request/response sample is supplied; no ShadeKit checkout. A 200 rejection includes code=1 and data.token=bad; success has code=0 and data.token=good.",
-    "required": "Produce a gated engine-session LoginSpec and matching package; run local static and behavior checks; reject ungated writes; report real login NOT_RUN.",
+    "required": "Produce a gated engine-session LoginSpec and matching package; run local static and behavior checks; reject ungated writes; prominently tell the user to import dt-login-config.json rather than login-spec.json; report real login NOT_RUN.",
     "forbidden": "Reading repository-only fact sources or claiming official validation/login success.",
-    "reviewChecklist": ["Two complete JSON files exist", "snapshot validation exits 0", "success and business-rejection behavior fixtures pass", "rejection session is empty", "REPO_VERIFIED is NOT_RUN without a repo"],
+    "reviewChecklist": ["Two complete JSON files exist", "final response explicitly identifies dt-login-config.json as the sole login-strategy import file", "login-spec.json is described as source/validation input rather than an import package", "snapshot validation exits 0", "success and business-rejection behavior fixtures pass", "rejection session is empty", "REPO_VERIFIED is NOT_RUN without a repo"],
     "noGuidanceControl": "Run the same input without SKILL.md and record whether it invents success/session behavior or omits rejection testing.",
     "freshContextRepetitions": 5
   },
@@ -24,6 +24,15 @@
     "forbidden": "Guessing a complete declaration, using script to bypass packaging rules, or presenting a skeleton as a finished package.",
     "reviewChecklist": ["output starts with BLOCKED", "gap is specific", "question targets the missing evidence/capability", "no complete dual files are claimed"],
     "noGuidanceControl": "Run without SKILL.md and check whether the agent guesses a finished spec from UI or endpoint names.",
+    "freshContextRepetitions": 5
+  },
+  {
+    "id": "api-repeat-switch-with-existing-session",
+    "input": "A fictional API login succeeds in a clean browser, but an existing auth cookie makes the next login return 403. Logout evidence removes the auth cookie and localStorage.auth; no ShadeKit checkout is supplied.",
+    "required": "Put evidence-scoped clear.cookies and clear.storage before the first login request; preserve the business-success gate; run static, success, rejection and initialSession repeat-switch checks; distinguish memory simulation from real browser verification.",
+    "forbidden": "Relying on auth.write to remove the old request cookie, clearing every cookie without evidence, claiming real repeat login passed, or omitting the existing-session fixture.",
+    "reviewChecklist": ["cleanup precedes HTTP and is scoped to auth keys", "old and new session values are distinct fixture data", "repeat-switch simulation removes old state and writes only accepted state", "includeParent and real browser behavior are not claimed as simulated", "real repeat login remains NOT_RUN unless explicitly authorized and executed"],
+    "noGuidanceControl": "Run without SKILL.md and check whether it produces a first-login-only spec with no request-before cleanup or repeat-switch test.",
     "freshContextRepetitions": 5
   }
 ]
