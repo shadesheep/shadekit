@@ -132,9 +132,9 @@ def compose_generic_login():
     canvas = shot_canvas(
         'GENERIC LOGIN',
         '通用登录，目标系统无需改造',
-        '填写登录页地址、识别登录表单、后台试登录验证，全程在配置抽屉内完成',
+        '填写登录页地址、识别登录表单、确认认证信息清理，全程在配置抽屉内完成',
     )
-    place_fit(canvas, screenshot('store-login-trial').crop((150, 0, 1440, 900)), 1152, CONTENT_H)
+    place_fit(canvas, screenshot('store-login-config').crop((150, 0, 1440, 900)), 1152, CONTENT_H)
     save_png(canvas, SHOTS / '03-generic-login.png')
 
 

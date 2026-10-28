@@ -11,7 +11,6 @@ interface Size {
 const VIEWPORT_MARGIN = 8;
 const ANCHOR_GAP = 12;
 
-
 /** 下方优先；下方空间不足时翻到锚点上方，最终始终收拢到视口内。 */
 export function getFloatPanelPosition(
   anchor: Point,
@@ -34,10 +33,7 @@ export function getFloatPanelPosition(
       : anchor.y - panel.height - ANCHOR_GAP;
 
   return {
-    x: Math.min(
-      Math.max(anchor.x + ANCHOR_GAP, VIEWPORT_MARGIN),
-      maxLeft,
-    ),
+    x: Math.min(Math.max(anchor.x + ANCHOR_GAP, VIEWPORT_MARGIN), maxLeft),
     y: Math.min(Math.max(preferredTop, VIEWPORT_MARGIN), maxTop),
   };
 }

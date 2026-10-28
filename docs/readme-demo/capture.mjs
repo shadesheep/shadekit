@@ -167,6 +167,7 @@ try {
     await options.bringToFront();
     await options
       .getByRole("button", { name: "新建环境", exact: true })
+      .first()
       .click();
     const drawer = options.locator(".dt-drawer");
     await drawer.locator("input").first().fill(config.origin);
@@ -281,7 +282,7 @@ try {
     });
     await shot(options, "store-login-config");
     console.log("captured recipe-03-save.png");
-    await drawer.getByRole("button", { name: "添加", exact: true }).click();
+    await drawer.getByRole("button", { name: "添加环境", exact: true }).click();
     await drawer.waitFor({ state: "detached" });
     let generatedGoto;
     for (let attempt = 0; attempt < 20 && !generatedGoto; attempt += 1) {
@@ -370,7 +371,7 @@ try {
     for (const account of config.accounts) {
       await options
         .locator(".main-topbar")
-        .getByRole("button", { name: "账号", exact: true })
+        .getByRole("button", { name: "新建账号", exact: true })
         .click();
       const form = options.locator(".dt-drawer");
       await form.locator("input").nth(0).fill(account.name);
@@ -382,7 +383,7 @@ try {
       await form
         .locator(".domain-chip", { hasText: config.environment.name })
         .click();
-      await form.getByRole("button", { name: "添加", exact: true }).click();
+      await form.getByRole("button", { name: "添加账号", exact: true }).click();
       await form.waitFor({ state: "detached" });
     }
     await worker.evaluate(async (badge) => {

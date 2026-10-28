@@ -146,3 +146,35 @@ describe("SwitcherPanel 零账号快捷登录", () => {
     });
   });
 });
+
+describe("SwitcherPanel 零配置快捷登录", () => {
+  it("保留快捷登录 Tab，隐藏环境空状态并直接展示完整表单", async () => {
+    await mountPanel();
+
+    expect(root.querySelectorAll(".as-tab-bar .as-tab-btn")).toHaveLength(1);
+    expect(root.querySelector(".as-tab-bar")?.textContent).toContain(
+      "快捷登录",
+    );
+    expect(root.textContent).not.toContain("当前站点未配置环境");
+    expect(root.textContent).not.toContain("打开设置添加环境");
+    expect(root.querySelector(".as-ql-header")?.textContent).toContain(
+      "快捷登录",
+    );
+    expect(root.querySelector<HTMLTextAreaElement>("textarea")?.rows).toBe(5);
+    expect(root.querySelector(".as-ql-btn")?.textContent).toContain(
+      "登录并跳转",
+    );
+  });
+});
+
+describe("SwitcherPanel 已配置环境", () => {
+  it("保留快捷登录和选择账号 Tab", async () => {
+    mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    await mountPanel();
+
+    const labels = Array.from(root.querySelectorAll(".as-tab-btn")).map(
+      (button) => button.textContent?.trim(),
+    );
+    expect(labels).toEqual(["快捷登录", "选择账号"]);
+  });
+});

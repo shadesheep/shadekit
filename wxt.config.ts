@@ -8,9 +8,9 @@ export default defineConfig({
   webExt: {
     disabled: true, // 不自动拉起浏览器，手动加载
   },
-  // 源码包会公开上传到 AMO，必须剔除本地密钥与 Git 已忽略的原始录像
+  // 源码包会公开上传到 AMO：仅保留构建所需源码，排除密钥与非构建文档
   zip: {
-    excludeSources: ["keys/**", "docs/images/raw/**"],
+    excludeSources: ["keys/**", "docs/**"],
   },
   manifest: ({ browser }) => ({
     name: "ShadeKit",

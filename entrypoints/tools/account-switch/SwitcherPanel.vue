@@ -635,14 +635,6 @@ const quickLoginPreview = computed(() => {
 
     <!-- 快捷登录 Tab 内容 -->
     <div v-show="activeTab === 'quicklogin' || !matchedEnv" class="as-quicklogin-tab">
-      <div v-if="!matchedEnv && !configLoadFailed" class="as-empty">
-        <div class="i-lucide-globe w-10 h-10 as-empty-icon" />
-        <p class="as-empty-text">当前站点未配置环境</p>
-        <p class="as-empty-hint">添加环境后可使用环境默认密码与 Bug 页配置</p>
-        <button type="button" class="as-role-chip as-empty-action" @click="openAccountSettings">
-          打开设置添加环境
-        </button>
-      </div>
       <div class="as-quicklogin-inner">
         <!-- 标题区 -->
         <div class="as-ql-header">
