@@ -117,8 +117,8 @@ interface LoginSpec {
 高级多步声明不被识别回填隐式重排；明确留空登录页的简易声明仍保留当前页 / SPA 用法，并显示软提示。
 
 其他系统由用户通过「导入登录策略包…」导入 `dt-login-config/v1`，存入
-**登录策略库**（ADR-0019）。公开仓库只提供通用格式与虚构示例；导入格式和
-本地策略包约定见 `docs/login-specs/`。
+**登录策略库**（ADR-0019）。公开仓库只提供通用格式与虚构示例；核心格式、
+导入边界和本地策略包约定见 `docs/AI.md`。
 
 ### 3.4 登录策略库与动态策略（ADR-0019）
 
@@ -222,13 +222,13 @@ interface LoginSpec {
 |---|------|----------|------|
 | 1 | Popup 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl/Cmd+Enter` | 解析文本，执行登录并跳转 |
 | 2 | Content Script 快捷登录 Tab | 粘贴文本 + 点击「登录并跳转」/ `Ctrl/Cmd+Enter` | 同上（快捷键面板中） |
-| 3 | 快捷键选中文字 | `Alt+Shift+A` (有选中文本) | 解析选中文本，新标签页快捷登录 |
-| 4 | 右键菜单快捷登录 | 选中文本 → 右键 → 「快捷登录」 | 同上，新标签页快捷登录 |
+| 3 | 快捷键选中文字 | `Alt+Shift+A` (有选中文本) | 当前页面命中环境时原地切换，否则新标签页快捷登录 |
+| 4 | 右键菜单快捷登录 | 选中文本 → 右键 → 「快捷登录」 | 同上，按目标来源选择当前页或新标签页 |
 | 5 | Bug 复现跳转 | 文本含 URL 且环境配置了 `debugRedirect` | 登录成功后自动进入反馈的 Bug 页面 |
-| 6 | 无 URL 模式 | 文本不含 URL + 配置了 `quickLoginDefaultDomain` | 使用默认域名作为目标 |
+| 6 | 快捷键/右键无 URL 模式 | 选中文本不含 URL | 当前页面命中环境时优先使用当前页面，否则使用 `quickLoginDefaultDomain` |
 | 7 | 默认密码快进 | 文本含 URL + 账号（无密码）+ 环境配置了 `defaultPassword` | 自动填充环境的默认密码执行登录 |
 
-环境匹配只依赖输入的 URL 与环境配置；即使尚未保存任何账号，也能使用环境默认密码和 Bug 页配置。
+快捷键/右键菜单的目标优先级为「文本显式 URL > 当前页面命中环境 > 默认环境」。只有当前页面命中环境的纯账号/密码文本在当前标签页切换；显式 URL 和默认环境仍使用新标签页。通配符环境仅用于匹配，不能作为实际导航地址。环境、默认密码与 Bug 页配置均基于最终目标 URL 解析，即使尚未保存任何账号也可使用。
 
 ### 4.3 快捷登录支持的文本格式
 
@@ -373,8 +373,8 @@ const password = parsed.password || envPassword || globalDefaultPassword.value |
 
 API 登录由 `http.request`、`crypto.digest`、`crypto.encrypt`、`map` 等通用算子
 编排。端点、请求字段、签名规则、成功信号和会话写入均由用户导入或编辑的
-LoginSpec 决定；请求和响应轨迹默认脱敏。虚构示例见
-`docs/login-specs/operators.md`，通用执行细节见 `spec/run.ts`。
+LoginSpec 决定；请求和响应轨迹默认脱敏。核心设计与虚构示例见
+`docs/AI.md`，通用执行细节见 `spec/run.ts`。
 
 ---
 
@@ -447,7 +447,7 @@ entrypoints/tools/account-switch/
 └── utils/
     ├── auth-snapshot.ts          # 认证快照 capture / clear / restore
     ├── host-cookies.ts           # 按 host（可选含父域）清理 cookie
-    ├── error-codes.ts            # 统一错误码 + buildErrorDetail
+    ├── error-codes.ts            # 统一错误码 + 友好用户提示 + buildErrorDetail
     ├── debug-log.ts              # 调试缓冲区 / 日志 adapter
     ├── env.ts                    # 域名匹配 + 环境检测 (matchDomain, getCurrentOrigin)
     └── parse-text.ts             # 快捷登录文本解析

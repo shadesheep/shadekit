@@ -50,4 +50,4 @@ npm run dev          # Chrome 开发模式（dev:firefox / dev:edge 对应其他
 2. 如需独立标签页，创建 `entrypoints/{tool-id}/`（`main.ts`、`App.vue`、`index.html`）
 3. 在 `entrypoints/shared/tool-definitions.ts` 的 `allTools` 注册表中声明
 
-架构决策与领域术语请先查阅 [CONTEXT.md](CONTEXT.md) 与 [docs/adr/](docs/adr/)，新模块命名应先查词汇表，避免引入已废弃的模式（词汇表末尾有清单）。
+核心设计与领域术语请先查阅 [docs/AI.md](docs/AI.md) 与 [CONTEXT.md](CONTEXT.md)，新模块命名应先查词汇表，避免引入已废弃的模式（词汇表末尾有清单）。

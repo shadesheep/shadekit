@@ -65,9 +65,9 @@ describe("DomainsPanel 添加环境布局", () => {
     expect(styleOf(root, ".spec-editor .scan-bar").justifyContent).toBe(
       "flex-end",
     );
-    expect(styleOf(root, ".form-card > .form-actions").justifyContent).toBe(
-      "flex-end",
-    );
+    expect(
+      styleOf(root, ".dt-drawer-footer .domain-form-actions").justifyContent,
+    ).toBe("flex-end");
   });
 
   it("简易模式的标签、提示和控件沿同一网格对齐", async () => {

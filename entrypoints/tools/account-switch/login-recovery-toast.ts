@@ -6,6 +6,7 @@ import {
   buildErrorDetail,
   copyToClipboard,
   ErrorCodes,
+  formatLoginError,
   type ErrorCode,
   type ErrorDetailContext,
 } from "./utils/error-codes";
@@ -21,7 +22,7 @@ export function showLoginRecoveryToast(input: {
 }): void {
   const code = input.errorCode ?? ErrorCodes.UNKNOWN;
   const recovery = loginRecoveryFor(input.errorCode, input.spec);
-  const message = recovery.message ?? input.error;
+  const message = recovery.message ?? formatLoginError(code, input.error);
   const actions: ToastAction[] = [];
   if (recovery.manualLocate && input.envKey) {
     actions.push({
@@ -56,5 +57,5 @@ export function showLoginRecoveryToast(input: {
     },
   });
   const prefix = recovery.message ? "未能自动登录" : input.prefix;
-  showToast(`${prefix}：${message} [${code}]`, "error", 8000, actions);
+  showToast(`${prefix}：${message}`, "error", 8000, actions);
 }

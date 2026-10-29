@@ -690,8 +690,10 @@ const quickLoginPreview = computed(() => {
             <div :class="['as-ql-toggle-knob', { active: redirectEnabled }]" />
           </div>
           <span class="as-ql-toggle-label">
-            登录后进入 Bug 页
-            <span class="as-ql-toggle-target">{{ quickLoginMatchedEnv.debugRedirect }}</span>
+            <span class="as-ql-toggle-text">登录后进入 Bug 页</span>
+            <span class="as-ql-toggle-target" :title="quickLoginMatchedEnv.debugRedirect">
+              {{ quickLoginMatchedEnv.debugRedirect }}
+            </span>
           </span>
         </button>
 
@@ -1532,6 +1534,8 @@ const quickLoginPreview = computed(() => {
 /* Redirect toggle */
 .as-ql-redirect-toggle {
   margin-top: 10px;
+  width: 100%;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1540,7 +1544,7 @@ const quickLoginPreview = computed(() => {
   text-align: left;
   cursor: pointer;
   user-select: none;
-  padding: 6px 10px;
+  padding: 8px 10px;
   border-radius: 6px;
   background: rgba(99, 102, 241, 0.04);
   border: 1px solid rgba(99, 102, 241, 0.08);
@@ -1596,11 +1600,19 @@ const quickLoginPreview = computed(() => {
 }
 
 .as-ql-toggle-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   font-size: 12px;
   color: #64748b;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+}
+
+.as-ql-toggle-text {
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 [data-dt-dark] .as-ql-toggle-label {
@@ -1608,8 +1620,14 @@ const quickLoginPreview = computed(() => {
 }
 
 .as-ql-toggle-target {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 16px;
   color: #94a3b8;
 }
 

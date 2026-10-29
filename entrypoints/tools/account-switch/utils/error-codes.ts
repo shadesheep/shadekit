@@ -106,6 +106,70 @@ export function errorCodeOf(e: unknown): ErrorCode {
 }
 
 // ---------------------------------------------------------------------------
+// 用户提示（技术错误仅进入日志与「复制详情」）
+// ---------------------------------------------------------------------------
+
+const LOGIN_ERROR_MESSAGES: Record<ErrorCode, string> = {
+  [ErrorCodes.CONFIG_NOT_FOUND]: "登录配置不存在，请打开设置检查当前环境",
+  [ErrorCodes.ENV_NOT_MATCHED]: "当前地址未配置登录环境，请在设置中添加该环境",
+  [ErrorCodes.NO_STRATEGY]: "当前环境尚未设置登录方式，请在设置中完成配置",
+  [ErrorCodes.STRATEGY_NOT_FOUND]: "当前登录方式不可用，请在设置中重新选择",
+  [ErrorCodes.TAB_RESTRICTED]: "当前页面不支持自动登录，请打开目标系统页面后重试",
+  [ErrorCodes.TAB_CLOSED]: "登录页面已关闭或无法打开，请重新打开目标页面后重试",
+  [ErrorCodes.TAB_LOAD_TIMEOUT]: "登录页面加载超时，请检查网络和目标服务状态后重试",
+  [ErrorCodes.INVALID_URL]: "登录地址无效，请检查选中的地址或环境配置",
+  [ErrorCodes.INVALID_REDIRECT_URL]: "跳转地址无效，请检查当前环境的 Bug 页配置",
+  [ErrorCodes.NETWORK_ERROR]: "无法连接服务器，请检查网络连接和目标服务状态后重试",
+  [ErrorCodes.REQUEST_TIMEOUT]: "登录请求超时，请检查网络后重试",
+  [ErrorCodes.STEP_TIMEOUT]: "页面响应超时，请刷新目标页面后重试",
+  [ErrorCodes.RSA_ENCRYPT_ERROR]: "登录凭据处理失败，请检查当前环境的加密配置",
+  [ErrorCodes.LOGIN_FAILED]: "登录未通过，请核对账号和密码后重试",
+  [ErrorCodes.CAPTCHA_REQUIRED]: "需要完成验证码，请在登录页面手动验证后重试",
+  [ErrorCodes.INJECT_AUTH_FAILED]: "登录状态未能保存，请确认已打开目标系统页面后重试",
+  [ErrorCodes.EMPTY_RESPONSE]: "服务器未返回登录结果，请稍后重试或联系系统管理员",
+  [ErrorCodes.LOGIN_BUSY]: LOGIN_BUSY_ERROR,
+  [ErrorCodes.STRATEGY_INVALID]: "登录配置有误，请在设置中检查当前环境的登录方式",
+  [ErrorCodes.CONFIG_INVALID]: "登录配置有误，请在设置中检查并修复当前环境",
+  [ErrorCodes.SELECTOR_INVALID]: "登录表单位置配置无效，请在设置中重新定位",
+  [ErrorCodes.ELEMENT_NOT_FOUND]: "未找到登录输入框或按钮，请确认页面已加载，或重新定位登录表单",
+  [ErrorCodes.AMBIGUOUS_TARGET]: "找到多个相同的登录元素，请在设置中重新定位",
+  [ErrorCodes.FRAME_NOT_FOUND]: "登录页面结构已变化，请刷新页面或重新定位登录表单",
+  [ErrorCodes.LOGIN_FORM_NOT_FOUND]: "未找到登录表单，请确认页面已打开并完成加载后重试",
+  [ErrorCodes.LOGIN_FORM_INCOMPLETE]: "登录表单不完整，请重新定位或检查页面",
+  [ErrorCodes.LOGIN_FORM_AMBIGUOUS]: "无法确定使用哪个登录表单，请手动定位",
+  [ErrorCodes.SUCCESS_CONDITION_UNMET]: "服务器已响应，但未确认登录成功，请核对账号密码或检查登录配置",
+  [ErrorCodes.LOGIN_REJECTED]: "登录未通过，请核对账号密码；如确认无误，请检查登录配置",
+  [ErrorCodes.TEMPLATE_UNRESOLVED]: "登录配置缺少必要信息，请在设置中检查当前环境",
+  [ErrorCodes.UNKNOWN]: "登录未完成，请稍后重试；如仍失败，请复制详情并联系技术支持",
+};
+
+/** 将内部错误转换为普通用户可理解、可执行的提示。 */
+export function formatLoginError(
+  code: ErrorCode | string | undefined,
+  technicalMessage = "",
+): string {
+  if (/showing error page/i.test(technicalMessage)) {
+    const origin = technicalMessage.match(/https?:\/\/[^\s，；（）()]+/)?.[0];
+    return `无法打开登录页面${origin ? ` ${origin}` : ""}，请确认服务已启动并检查网络连接`;
+  }
+  if (/Failed to fetch|NetworkError|ERR_CONNECTION_|ERR_NAME_NOT_RESOLVED/i.test(technicalMessage)) {
+    return LOGIN_ERROR_MESSAGES[ErrorCodes.NETWORK_ERROR];
+  }
+  if (/Cannot access (?:a )?chrome:|Cannot access contents of url|extensions gallery cannot be scripted/i.test(technicalMessage)) {
+    return LOGIN_ERROR_MESSAGES[ErrorCodes.TAB_RESTRICTED];
+  }
+  if (/No tab with id|Invalid tab ID|tab was closed/i.test(technicalMessage)) {
+    return LOGIN_ERROR_MESSAGES[ErrorCodes.TAB_CLOSED];
+  }
+  if (/Could not establish connection|Receiving end does not exist|请求发送失败/i.test(technicalMessage)) {
+    return "登录请求未能发送，请重新打开账号面板后重试";
+  }
+  return Object.hasOwn(LOGIN_ERROR_MESSAGES, code ?? "")
+    ? LOGIN_ERROR_MESSAGES[code as ErrorCode]
+    : LOGIN_ERROR_MESSAGES[ErrorCodes.UNKNOWN];
+}
+
+// ---------------------------------------------------------------------------
 // 复制详情（错误 Toast 的「复制详情」按钮）
 // ---------------------------------------------------------------------------
 

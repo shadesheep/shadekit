@@ -46,6 +46,7 @@ import {
   LoginError,
   buildErrorDetail,
   errorCodeOf,
+  formatLoginError,
 } from '../entrypoints/tools/account-switch/utils/error-codes';
 import { RequestTimeoutError } from '../entrypoints/tools/account-switch/utils/fetch-timeout';
 import { getLogs } from '../entrypoints/shared/logger';
@@ -103,6 +104,38 @@ describe('errorCodeOf — 异常归一化为错误码', () => {
     expect(errorCodeOf(new Error('随便什么错误'))).toBe(ErrorCodes.UNKNOWN);
     expect(errorCodeOf('字符串异常')).toBe(ErrorCodes.UNKNOWN);
     expect(errorCodeOf(undefined)).toBe(ErrorCodes.UNKNOWN);
+  });
+});
+
+describe('formatLoginError — 普通用户提示', () => {
+  it('所有错误码都有中文处理建议，且不展示技术异常或错误码', () => {
+    for (const code of Object.values(ErrorCodes)) {
+      const message = formatLoginError(code, 'Unexpected internal failure');
+      expect(message, code).toMatch(/[一-龥]/);
+      expect(message, code).not.toContain('Unexpected internal failure');
+      expect(message, code).not.toContain(code);
+    }
+  });
+
+  it('浏览器错误页显示实际服务地址和启动检查建议', () => {
+    expect(
+      formatLoginError(
+        ErrorCodes.UNKNOWN,
+        '第 1 步（提取）：无法访问登录页面 http://localhost:8888，请确认服务已启动且地址可访问（Frame with ID 0 is showing error page）',
+      ),
+    ).toBe('无法打开登录页面 http://localhost:8888，请确认服务已启动并检查网络连接');
+    expect(
+      formatLoginError(
+        ErrorCodes.UNKNOWN,
+        '无法访问登录页面 http://localhost:8888（Frame with ID 0 is showing error page）',
+      ),
+    ).toBe('无法打开登录页面 http://localhost:8888，请确认服务已启动并检查网络连接');
+  });
+
+  it('未识别异常不原样展示英文，统一给出重试和复制详情建议', () => {
+    const message = formatLoginError(undefined, 'Unexpected token < in JSON');
+    expect(message).toBe('登录未完成，请稍后重试；如仍失败，请复制详情并联系技术支持');
+    expect(message).not.toContain('Unexpected token');
   });
 });
 

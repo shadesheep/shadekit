@@ -2,9 +2,14 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const EXTENSION = resolve(ROOT, ".output/chrome-mv3");
+const CACHE_ROOT =
+  process.env.SHADEKIT_DEMO_CACHE ||
+  resolve(homedir(), ".cache", "shadekit", "readme-demo");
+process.env.PLAYWRIGHT_BROWSERS_PATH ||= resolve(CACHE_ROOT, "browsers");
 const OUT = process.env.SHADEKIT_DEMO_RAW || resolve(ROOT, "docs/images/raw");
 const PROFILE =
   process.env.SHADEKIT_DEMO_PROFILE || "/tmp/shadekit-readme-profile";
@@ -13,7 +18,7 @@ const VIDEO_DIR = process.env.SHADEKIT_DEMO_VIDEO || resolve(OUT, "video");
 const MANIFEST = resolve(OUT, "verified-switch-video.json");
 const playwrightPath =
   process.env.PLAYWRIGHT_MODULE ||
-  "/tmp/shadekit-readme-tools/node_modules/playwright/index.mjs";
+  resolve(CACHE_ROOT, "tools/node_modules/playwright/index.mjs");
 const { chromium } = await import(
   existsSync(playwrightPath) ? playwrightPath : "playwright"
 );

@@ -138,17 +138,19 @@ describe("showLoginRecoveryToast", () => {
     });
   });
 
-  it("offers only relevant recovery actions for success-condition failures", () => {
+  it("成功状态未确认时仅展示友好提示和复制详情", () => {
     showLoginRecoveryToast({
       prefix: "登录失败",
-      error: "成功条件未满足",
+      error: "响应路径条件未满足：resp.data.token 为空",
       errorCode: ErrorCodes.SUCCESS_CONDITION_UNMET,
       envKey: "https://example.test/login",
       detail: {},
     });
 
     const toast = useToast().toasts.value[0];
-    expect(toast.message).toContain("成功条件未满足");
+    expect(toast.message).toContain("服务器已响应，但未确认登录成功");
+    expect(toast.message).not.toContain("resp.data.token");
+    expect(toast.message).not.toContain(ErrorCodes.SUCCESS_CONDITION_UNMET);
     expect(toast.actions.map((action) => action.label)).toEqual(["复制详情"]);
   });
 });

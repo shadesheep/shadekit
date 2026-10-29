@@ -36,6 +36,7 @@ import DtDrawer from '../../../shared/components/DtDrawer.vue';
 import DtButton from '../../../shared/components/DtButton.vue';
 import { useOverlayClose } from '../../../shared/use-overlay-close';
 import { showToast } from '../../../shared/use-toast';
+import { formatLoginError } from '../utils/error-codes';
 
 /**
  * 环境（域名）表单与配置包导入向导 — 从 Config.vue 拆出的子组件
@@ -993,10 +994,6 @@ const trialResult = ref<{
   sessionWritten: boolean;
 } | null>(null);
 
-function trialError(code?: string, message?: string): string {
-  const prefix = code ? `错误码 ${code}：` : '';
-  return prefix + (message ?? '试登录失败');
-}
 
 /** 试登录是否可用于当前表单：地址合法即可（执行只认 spec，与登录方式标签无关） */
 const trialAvailable = computed(() => {
@@ -1214,7 +1211,7 @@ async function runTrialLogin(): Promise<void> {
           <div class="trial-result-head">
             <span :class="trialResult.ok ? 'i-lucide-check-circle w-3.5 h-3.5' : 'i-lucide-alert-circle w-3.5 h-3.5'" />
             <span>
-              {{ trialResult.ok ? (trialResult.sessionWritten ? '已登录（与会话）' : '请求成功，可换到凭据') : trialError(trialResult.errorCode, trialResult.error) }}
+              {{ trialResult.ok ? (trialResult.sessionWritten ? '已登录（与会话）' : '请求成功，可换到凭据') : formatLoginError(trialResult.errorCode, trialResult.error) }}
             </span>
           </div>
           <ul v-if="trialResult.signals.length > 0" class="trial-signals">
@@ -1232,20 +1229,20 @@ async function runTrialLogin(): Promise<void> {
       </div>
       -->
 
-      <!-- 高级配置（可折叠）：默认密码、本地 Bug 复现地址、登录声明等低频设置 -->
+      <div class="form-row">
+        <label for="domain-default-password">默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
+        <input id="domain-default-password" class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
+        <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
+      </div>
+
+      <!-- 高级配置（可折叠）：本地 Bug 复现地址、登录声明等低频设置 -->
       <div class="advanced-settings-section">
         <button type="button" class="advanced-toggle-btn" :aria-expanded="showAdvanced" aria-controls="domain-advanced-settings" @click="showAdvanced = !showAdvanced">
           <div :class="showAdvanced ? 'i-lucide-chevron-down w-4 h-4' : 'i-lucide-chevron-right w-4 h-4'" />
           <span>高级配置</span>
-          <span class="optional">（默认密码 / 本地复现 / 登录声明等）</span>
+          <span class="optional">（本地复现 / 登录声明等）</span>
         </button>
         <div id="domain-advanced-settings" v-show="showAdvanced" class="advanced-content">
-          <div class="form-row">
-            <label for="domain-default-password">默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
-            <input id="domain-default-password" class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
-            <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
-          </div>
-
           <!-- 本地 Bug 复现地址：替换测试链接的域名和端口，保留后续完整 URL -->
           <div class="form-row">
             <label for="domain-debug-redirect">本地 Bug 复现地址 <span class="optional">（选填，填写本地项目的完整页面 URL）</span></label>
@@ -1314,14 +1311,16 @@ async function runTrialLogin(): Promise<void> {
           </div>
         </div>
       </div>
-      <div class="form-actions">
-        <DtButton v-if="!editingDomain" variant="primary" :disabled="savingDomain" @click="addDomain">
-          <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : cloningDomain ? '创建副本' : '添加环境' }}
-        </DtButton>
-        <DtButton v-else variant="primary" @click="saveEditDomain">保存环境</DtButton>
-        <DtButton variant="secondary" :disabled="savingDomain" @click="cancelEditDomain">取消</DtButton>
       </div>
-      </div>
+      <template #footer>
+        <div class="form-actions domain-form-actions">
+          <DtButton v-if="!editingDomain" variant="primary" :disabled="savingDomain" @click="addDomain">
+            <div class="i-lucide-plus w-4 h-4 mr-1" />{{ savingDomain ? '保存中…' : cloningDomain ? '创建副本' : '添加环境' }}
+          </DtButton>
+          <DtButton v-else variant="primary" @click="saveEditDomain">保存环境</DtButton>
+          <DtButton variant="secondary" :disabled="savingDomain" @click="cancelEditDomain">取消</DtButton>
+        </div>
+      </template>
     </DtDrawer>
 
     <!-- 配置包导入向导：逐个环境勾选 + 填写 requiredVars，确认后才落地 -->
@@ -1496,6 +1495,12 @@ async function runTrialLogin(): Promise<void> {
   border-top: 1px solid #f1f5f9;
   padding-top: 14px;
   margin-top: 4px;
+}
+
+.domain-form-actions {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 [data-dt-dark] .form-actions {

@@ -748,6 +748,32 @@ describe("runSpec — extract / script / 模板", () => {
     expect(executeScript).toHaveBeenCalledTimes(1);
   });
 
+  it("目标页为浏览器错误页时，提示检查目标服务并保留原始错误", async () => {
+    executeScript.mockRejectedValue(
+      new Error("Frame with ID 0 is showing error page"),
+    );
+    const result = await runSpec(
+      spec([
+        {
+          op: "extract",
+          source: "local",
+          key: "language",
+          default: "zh",
+          as: "lang",
+        },
+      ]),
+      buildCtx({ origin: "http://localhost:8888" }),
+      { settle: { pollingIntervalMs: 1 } },
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe(
+        "第 1 步（提取）：无法访问登录页面 http://localhost:8888，请确认服务已启动且地址可访问（Frame with ID 0 is showing error page）",
+      );
+    }
+  });
+
   it("extract 声明 default 时，空值回退缺省而非抛错", async () => {
     executeScript.mockResolvedValue([{ frameId: 0, result: null }]);
     const result = await runSpec(

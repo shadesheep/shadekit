@@ -897,6 +897,16 @@ function wrapTemplateError(e: unknown): LoginError {
       );
 }
 
+/** Chrome 拒绝向错误页注入时，将底层异常翻译成可操作的登录提示。 */
+function wrapExecutionError(e: unknown, origin: string): LoginError {
+  const error = wrapTemplateError(e);
+  if (!/showing error page/i.test(error.message)) return error;
+  return new LoginError(
+    error.code,
+    `无法访问登录页面 ${origin}，请确认服务已启动且地址可访问（${error.message}）`,
+  );
+}
+
 /** 模板求值：未解析引用 → TEMPLATE_UNRESOLVED（D4） */
 function resolveRef(state: RunState, template: string): string {
   try {
@@ -1488,7 +1498,7 @@ export async function runSpec(
         ...(resolution ? { resolution } : {}),
       });
     } catch (e: unknown) {
-      const error = wrapTemplateError(e);
+      const error = wrapExecutionError(e, ctx.origin);
       const actualTarget = describeOp(effectiveOp);
       await record(index, op, "error", {
         duration: Date.now() - startedAt,
@@ -1560,7 +1570,7 @@ export async function runSpec(
       pollingIntervalMs: options.settle?.pollingIntervalMs,
     });
   } catch (e: unknown) {
-    const error = wrapTemplateError(e);
+    const error = wrapExecutionError(e, ctx.origin);
     return {
       success: false,
       ...resultBase,

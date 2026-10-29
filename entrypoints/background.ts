@@ -7,8 +7,16 @@ import {
   createBackgroundMessageListener,
 } from './shared/message-router';
 import { allTools } from './shared/tool-definitions';
-import { ErrorCodes, buildErrorDetail } from './tools/account-switch/utils/error-codes';
+import { ErrorCodes, buildErrorDetail, formatLoginError } from './tools/account-switch/utils/error-codes';
 import type { AccountSwitchConfig } from './tools/account-switch/types';
+import {
+  hasWildcardHostname,
+  parseQuickLoginSelection,
+} from './tools/account-switch/utils/quick-login-target';
+import {
+  handleQuickLogin,
+  handleQuickLoginInNewTab,
+} from './tools/account-switch/background-handler';
 
 export default defineBackground({
   main() {
@@ -196,19 +204,13 @@ async function initToolDefaults() {
 }
 
 /**
- * 从选中文本解析登录信息并执行快捷登录（新标签页模式）
+ * 从选中文本解析登录信息；当前页面命中环境时原地切换，否则新标签页登录。
  */
 async function handleQuickLoginFromSelection(
   selectedText: string,
   tabId: number,
-  _pageUrl: string,
+  pageUrl: string,
 ): Promise<void> {
-  const { parseLoginText } = await import(
-    './tools/account-switch/utils/parse-text'
-  );
-  const { handleQuickLoginInNewTab } = await import(
-    './tools/account-switch/background-handler'
-  );
   const { showPageToast } = await import(
     './tools/account-switch/utils/show-page-toast'
   );
@@ -222,8 +224,13 @@ async function handleQuickLoginFromSelection(
   );
   const defaultDomain = asConfig?.quickLoginDefaultDomain || '';
 
-  // 尝试解析选中文本
-  const parsed = parseLoginText(selectedText, defaultDomain);
+  // 显式 URL > 当前页面命中环境 > 默认环境。
+  const parsed = parseQuickLoginSelection(
+    selectedText,
+    pageUrl,
+    defaultDomain,
+    asConfig?.domains,
+  );
   if (!parsed) {
     // 无法解析，回退到打开面板
     try {
@@ -243,6 +250,15 @@ async function handleQuickLoginFromSelection(
     }
     return;
   }
+  if (hasWildcardHostname(parsed.url)) {
+    showPageToast(
+      tabId,
+      '无法使用通配符地址登录',
+      'error',
+      6000,
+    );
+    return;
+  }
 
   // 环境匹配与密码回退收口至 Account View Model(resolveEnvironment / resolvePassword)
   const { resolveEnvironment, resolvePassword } = await import(
@@ -252,9 +268,7 @@ async function handleQuickLoginFromSelection(
   let matchedDefaultPassword: string | undefined;
   if (asConfig?.domains) {
     try {
-      const checkOrigin = parsed.hasUrl
-        ? new URL(parsed.url).origin
-        : new URL(defaultDomain).origin;
+      const checkOrigin = new URL(parsed.url).origin;
       const resolved = resolveEnvironment(checkOrigin, asConfig.domains);
       if (resolved) {
         if (resolved.env.debugRedirect && resolved.env.debugRedirectEnabled) {
@@ -272,7 +286,7 @@ async function handleQuickLoginFromSelection(
   // 显示「正在登录」提示
   showPageToast(tabId, '正在登录...', 'info', 0);
 
-  // 在新标签页执行快捷登录
+  // 当前页面命中环境时原地切换；显式 URL 和默认环境仍在新标签页打开。
   // 密码优先级与面板路径一致（resolvePassword）：文本输入 > 环境默认密码 > 全局默认密码
   const password = resolvePassword({
     input: parsed.password,
@@ -283,17 +297,27 @@ async function handleQuickLoginFromSelection(
     showPageToast(tabId, '未找到可用密码：请在文本中包含密码，或配置环境/全局默认密码', 'error', 5000);
     return;
   }
-  const result = await handleQuickLoginInNewTab(
-    parsed.url,
-    parsed.username,
-    password,
-    parsed.hasUrl,
-    matchedDebugRedirect,
-    tabId,
-  );
+  const useCurrentTab = parsed.targetSource === 'current-page';
+  const result = useCurrentTab
+    ? await handleQuickLogin(
+        parsed.url,
+        parsed.username,
+        password,
+        parsed.hasUrl,
+        { tab: await chrome.tabs.get(tabId) },
+        matchedDebugRedirect,
+      )
+    : await handleQuickLoginInNewTab(
+        parsed.url,
+        parsed.username,
+        password,
+        parsed.hasUrl,
+        matchedDebugRedirect,
+        tabId,
+      );
 
   if (result.success) {
-    // 通知用户已在新标签页打开
+    // 当前页路径已刷新，新标签页路径已在后台打开。
     showPageToast(tabId, `已以 ${parsed.username} 登录成功`, 'success', 4000);
   } else if (result.error === LOGIN_BUSY_ERROR) {
     // 并发互斥拒绝是「忙碌」而非失败
@@ -302,11 +326,11 @@ async function handleQuickLoginFromSelection(
     // 页面内 Toast 附「复制详情」按钮：错误码 + 上下文一键复制
     const code = result.errorCode ?? ErrorCodes.UNKNOWN;
     const detail = buildErrorDetail(code, result.error || '未知错误', {
-      action: 'QUICK_LOGIN_NEW_TAB',
+      action: useCurrentTab ? 'QUICK_LOGIN' : 'QUICK_LOGIN_NEW_TAB',
       origin: parsed.url,
       username: parsed.username,
       recipeSteps: result.recipeSteps,
     });
-    showPageToast(tabId, `登录失败：${result.error || '未知错误'} [${code}]`, 'error', 8000, detail);
+    showPageToast(tabId, `登录失败：${formatLoginError(code, result.error)}`, 'error', 8000, detail);
   }
 }

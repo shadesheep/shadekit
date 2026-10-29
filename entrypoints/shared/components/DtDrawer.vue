@@ -146,6 +146,9 @@ onUnmounted(() => {
         <div class="dt-drawer-body">
           <slot />
         </div>
+        <footer v-if="$slots.footer" class="dt-drawer-footer">
+          <slot name="footer" />
+        </footer>
       </aside>
     </div>
 </template>
@@ -234,6 +237,18 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+}
+
+.dt-drawer-footer {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+}
+
+[data-dt-dark] .dt-drawer-footer {
+  background: var(--dt-dark-surface-1, #161b22);
+  border-top-color: var(--dt-dark-border, #30363d);
 }
 
 @keyframes dt-drawer-slide-in {

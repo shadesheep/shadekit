@@ -27,34 +27,33 @@ node docs/readme-demo/server.mjs
 
 ## 截图驱动
 
-驱动使用 Playwright 和隔离的 Chrome profile；**不修改项目依赖**。驱动查找 `/tmp/shadekit-readme-tools` 中的 Playwright，也可用 `PLAYWRIGHT_MODULE` 指定已有的模块。
+驱动使用 Playwright 和隔离的 Chrome profile；**不修改项目依赖**。驱动默认查找 `~/.cache/shadekit/readme-demo/tools` 中的 Playwright，也可用 `PLAYWRIGHT_MODULE` 指定已有的模块。
 
 ```bash
-npm install --prefix /tmp/shadekit-readme-tools playwright@1.64.1
-PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers \
-  /tmp/shadekit-readme-tools/node_modules/.bin/playwright install chromium
+npm install --prefix ~/.cache/shadekit/readme-demo/tools playwright@1.64.1
+PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/shadekit/readme-demo/browsers" \
+  ~/.cache/shadekit/readme-demo/tools/node_modules/.bin/playwright install chromium
 
-# 另一个终端保持演示服务运行
-PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers node docs/readme-demo/capture.mjs all
+# 另一个终端保持演示服务运行；脚本默认复用上述持久目录，无需重复安装
+node docs/readme-demo/capture.mjs all
 ```
 
 脚本执行真实的「新建环境 → 识别 → 使用识别结果 → 拾取 → 确认认证键 → 保存配置与账号」，打开 Shadow DOM 账号面板，并断言 `data-current-role` 从 `tester` 变为 `admin`；同时验证认证键被清除、无关本地存储保留。「添加环境」首图在表单锁定后收拢高级配置，完整展示基础字段、关联账号和添加按钮，随后重新展开高级配置继续采集。演示页和录制中的扩展控件固定使用 `data-dt-dark` 暗色模式，采集脚本同时设置扩展页 `localStorage` 与 `chrome.storage.local`，并在截图前检查主题。
 
 录像前通过本机演示 API 建立真实 HttpOnly 测试员会话，再创建录制标签页，因此 GIF 从测试员控制台开始，不包含准备阶段的登录表单或密码提示。点击前会悬停高亮目标账号；切换前后都会验证当前账号区中的姓名、邮箱、角色和权限文案，避免只验证内部角色而画面看不出变化。无头浏览器不总是分发扩展快捷键，此时通过扩展自己的后台消息唤起面板，不渲染替代 UI。面板保持产品原始尺寸。
 
-采集脚本从当前临时 Playwright 安装中解析配套 Chromium 路径，不依赖某个本机浏览器目录；`PLAYWRIGHT_BROWSERS_PATH` 需在安装和采集时保持一致。需要 MV3 扩展支持时应使用 Chrome for Testing，系统 Chrome 可能禁用侧载扩展。可用 `CHROME_PATH` 显式指定可执行文件。
+采集脚本从当前持久缓存的 Playwright 安装中解析配套 Chromium 路径，不依赖某个本机浏览器目录。浏览器默认保存在 `~/.cache/shadekit/readme-demo/browsers`，不会因 `/tmp` 清理而重复下载；可用 `SHADEKIT_DEMO_CACHE` 整体更换缓存目录。单独覆盖 `PLAYWRIGHT_BROWSERS_PATH` 时，安装和采集需保持一致。需要 MV3 扩展支持时应使用 Chrome for Testing，系统 Chrome 可能禁用侧载扩展。可用 `CHROME_PATH` 显式指定可执行文件。
 
 分开执行（按顺序复用同一个隔离 profile；若改目录，需同步修改 `SHADEKIT_DEMO_PROFILE`）：
 
 ```bash
-export PLAYWRIGHT_BROWSERS_PATH=/tmp/shadekit-readme-browsers
 node docs/readme-demo/capture.mjs setup
 node docs/readme-demo/capture.mjs hero
 node docs/readme-demo/capture.mjs record
 node docs/readme-demo/capture.mjs tools
 ```
 
-可用环境变量：`SHADEKIT_DEMO_PROFILE`、`SHADEKIT_DEMO_RAW`、`SHADEKIT_DEMO_VIDEO`、`PLAYWRIGHT_MODULE`、`PLAYWRIGHT_BROWSERS_PATH`、`CHROME_PATH`。原始 PNG、WebM 和诊断文件保存在 `docs/images/raw/`（Git 忽略）或指定的 `/tmp` 目录，不作为公开素材直接引用。
+可用环境变量：`SHADEKIT_DEMO_CACHE`、`SHADEKIT_DEMO_PROFILE`、`SHADEKIT_DEMO_RAW`、`SHADEKIT_DEMO_VIDEO`、`PLAYWRIGHT_MODULE`、`PLAYWRIGHT_BROWSERS_PATH`、`CHROME_PATH`。原始 PNG、WebM 和诊断文件保存在 `docs/images/raw/`（Git 忽略）或指定的 `/tmp` 目录，不作为公开素材直接引用。
 
 ## 排版与 GIF
 

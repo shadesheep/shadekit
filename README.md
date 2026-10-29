@@ -1,5 +1,7 @@
 # ShadeKit
 
+**简体中文** | [English](README.en.md)
+
 [![CI](https://github.com/shadesheep/shadekit/actions/workflows/ci.yml/badge.svg)](https://github.com/shadesheep/shadekit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -156,7 +158,7 @@ npm run zip:firefox   # 打包 Firefox 版本（含 sources zip）
 
 ## 开发
 
-项目结构、添加工具与存储约定见 [AGENTS.md](AGENTS.md)；架构决策记录见 [docs/adr/](docs/adr/)，领域术语表见 [CONTEXT.md](CONTEXT.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+项目结构、添加工具与存储约定见 [AGENTS.md](AGENTS.md)；核心设计与架构约束见 [docs/AI.md](docs/AI.md)，领域术语表见 [CONTEXT.md](CONTEXT.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 提交 PR 前请运行 `npm run check`（类型检查）、`npm run lint`（代码检查）、`npm test`（单元测试）和 `npm run build`（构建），与 CI 保持一致。演示服务可另外运行 `npm run test:demo`；配图复现见[演示系统与素材制作](docs/readme-demo/README.md)。
 
