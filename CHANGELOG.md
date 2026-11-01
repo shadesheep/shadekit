@@ -26,7 +26,7 @@
 ### 性能
 
 - CodeMirror 改用按需精编基础扩展，去除未使用的 autocomplete/lint/closeBrackets，减小扩展体积。
-- SQL 美化改用单一方言（formatDialect + sql），避免打包完整 sql-formatter 方言集。
+- SQL 美化支持 sql-formatter 全部方言（bigquery、mysql、postgresql、transactsql 等），默认通用 `sql`，可按需切换。
 - 按入口拆分组件加载器，background/content 不再内联 UI 组件；移除 pinia 依赖。
 
 ### 安全
