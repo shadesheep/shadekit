@@ -154,12 +154,13 @@ export function redactBodyObject(
 export function collectRevealed(
   revealNames: string[] | undefined,
   bindings: Record<string, unknown>,
+  tainted: Record<string, boolean> = {},
 ): Record<string, string> | undefined {
   if (!revealNames || revealNames.length === 0) return undefined;
   const revealed: Record<string, string> = {};
   let any = false;
   for (const name of revealNames) {
-    if (isSensitiveKey(name)) continue; // 黑名单优先，禁止泄露敏感绑定名
+    if (isSensitiveKey(name) || tainted[name]) continue;
     if (!Object.hasOwn(bindings, name)) continue;
     const value = bindings[name];
     if (value === undefined) continue;

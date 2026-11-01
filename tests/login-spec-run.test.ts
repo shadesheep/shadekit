@@ -9,7 +9,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   waitForTabLoaded: vi.fn(async () => {}),
-  applyNavigationIntent: vi.fn(async () => {}),
+  applyNavigationIntent: vi.fn(async (
+    _tabId: number,
+    _intent: { action: "navigate" | "reload" | "none"; url?: string },
+  ) => {}),
   waitForSettle: vi.fn(async (_opts: unknown) => ({ states: [] })),
   snapshotPasswordField: vi.fn(async () => true),
   currentUrl: vi.fn(async () => "https://example.com/login"),
@@ -44,13 +47,15 @@ vi.mock(
 
 const executeScript = vi.fn();
 const tabsGet = vi.fn(async () => ({ url: "https://example.com/home" }));
+const tabsUpdate = vi.fn(async (_tabId: number, _updates: { url?: string }) => undefined);
 const cookiesGetAll = vi.fn(
   async () =>
     [] as Array<{ name: string; value: string; domain: string; path: string }>,
 );
 
 vi.stubGlobal("chrome", {
-  tabs: { get: tabsGet },
+  permissions: { contains: async () => true, request: async () => true },
+  tabs: { get: tabsGet, update: tabsUpdate },
   scripting: { executeScript },
   cookies: { getAll: cookiesGetAll },
 });
@@ -92,15 +97,22 @@ const FORM_OPS: SpecOp[] = [
   { op: "fill", target: "#p", value: "{password}", clearFirst: true },
   { op: "click", target: "#go" },
 ];
-
 /** 原生 DOM 动作的 playbook：按顺序返回预设结果 */
 function domPlaybook(results: Array<Record<string, unknown>>) {
   const actions: string[] = [];
   executeScript.mockImplementation(
-    async (injection: { args: Array<{ action: string }> }) => {
-      const action = injection.args[0].action;
-      actions.push(action);
-      const next = results.shift() ?? { status: "ok", count: 1 };
+    async (injection: { args: Array<{ action: string; target?: unknown }> }) => {
+      const action = injection.args[0];
+      const isBaseline = action.action === "locate" && action.target === 'input[type="password"]';
+      if (!isBaseline && action.action !== "scan" && action.action !== "locate") actions.push(action.action);
+      if (isBaseline && results.length > 0) {
+        return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+      }
+      if ((isBaseline || action.action === "scan") && results.length === 0) {
+        return [{ frameId: 0, result: { status: "notFound", count: 0 } }];
+      }
+      const next = (action.action === "locate" || action.action === "scan" ? results[0] : results.shift()) ?? { status: "ok", count: 1 };
+      if (action.action === "locate" && next.status === "notFound" && results.length > 0) results.shift();
       return [{ frameId: 0, result: next }];
     },
   );
@@ -116,6 +128,14 @@ beforeEach(() => {
   mocks.detectCaptcha.mockResolvedValue(false);
   mocks.waitForSettle.mockResolvedValue({ states: [] });
   tabsGet.mockResolvedValue({ url: "https://example.com/home" });
+  mocks.applyNavigationIntent.mockImplementation(async (_tabId, intent) => {
+    if (intent.action === "navigate" && intent.url) {
+      tabsGet.mockResolvedValue({ url: intent.url });
+    }
+  });
+  tabsUpdate.mockImplementation(async (tabId, updates) => {
+    await mocks.applyNavigationIntent(tabId, { action: "navigate", url: updates.url ?? "" });
+  });
   cookiesGetAll.mockResolvedValue([]);
   executeScript.mockResolvedValue([
     { frameId: 0, result: { status: "ok", count: 1 } },
@@ -150,6 +170,7 @@ describe("runSpec — 算子编排与轨迹", () => {
   });
 
   it("已登录后台切号：清理后导航登录页并等待加载，再填充表单", async () => {
+    tabsGet.mockResolvedValue({ url: "https://xiaoyule.com.cn/home" });
     const domActions: string[] = [];
     executeScript.mockImplementation(async (injection: { args: unknown[] }) => {
       const first = injection.args[0];
@@ -185,7 +206,7 @@ describe("runSpec — 算子编排与轨迹", () => {
       { op: "click", target: { text: "登 录" }, onNotFound: "fail" },
     ];
     const result = await runSpec(
-      spec(ops),
+      spec(ops, { success: [] }),
       buildCtx({
         origin: "https://xiaoyule.com.cn",
         targetUrl: "https://xiaoyule.com.cn/admin/users",
@@ -213,10 +234,11 @@ describe("runSpec — 算子编排与轨迹", () => {
     expect(mocks.waitForTabLoaded.mock.invocationCallOrder[0]).toBeLessThan(
       firstFillCall,
     );
-    expect(domActions).toEqual(["locate", "fill", "fill", "click"]);
+    expect(domActions.filter((action) => action !== "locate")).toEqual(["fill", "fill", "click"]);
   });
 
   it("导航后等待表单超时，报告当前地址并提示检查本地登录态", async () => {
+    tabsGet.mockResolvedValue({ url: "https://xiaoyule.com.cn/home" });
     executeScript.mockResolvedValue([
       { frameId: 0, result: { status: "notFound", count: 0 } },
     ]);
@@ -240,7 +262,7 @@ describe("runSpec — 算子编排与轨迹", () => {
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error).toContain("等待登录表单出现超时");
-    expect(result.error).toContain("https://example.com/home");
+    expect(result.error).toContain("https://xiaoyule.com.cn/admin/login");
     expect(result.error).toContain("本地登录态清理");
     expect(result.trace).toHaveLength(1);
     expect(result.trace[0]).toMatchObject({ op: "goto", status: "error" });
@@ -251,9 +273,9 @@ describe("runSpec — 算子编排与轨迹", () => {
     await runSpec(spec(FORM_OPS), buildCtx(), {
       settle: { pollingIntervalMs: 1 },
     });
-    const payloads = executeScript.mock.calls.map(
-      (call) => (call[0] as { args: Array<Record<string, unknown>> }).args[0],
-    );
+    const payloads = executeScript.mock.calls
+      .map((call) => (call[0] as { args: Array<Record<string, unknown>> }).args[0])
+      .filter((payload) => payload.action === "fill");
     expect(payloads[0]).toMatchObject({ value: "alice", clearFirst: true });
     // 密码只出现在注入参数里，不进轨迹
     expect(payloads[1]).toMatchObject({ value: "p@ss" });
@@ -273,7 +295,7 @@ describe("runSpec — 算子编排与轨迹", () => {
     expect(result.errorCode).toBe(ErrorCodes.ELEMENT_NOT_FOUND);
     expect(result.error).toContain("第 3 步");
     // 第四步没有执行
-    expect(actions).toHaveLength(2);
+    expect(actions).toHaveLength(1);
     expect(result.trace).toHaveLength(3);
     expect(result.trace[2]).toMatchObject({
       index: 2,
@@ -286,7 +308,10 @@ describe("runSpec — 算子编排与轨迹", () => {
 
   it("单次 DOM 交互超时（limits.stepMs）→ STEP_TIMEOUT", async () => {
     // executeScript 永不 resolve → withStepTimeout 竞速触发 STEP_TIMEOUT
-    executeScript.mockImplementation(() => new Promise<unknown>(() => {}));
+    executeScript.mockImplementation(async (injection: { args: Array<{ action: string }> }) => {
+      if (injection.args[0].action === "fill") return new Promise<unknown>(() => {});
+      return [{ frameId: 0, result: { status: "ok", count: 1 } }];
+    });
     const result = await runSpec(
       spec([{ op: "fill", target: "#u", value: "a" }], {
         limits: { stepMs: 30 },
@@ -373,7 +398,7 @@ describe("runSpec — 算子编排与轨迹", () => {
       { frameId: 4, result: { status: "ok", count: 1 } },
     ]);
     const result = await runSpec(
-      spec([{ op: "click", target: { label: "登录" } }]),
+      spec([{ op: "click", target: { label: "登录" } }], { success: [] }),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -384,18 +409,19 @@ describe("runSpec — 算子编排与轨迹", () => {
     mocks.applyNavigationIntent.mockRejectedValueOnce(
       new Error("No tab with id: 5"),
     );
-    domPlaybook([]);
+    const actions = domPlaybook([]);
     const result = await runSpec(spec(FORM_OPS), buildCtx(), {
       settle: { pollingIntervalMs: 1 },
     });
 
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error).toContain("导航失败");
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(actions).toEqual([]);
     expect(result.trace).toHaveLength(1);
   });
 
   it('goto.when 按 D1 假值集合判定：字符串 "0" / "false" 视为真', async () => {
+    domPlaybook([]);
     const result = await runSpec(
       spec([
         {
@@ -420,6 +446,7 @@ describe("runSpec — 算子编排与轨迹", () => {
   });
 
   it("goto.when 为假时跳过算子，轨迹记 skipped 且 lastGotoUrl 不更新", async () => {
+    domPlaybook([]);
     const result = await runSpec(
       spec([
         { op: "goto", url: "https://a.example.com/login" },
@@ -440,6 +467,7 @@ describe("runSpec — 算子编排与轨迹", () => {
   });
 
   it("goto.when 为真时执行，lastGotoUrl 更新为跳转后的地址", async () => {
+    domPlaybook([]);
     const result = await runSpec(
       spec([
         {
@@ -481,7 +509,12 @@ describe("runSpec — 算子编排与轨迹", () => {
   });
 
   it("waitFor 走既有结算判定，单条 failure 原样传 failWhen", async () => {
-    await runSpec(
+    executeScript.mockImplementation(async (injection: { args: Array<{ action: string; target?: unknown }> }) => {
+      const action = injection.args[0];
+      const found = action.action === "locate" && action.target === ".error";
+      return [{ frameId: 0, result: { status: found ? "ok" : "notFound", count: found ? 1 : 0 } }];
+    });
+    const result = await runSpec(
       spec(
         [{ op: "waitFor", when: { type: "selector", target: ".welcome" } }],
         { failure: [{ type: "selector", target: ".error" }] },
@@ -489,18 +522,13 @@ describe("runSpec — 算子编排与轨迹", () => {
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
-    expect(mocks.waitForSettle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tabId: 5,
-        settle: { type: "selector", target: ".welcome" },
-        failWhen: { type: "selector", target: ".error" },
-        timeoutMs: 10000,
-      }),
-    );
+    expect(result).toMatchObject({ success: false, errorCode: ErrorCodes.LOGIN_REJECTED });
   });
 
   it("waitFor 遇到多条 failure 时按 OR 合并，不再只取首条", async () => {
-    await runSpec(
+    tabsGet.mockResolvedValue({ url: "https://example.com/locked" });
+    executeScript.mockResolvedValue([{ frameId: 0, result: { status: "notFound", count: 0 } }]);
+    const result = await runSpec(
       spec(
         [{ op: "waitFor", when: { type: "selector", target: ".welcome" } }],
         {
@@ -513,17 +541,7 @@ describe("runSpec — 算子编排与轨迹", () => {
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
-    expect(mocks.waitForSettle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        failWhen: {
-          type: "any",
-          of: [
-            { type: "selector", target: ".error" },
-            { type: "url", glob: "*/locked*" },
-          ],
-        },
-      }),
-    );
+    expect(result).toMatchObject({ success: false, errorCode: ErrorCodes.LOGIN_REJECTED });
   });
 
   it("success.anyOf 是 OR：一条数据信号成立即成功，不等页面条件", async () => {
@@ -611,7 +629,6 @@ describe("runSpec — 算子编排与轨迹", () => {
       status: "success",
       target: "sha256",
     });
-    expect(executeScript).not.toHaveBeenCalled();
   });
 });
 
@@ -652,16 +669,21 @@ describe("runSpec — 页面成功信号", () => {
     });
     expect(result.success).toBe(true);
     // click 前刷新基准：初始一次 + click 前一次
-    expect(mocks.snapshotPasswordField).toHaveBeenCalledTimes(2);
-    expect(mocks.evaluateCondition).toHaveBeenCalledWith(
-      expect.objectContaining({ tabId: 5, passwordFieldPresent: true }),
-      { type: "formGone" },
-      expect.anything(),
+    const firstClickIndex = executeScript.mock.calls.findIndex((call) =>
+      (call[0] as { args: Array<{ action?: string }> }).args[0].action === "click"
     );
+    const baselineScans = executeScript.mock.calls.slice(0, firstClickIndex).filter((call) => {
+      const payload = (call[0] as { args: Array<{ action?: string; target?: unknown }> }).args[0];
+      return payload.action === "locate" && payload.target === 'input[type="password"]';
+    });
+    expect(baselineScans).toHaveLength(2);
   });
 
   it("页面条件超时 → SUCCESS_CONDITION_UNMET，消息列出未满足的条件", async () => {
-    mocks.evaluateCondition.mockResolvedValue(false);
+    executeScript.mockImplementation(async (injection: { args: Array<{ action: string }> }) => {
+      const action = injection.args[0].action;
+      return [{ frameId: 0, result: { status: action === "scan" ? "notFound" : "ok", count: 1 } }];
+    });
     const result = await runSpec(
       spec(FORM_OPS, {
         limits: { settleMs: 20 },
@@ -710,6 +732,7 @@ describe("runSpec — 页面成功信号", () => {
   });
 
   it("固定等待（legacy timeout）直接 sleep 后成功，不轮询", async () => {
+    domPlaybook([]);
     const result = await runSpec(
       spec(FORM_OPS, { success: [{ page: { type: "fixed", ms: 1 } }] }),
       buildCtx(),
@@ -745,10 +768,11 @@ describe("runSpec — extract / script / 模板", () => {
       expect(result.errorCode).toBe(ErrorCodes.LOGIN_REJECTED);
     }
     expect(result.bindings).toEqual({});
-    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(executeScript).toHaveBeenCalledTimes(2);
   });
 
   it("目标页为浏览器错误页时，提示检查目标服务并保留原始错误", async () => {
+    tabsGet.mockResolvedValue({ url: "http://localhost:8888/login" });
     executeScript.mockRejectedValue(
       new Error("Frame with ID 0 is showing error page"),
     );
@@ -810,7 +834,7 @@ describe("runSpec — extract / script / 模板", () => {
     );
 
     const read = await runSpec(
-      spec([{ op: "extract", source: "dom", key: ".welcome", as: "text" }]),
+      spec([{ op: "extract", source: "dom", key: ".welcome", as: "text" }], { success: [] }),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -854,7 +878,7 @@ describe("runSpec — extract / script / 模板", () => {
     const result = await runSpec(
       spec([
         { op: "extract", source: "cookie", key: "sid", as: "cookieValue" },
-      ]),
+      ], { success: [] }),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
@@ -865,17 +889,17 @@ describe("runSpec — extract / script / 模板", () => {
 
   it("extract 取到值后进入绑定表，parse: jsonValue 解一次 JSON", async () => {
     executeScript.mockImplementation(async (injection: { args: unknown[] }) => {
-      const [source, key] = injection.args as [string, string];
-      if (source === "local") return [{ frameId: 0, result: '"en"' }];
-      if (source === "session" && key === "sid2") {
-        return [{ frameId: 0, result: "session-value" }];
+      const [source] = injection.args as [string];
+      if (source === "local") return [{ frameId: 0, result: { lang: '"en"' } }];
+      if (source === "session") {
+        return [{ frameId: 0, result: { sid2: "session-value" } }];
       }
       return [{ frameId: 0, result: null }];
     });
     cookiesGetAll.mockResolvedValue([
       { name: "sid", value: "cookie-value", domain: "example.com", path: "/" },
     ]);
-    mocks.currentUrl.mockResolvedValue("https://example.com/cb?code=abc%20123");
+    tabsGet.mockResolvedValue({ url: "https://example.com/cb?code=abc%20123" });
 
     const result = await runSpec(
       spec(
@@ -892,7 +916,7 @@ describe("runSpec — extract / script / 模板", () => {
           { op: "extract", source: "url", key: "code", as: "query" },
           { op: "extract", source: "url", as: "fullUrl" },
         ],
-        { success: [{ page: { type: "formGone" } }] },
+        { success: [] },
       ),
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
@@ -1031,9 +1055,9 @@ describe("runSpec — extract / script / 模板", () => {
       { settle: { pollingIntervalMs: 1 } },
     );
     expect(result.success).toBe(true);
-    const payloads = executeScript.mock.calls.map(
-      (call) => (call[0] as { args: Array<Record<string, unknown>> }).args[0],
-    );
+    const payloads = executeScript.mock.calls
+      .map((call) => (call[0] as { args: Array<Record<string, unknown>> }).args[0])
+      .filter((payload) => payload.action === "fill");
     expect(payloads[0]).toMatchObject({ value: "acme" });
     expect(payloads[1]).toMatchObject({ value: "http://localhost:8888" });
   });

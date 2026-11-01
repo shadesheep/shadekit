@@ -1,11 +1,5 @@
 <script setup lang="ts">
 import {computed, defineAsyncComponent, markRaw, onMounted, onUnmounted, ref} from 'vue';
-import {
-  getAllConfig,
-  isExportableConfigId,
-  setAllConfig,
-} from '../shared/config-transfer';
-import { migrateConfig } from '../shared/tool-config';
 import type {ThemeMode} from '../shared/use-theme';
 import {
   applyTheme,
@@ -16,13 +10,13 @@ import {showToast} from '../shared/use-toast';
 import ToastContainer from '../shared/ToastContainer.vue';
 import {DevModeClickCounter, isDevModeEnabled, onDevModeChange, setDevModeEnabled} from '../shared/dev-mode';
 import ToolMarket from './components/ToolMarket.vue';
+import PlaintextBackupControls from './components/PlaintextBackupControls.vue';
 import {getConfigSections} from './tool-registry';
 import {subscribeOptionsRoute} from './options-route';
 
 type View = 'market' | string;
 
 const logoUrl = ref('');
-const allConfigFileInput = ref<HTMLInputElement | null>(null);
 const themeMode = ref<ThemeMode>(getStoredTheme());
 // 仓库地址统一取扩展元数据（wxt.config.ts manifest.homepage_url），避免多处硬编码
 const repoUrl = chrome.runtime.getManifest().homepage_url ?? '';
@@ -96,69 +90,14 @@ async function handleExitDevMode() {
   activeView.value = 'market';
 }
 
-async function exportAllConfig() {
-  try {
-    const data = await getAllConfig();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const date = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = `shadekit-config-${date}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('全部工具设置已导出', 'success');
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : '未知错误';
-    showToast(`导出失败: ${msg}`, 'error');
-  }
-}
-
-async function importAllConfig(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-
-  // 重置 input，允许重复选择同一文件
-  input.value = '';
-
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text) as Record<string, unknown>;
-    const migrated = migrateConfig(data);
-    // 只统计会真正落地的 key：导出文件里夹带的日志/死键会被 setAllConfig
-    // 过滤掉，不能算进「N 个工具」让用户误以为要导入更多东西
-    const toolCount = Object.keys(migrated).filter(
-        (k) => !k.startsWith('__') && isExportableConfigId(k),
-    ).length;
-    if (toolCount === 0) {
-      showToast('文件中没有可导入的工具设置', 'error');
-      return;
-    }
-    if (
-        !confirm(`将导入 ${toolCount} 个工具的全部设置，当前设置将被覆盖。确定继续？`)
-    )
-      return;
-
-    const ok = await setAllConfig(migrated);
-    if (!ok) {
-      // 写入失败（如配额满）：setAllConfig 已提示用户，此处不展示成功反馈
-      return;
-    }
-    showToast('全部工具设置已导入，刷新页面生效', 'success');
-    // 刷新侧边栏
-    const configSections = getConfigSections();
-    sections.value = configSections.map((s) => ({
-      id: s.id,
-      label: s.label,
-      icon: s.icon,
-      component: markRaw(defineAsyncComponent(s.component)),
-    }));
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'JSON 格式错误';
-    showToast(`导入失败: ${msg}`, 'error');
-  }
+function refreshConfigSections(): void {
+  const configSections = getConfigSections();
+  sections.value = configSections.map((s) => ({
+    id: s.id,
+    label: s.label,
+    icon: s.icon,
+    component: markRaw(defineAsyncComponent(s.component)),
+  }));
 }
 
 /** 切换主题。 */
@@ -214,38 +153,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 全局配置操作（全部工具设置：跨工具整包） -->
-      <div class="header-actions">
-        <button
-          type="button"
-          class="btn-import"
-          title="导入全部工具的设置（整包覆盖）"
-          @click="allConfigFileInput?.click()"
-        >
-          <div class="i-lucide-download w-4 h-4" aria-hidden="true"/>
-          导入全部工具设置
-        </button>
-        <input
-          ref="allConfigFileInput"
-          type="file"
-          accept=".json"
-          class="hidden-file"
-          @change="importAllConfig"
-        />
-        <button
-          type="button"
-          class="btn-export"
-          title="导出全部工具的设置"
-          aria-describedby="export-backup-warning"
-          @click="exportAllConfig"
-        >
-          <div class="i-lucide-upload w-4 h-4" aria-hidden="true"/>
-          导出全部工具设置
-        </button>
-        <p id="export-backup-warning" class="export-warning">
-          导出文件包含明文账号密码，请勿随意分享。
-        </p>
-      </div>
+      <!-- 完整备份仅由 Background 解析和物化秘密；页面只展示预览摘要。 -->
+      <PlaintextBackupControls @imported="refreshConfigSections" />
     </div>
 
     <div class="main-layout">

@@ -34,6 +34,7 @@ const settleMocks = vi.hoisted(() => ({
 }));
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   tabs: { get: tabsGet },
   scripting: { executeScript },
   cookies: {
@@ -96,8 +97,11 @@ function stubStorage(
   session: Record<string, string> = {},
 ) {
   executeScript.mockImplementation(
-    async (injection: { args: [string, unknown, ...unknown[]] }) => {
+    async (injection: { args: unknown[] }) => {
       const area = injection.args?.[0];
+      if (typeof area === "object" && area !== null && "action" in area && area.action === "scan") {
+        return [{ frameId: 0, result: { status: "notFound", count: 0 } }];
+      }
       if (area === "local") return [{ frameId: 0, result: local }];
       if (area === "session") return [{ frameId: 0, result: session }];
       return [{ frameId: 0, result: { status: "ok", count: 1 } }];
@@ -108,9 +112,10 @@ function stubStorage(
 beforeEach(() => {
   vi.clearAllMocks();
   executeScript.mockReset();
-  executeScript.mockImplementation(async () => [
-    { frameId: 0, result: { status: "ok", count: 1 } },
-  ]);
+  executeScript.mockImplementation(async (injection: { args?: Array<{ action?: string }> }) => {
+    const action = injection.args?.[0]?.action;
+    return [{ frameId: 0, result: { status: action === "scan" ? "notFound" : "ok", count: 1 } }];
+  });
   tabsGet.mockReset();
   tabsGet.mockResolvedValue({ url: "https://example.com/home" });
   cookiesGetAll.mockReset();

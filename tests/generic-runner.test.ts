@@ -86,7 +86,8 @@ describe("buildRecipeVariables", () => {
   });
 
   it("变量表可直接用于插值（密码只在本进程内存中）", () => {
-    vi.stubGlobal("chrome", {});
+    vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },});
     const vars = buildRecipeVariables(buildCtx());
     expect(interpolateTemplate("{username}:{password}", vars)).toBe(
       "alice:p@ss",

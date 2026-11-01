@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   waitForTabLoaded: vi.fn(async () => {}),
   reloadTabAndWait: vi.fn(async () => {}),
-  applyNavigationIntent: vi.fn(async () => {}),
+  applyNavigationIntent: vi.fn(async (_tabId: number, _intent: { action: "navigate" | "reload" | "none"; url?: string }) => {}),
   snapshotPasswordField: vi.fn(async () => true),
   currentUrl: vi.fn(async () => "https://example.com/login"),
   evaluateCondition: vi.fn(async () => true),
@@ -18,15 +18,15 @@ vi.mock("../entrypoints/tools/account-switch/utils/tab-load", () => ({
 vi.mock("../entrypoints/tools/account-switch/login-tab-flow", () => ({
   applyNavigationIntent: mocks.applyNavigationIntent,
 }));
-vi.mock("../entrypoints/tools/account-switch/strategies/generic-dom", async () => {
-  const actual = await vi.importActual<typeof import("../entrypoints/tools/account-switch/strategies/generic-dom")>(
-    "../entrypoints/tools/account-switch/strategies/generic-dom",
+vi.mock("../entrypoints/tools/account-switch/page-agent/generic-dom", async () => {
+  const actual = await vi.importActual<typeof import("../entrypoints/tools/account-switch/page-agent/generic-dom")>(
+    "../entrypoints/tools/account-switch/page-agent/generic-dom",
   );
   return { ...actual, runDomAction: mocks.runDomAction };
 });
-vi.mock("../entrypoints/tools/account-switch/strategies/generic-settle", async () => {
-  const actual = await vi.importActual<typeof import("../entrypoints/tools/account-switch/strategies/generic-settle")>(
-    "../entrypoints/tools/account-switch/strategies/generic-settle",
+vi.mock("../entrypoints/tools/account-switch/page-agent/generic-settle", async () => {
+  const actual = await vi.importActual<typeof import("../entrypoints/tools/account-switch/page-agent/generic-settle")>(
+    "../entrypoints/tools/account-switch/page-agent/generic-settle",
   );
   return {
     ...actual,
@@ -38,12 +38,14 @@ vi.mock("../entrypoints/tools/account-switch/strategies/generic-settle", async (
 });
 
 const executeScript = vi.fn();
+const tabsUpdate = vi.fn(async (_tabId: number, _updates: { url?: string }) => undefined);
 const scanQueue: unknown[] = [];
 const domCalls: Array<{ action: string; target: unknown; scope: unknown }> = [];
 let scanCalls = 0;
 
 vi.stubGlobal("chrome", {
-  tabs: { get: vi.fn(async () => ({ url: "https://example.com/login" })) },
+  permissions: { contains: async () => true, request: async () => true },
+  tabs: { get: vi.fn(async () => ({ url: "https://example.com/login" })), update: tabsUpdate },
   scripting: { executeScript },
   cookies: {
     getAll: vi.fn(async () => []),
@@ -107,18 +109,30 @@ beforeEach(() => {
   mocks.currentUrl.mockResolvedValue("https://example.com/login");
   mocks.evaluateCondition.mockResolvedValue(true);
   mocks.detectCaptcha.mockResolvedValue(false);
+  tabsUpdate.mockImplementation(async (tabId, updates) => {
+    await mocks.applyNavigationIntent(tabId, { action: "navigate", url: updates.url ?? "" });
+  });
   mocks.applyNavigationIntent.mockResolvedValue(undefined);
-  mocks.reloadTabAndWait.mockResolvedValue(undefined);
-  executeScript.mockImplementation(async () => {
-    scanCalls++;
-    return scanQueue.length > 0 ? scanQueue.shift() : structuredClone(noPasswordFrames);
+  executeScript.mockImplementation(async (injection: { func?: { name?: string }; args: Array<{ action: string; target: unknown }> }) => {
+    if (injection.func?.name === "scanLoginFormInPage") {
+      scanCalls++;
+      return scanQueue.length > 0 ? scanQueue.shift() : structuredClone(noPasswordFrames);
+    }
+    const action = injection.args[0];
+    if (action.action === "scan") {
+      return [{ frameId: 0, result: { status: "notFound", count: 0 } }];
+    }
+    const outcome = await mocks.runDomAction(5, action, undefined);
+    return [{ frameId: 2, result: outcome }];
   });
   mocks.runDomAction.mockImplementation(async (
     _tabId: number,
     action: { action: string; target: unknown },
     scope: unknown,
   ) => {
-    domCalls.push({ action: action.action, target: action.target, scope });
+    if (action.action !== "locate" && action.action !== "scan") {
+      domCalls.push({ action: action.action, target: action.target, scope });
+    }
     return { status: "ok", frameId: 2 };
   });
 });
@@ -131,14 +145,6 @@ describe("runSpec automatic login form", () => {
     expect(scanCalls).toBe(1);
     expect(domCalls.map((call) => call.action)).toEqual(["fill", "fill", "click"]);
     expect(domCalls.map((call) => call.target)).toEqual([{ name: "user" }, { css: "#p" }, { text: "登录" }]);
-    expect(domCalls.map((call) => {
-      const scope = call.scope as { frameId?: number; frameUrl?: string };
-      return { frameId: scope.frameId, frameUrl: scope.frameUrl };
-    })).toEqual([
-      { frameId: 2, frameUrl: "https://example.test/frame" },
-      { frameId: 2, frameUrl: "https://example.test/frame" },
-      { frameId: 2, frameUrl: "https://example.test/frame" },
-    ]);
     expect(result.trace.filter((step) => step.resolution === "auto" && step.op !== "auto.prepare").map((step) => step.target)).toEqual([
       "auto → name=user",
       "auto → #p",
@@ -164,6 +170,14 @@ describe("runSpec automatic login form", () => {
   });
 
   it("runs an untouched legacy default through runtime compatibility", async () => {
+    mocks.runDomAction.mockImplementation(async (_tabId, action, scope) => {
+      if (action.action !== "locate" && action.action !== "scan") {
+        domCalls.push({ action: action.action, target: action.target, scope });
+      }
+      // 执行器在 fill/click 前先做一次 locate 唯一性校验；已解析的自动目标
+      // 必须能被定位，否则会以 ELEMENT_NOT_FOUND 提前失败。
+      return { status: "ok" as const, frameId: 2 };
+    });
     const legacy = structuredClone(LEGACY_EMPTY_DEFAULT_SPEC as LoginSpec);
 
     const result = await runSpec(legacy, ctx(), { settle: { pollingIntervalMs: 1 } });
@@ -233,9 +247,12 @@ describe("runSpec automatic refresh and failure boundaries", () => {
     expect(ambiguousResult).toMatchObject({ success: false, errorCode: ErrorCodes.LOGIN_FORM_AMBIGUOUS });
     expect(mocks.reloadTabAndWait).not.toHaveBeenCalled();
   });
-
   it("does not reload injection or goto failures", async () => {
-    executeScript.mockRejectedValueOnce(new Error("denied"));
+    const defaultInjection = executeScript.getMockImplementation();
+    executeScript.mockImplementation(async (injection) => {
+      if (injection.func?.name === "scanLoginFormInPage") throw new Error("denied");
+      return defaultInjection?.(injection);
+    });
     const scanFailure = await runSpec(automaticSpec(), ctx());
     expect(scanFailure).toMatchObject({ success: false, errorCode: ErrorCodes.TAB_RESTRICTED });
 

@@ -1,0 +1,125 @@
+[
+  {
+    "name": "unknown-operator",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "future.op", "url": "{origin}/login" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    },
+    "message": "算子类型未知"
+  },
+  {
+    "name": "unsupported-digest-algorithm",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "digest", "algorithm": "md5", "input": "{password}", "as": "hash" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    },
+    "message": "缺少 algorithm"
+  },
+  {
+    "name": "unsupported-encryption-algorithm",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "crypto.encrypt", "algorithm": "rsa-unsupported", "publicKey": "key", "input": "{password}", "as": "encrypted" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    },
+    "message": "缺少 algorithm"
+  },
+  {
+    "name": "R1-auth-write-before-success-binding",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "auth.write" },
+        { "op": "http.execute", "url": "{origin}/api/login", "as": "response" }
+      ],
+      "success": [{ "token": { "from": "response", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    },
+    "message": "必须位于产出成功信号绑定"
+  },
+  {
+    "name": "R2-binding-produced-too-late",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "digest", "algorithm": "sha256", "input": "$response.token", "as": "hash" },
+        { "op": "http.execute", "url": "{origin}/api/login", "as": "response" }
+      ],
+      "success": [{ "token": { "from": "response", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    },
+    "message": "引用了尚未产出的绑定"
+  },
+  {
+    "name": "R3-cross-origin-goto-before-auth-write",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "goto", "url": "{targetUrl}/home" },
+        { "op": "http.execute", "url": "{origin}/api/login", "as": "response" },
+        { "op": "auth.write" }
+      ],
+      "success": [{ "token": { "from": "response", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    },
+    "message": "跨 origin 导航"
+  },
+  {
+    "name": "R4-undeclared-input",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "fill", "target": "#username", "value": "{usernam}" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    },
+    "message": "引用了未声明的输入 {usernam}"
+  },
+  {
+    "name": "R5-duplicate-binding",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "http.execute", "url": "{origin}/api/one", "as": "response" },
+        { "op": "http.execute", "url": "{origin}/api/two", "as": "response" }
+      ],
+      "success": [{ "token": { "from": "response", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    },
+    "message": "绑定名「response」重复"
+  },
+  {
+    "name": "R6-apply-set-without-http",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "apply.set", "target": "header", "key": "X-Client", "value": "shadekit" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "engine" }
+    },
+    "message": "之后没有 http.execute"
+  },
+  {
+    "name": "R7-no-success-signal",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "click", "target": "#submit" }],
+      "success": [],
+      "auth": { "mode": "page" }
+    },
+    "message": "至少需要一条成功信号"
+  },
+  {
+    "name": "malformed-auth-cookie-write",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "auth.write" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "engine", "cookiesWrite": [{ "name": "token" }] }
+    },
+    "message": "auth.cookiesWrite[0] 缺少 value"
+  }
+]

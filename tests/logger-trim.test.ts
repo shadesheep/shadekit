@@ -40,6 +40,7 @@ import {
   LOG_TRIM_LIMITS,
   type LogEntry,
 } from '../entrypoints/shared/logger';
+import * as loggerModule from '../entrypoints/shared/logger';
 
 const STORAGE_KEY = 'devtools-logs';
 
@@ -301,5 +302,62 @@ describe('logger 写入时三维清理', () => {
     for (let i = 1; i < logs.length; i++) {
       expect(logs[i - 1].timestamp).toBeGreaterThanOrEqual(logs[i].timestamp);
     }
+  });
+});
+
+describe('logger 秘密脱敏', () => {
+  type SecretRegistration = (values: readonly string[]) => () => void;
+  const registerSecrets = () => {
+    const register = (loggerModule as unknown as {
+      registerLogSecrets?: SecretRegistration;
+    }).registerLogSecrets;
+    expect(register).toBeTypeOf('function');
+    return register!;
+  };
+
+  it('递归处理字段黑名单、字符串化 JSON 和已解析秘密，且不修改普通字段', async () => {
+    const password = 'a1-password-9f8e7d6c';
+    const token = 't1-token-7a6b5c4d';
+    const restore = registerSecrets()([password]);
+    try {
+      await logger.info(`登录失败，凭据为 ${password}`, {
+        category: 'auth',
+        error: password,
+        request: {
+          url: 'https://example.test/login',
+          body: JSON.stringify({ username: 'alice', password }),
+          headers: { Authorization: `Bearer ${token}`, 'X-Request-Id': 'safe' },
+          nested: [{ clientSecret: 'nested-secret' }],
+        },
+        response: { body: JSON.stringify({ refresh_token: token }) },
+        extra: { note: '保留这段普通文本', password },
+      });
+    } finally {
+      restore();
+    }
+
+    const serialized = JSON.stringify(await getLogs());
+    expect(serialized).not.toContain(password);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain('nested-secret');
+    expect(serialized).toContain('alice');
+    expect(serialized).toContain('X-Request-Id');
+    expect(serialized).toContain('保留这段普通文本');
+    expect(serialized).toContain('***');
+  });
+
+  it('敏感字段的原始值在 log.reveal 别名中也会被精确清除', async () => {
+    const token = 'revealed-token-4e3d2c1b';
+    await logger.info('调试登录', {
+      category: 'auth',
+      request: {
+        body: JSON.stringify({ access_token: token }),
+        revealed: { harmlessAlias: token, requestId: 'req-safe' },
+      },
+    });
+
+    const logs = await getLogs();
+    expect(JSON.stringify(logs)).not.toContain(token);
+    expect(JSON.stringify(logs)).toContain('req-safe');
   });
 });

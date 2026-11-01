@@ -8,7 +8,7 @@
 
 - **框架**: WXT (Web Extension Toolkit) + Vue 3 (Composition API)
 - **样式**: UnoCSS (原子化 CSS) + content script 专用 SCSS
-- **状态**: Vue 内使用 Pinia，扩展持久化使用 `chrome.storage.local`
+- **状态**: Vue 内使用 Composition API 本地状态，扩展持久化使用 `chrome.storage.local`
 - **语言**: TypeScript，strict 模式
 
 ## 目录结构

@@ -12,6 +12,7 @@
 
 import type { AuthSpec } from "../strategies/generic-recipe";
 import { ErrorCodes, LoginError } from "./error-codes";
+import { originMatches } from "./env";
 import {
   captureHostCookies,
   clearHostCookies,
@@ -117,8 +118,8 @@ async function assertTabOnOrigin(tabId: number, origin: string): Promise<void> {
   } catch {
     throw new LoginError(ErrorCodes.TAB_CLOSED, "目标页面不存在或已关闭");
   }
-  const url = tab.url || tab.pendingUrl || "";
-  if (!url.startsWith(origin)) {
+  const url = tab.pendingUrl || tab.url || "";
+  if (!originMatches(origin, url)) {
     throw new LoginError(
       ErrorCodes.INJECT_AUTH_FAILED,
       `无法写入认证数据：页面不在目标站点 (${origin})，当前为 ${url || "未知"}。` +
@@ -221,6 +222,7 @@ export async function restoreAuth(
 ): Promise<void> {
   const ranges = normalizeSnapshotSpec(spec);
   if (!ranges) return;
+  await assertTabOnOrigin(tabId, origin);
 
   for (const cookie of snapshot.cookies) {
     const details: chrome.cookies.SetDetails = {

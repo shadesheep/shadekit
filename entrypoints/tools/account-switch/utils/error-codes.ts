@@ -55,7 +55,19 @@ export const ErrorCodes = {
   LOGIN_FORM_AMBIGUOUS: "LOGIN_FORM_AMBIGUOUS",
   SUCCESS_CONDITION_UNMET: "SUCCESS_CONDITION_UNMET",
   LOGIN_REJECTED: "LOGIN_REJECTED",
+  VAULT_UNAVAILABLE: "VAULT_UNAVAILABLE",
+  VAULT_AUTH_FAILED: "VAULT_AUTH_FAILED",
+  BACKUP_AUTH_FAILED: "BACKUP_AUTH_FAILED",
   /** 运行期引用未解析（ADR-0015 D4），保存期同一问题为 CONFIG_INVALID */
+  SPEC_VERSION_UNSUPPORTED: "SPEC_VERSION_UNSUPPORTED",
+  OP_UNSUPPORTED: "OP_UNSUPPORTED",
+  ALGORITHM_UNSUPPORTED: "ALGORITHM_UNSUPPORTED",
+  HOST_CAPABILITY_MISSING: "HOST_CAPABILITY_MISSING",
+  HOST_PERMISSION_REQUIRED: "HOST_PERMISSION_REQUIRED",
+  HOST_PERMISSION_DENIED: "HOST_PERMISSION_DENIED",
+  HOST_PERMISSION_REVOKED: "HOST_PERMISSION_REVOKED",
+  WILDCARD_ENVIRONMENT: "WILDCARD_ENVIRONMENT",
+  ORIGIN_UNSUPPORTED: "ORIGIN_UNSUPPORTED",
   TEMPLATE_UNRESOLVED: "TEMPLATE_UNRESOLVED",
   // 兜底
   UNKNOWN: "UNKNOWN",
@@ -92,6 +104,12 @@ function isFetchTypeError(e: TypeError): boolean {
  */
 export function errorCodeOf(e: unknown): ErrorCode {
   if (e instanceof LoginError) return e.code;
+  if (e instanceof Error && "code" in e) {
+    const code = (e as Error & { code?: unknown }).code;
+    if (typeof code === "string" && Object.values(ErrorCodes).includes(code as ErrorCode)) {
+      return code as ErrorCode;
+    }
+  }
   if (e instanceof RequestTimeoutError) return ErrorCodes.REQUEST_TIMEOUT;
   if (e instanceof NetworkError) return ErrorCodes.NETWORK_ERROR;
   if (e instanceof Error) {
@@ -139,7 +157,19 @@ const LOGIN_ERROR_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCodes.LOGIN_FORM_AMBIGUOUS]: "无法确定使用哪个登录表单，请手动定位",
   [ErrorCodes.SUCCESS_CONDITION_UNMET]: "服务器已响应，但未确认登录成功，请核对账号密码或检查登录配置",
   [ErrorCodes.LOGIN_REJECTED]: "登录未通过，请核对账号密码；如确认无误，请检查登录配置",
+  [ErrorCodes.VAULT_UNAVAILABLE]: "保险库不可用，请检查浏览器密钥存储后重试",
+  [ErrorCodes.VAULT_AUTH_FAILED]: "保险库记录认证失败，请重新导入备份或重试",
+  [ErrorCodes.BACKUP_AUTH_FAILED]: "备份密码错误或备份文件已损坏",
   [ErrorCodes.TEMPLATE_UNRESOLVED]: "登录配置缺少必要信息，请在设置中检查当前环境",
+  [ErrorCodes.SPEC_VERSION_UNSUPPORTED]: "登录声明版本不受支持，请升级客户端",
+  [ErrorCodes.OP_UNSUPPORTED]: "当前客户端不支持该登录操作，请升级客户端或修改策略",
+  [ErrorCodes.ALGORITHM_UNSUPPORTED]: "当前客户端不支持该登录算法，请升级客户端或修改策略",
+  [ErrorCodes.HOST_CAPABILITY_MISSING]: "当前客户端缺少登录所需能力，请检查浏览器支持情况",
+  [ErrorCodes.HOST_PERMISSION_REQUIRED]: "缺少环境访问权限，请按提示授权后重试",
+  [ErrorCodes.HOST_PERMISSION_DENIED]: "环境访问权限未授予，请重新授权",
+  [ErrorCodes.HOST_PERMISSION_REVOKED]: "环境访问权限已撤回，请重新授权",
+  [ErrorCodes.WILDCARD_ENVIRONMENT]: "通配环境需要确认具体访问地址，不能自动授权",
+  [ErrorCodes.ORIGIN_UNSUPPORTED]: "环境地址或协议不受支持，请检查配置",
   [ErrorCodes.UNKNOWN]: "登录未完成，请稍后重试；如仍失败，请复制详情并联系技术支持",
 };
 

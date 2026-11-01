@@ -7,7 +7,7 @@ import {
   createBackgroundMessageListener,
 } from './shared/message-router';
 import { allTools } from './shared/tool-definitions';
-import { ErrorCodes, buildErrorDetail, formatLoginError } from './tools/account-switch/utils/error-codes';
+import { ErrorCodes, buildErrorDetail, errorCodeOf, formatLoginError } from './tools/account-switch/utils/error-codes';
 import type { AccountSwitchConfig } from './tools/account-switch/types';
 import {
   hasWildcardHostname,
@@ -36,8 +36,20 @@ export default defineBackground({
       }
     });
 
-    // 初始化默认配置：任一步失败只记日志，不阻塞启动。
-    void initToolDefaults();
+    // 默认配置就绪后先回滚中断导入，再迁移旧明文；恢复失败只记录结构化错误。
+    void initToolDefaults()
+      .then(async () => {
+        const { recoverSecurityState } = await import('./shared/security/startup');
+        await recoverSecurityState();
+      })
+      .catch((error: unknown) => {
+        void authLog.error('保险库启动恢复未完成', {
+          extra: {
+            action: 'VAULT_STARTUP_RECOVERY',
+            errorCode: errorCodeOf(error),
+          },
+        });
+      });
 
     // 注册右键菜单
     void registerContextMenus();
@@ -260,12 +272,11 @@ async function handleQuickLoginFromSelection(
     return;
   }
 
-  // 环境匹配与密码回退收口至 Account View Model(resolveEnvironment / resolvePassword)
-  const { resolveEnvironment, resolvePassword } = await import(
+  // 环境匹配只用于公开跳转配置；密码由登录 handler 统一在 Background 解析。
+  const { resolveEnvironment } = await import(
     './tools/account-switch/account-view'
   );
   let matchedDebugRedirect: string | undefined;
-  let matchedDefaultPassword: string | undefined;
   if (asConfig?.domains) {
     try {
       const checkOrigin = new URL(parsed.url).origin;
@@ -273,9 +284,6 @@ async function handleQuickLoginFromSelection(
       if (resolved) {
         if (resolved.env.debugRedirect && resolved.env.debugRedirectEnabled) {
           matchedDebugRedirect = resolved.env.debugRedirect;
-        }
-        if (resolved.env.defaultPassword) {
-          matchedDefaultPassword = resolved.env.defaultPassword;
         }
       }
     } catch {
@@ -287,22 +295,12 @@ async function handleQuickLoginFromSelection(
   showPageToast(tabId, '正在登录...', 'info', 0);
 
   // 当前页面命中环境时原地切换；显式 URL 和默认环境仍在新标签页打开。
-  // 密码优先级与面板路径一致（resolvePassword）：文本输入 > 环境默认密码 > 全局默认密码
-  const password = resolvePassword({
-    input: parsed.password,
-    envDefault: matchedDefaultPassword,
-    globalDefault: asConfig?.globalDefaultPassword,
-  });
-  if (!password) {
-    showPageToast(tabId, '未找到可用密码：请在文本中包含密码，或配置环境/全局默认密码', 'error', 5000);
-    return;
-  }
   const useCurrentTab = parsed.targetSource === 'current-page';
   const result = useCurrentTab
     ? await handleQuickLogin(
         parsed.url,
         parsed.username,
-        password,
+        parsed.password,
         parsed.hasUrl,
         { tab: await chrome.tabs.get(tabId) },
         matchedDebugRedirect,
@@ -310,7 +308,7 @@ async function handleQuickLoginFromSelection(
     : await handleQuickLoginInNewTab(
         parsed.url,
         parsed.username,
-        password,
+        parsed.password,
         parsed.hasUrl,
         matchedDebugRedirect,
         tabId,

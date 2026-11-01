@@ -624,8 +624,8 @@ describe("readSpecFromConfig — 已移除的内置登录环境", () => {
     const inline = {
       version: 2,
       template: "custom-login",
-      ops: [],
-      success: [],
+      ops: [{ op: "click", target: "#login" }],
+      success: [{ page: { type: "urlChanged" } }],
       auth: { mode: "page" },
     };
     const result = readSpecFromConfig({
@@ -668,7 +668,7 @@ describe("readSpecFromConfig — 策略库镜像（ADR-0019 修订）", () => {
       version: 2,
       template: "shared-login",
       ops: [{ op: "click", target: "#private" }],
-      success: [],
+      success: [{ page: { type: "urlChanged" } }],
       auth: { mode: "page" },
     };
     const result = readSpecFromConfig(

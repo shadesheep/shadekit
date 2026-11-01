@@ -350,6 +350,9 @@ function confirm() {
                   <span v-if="item.conflict" class="drawer-conflict-tag">
                     地址已占用{{ landMode === 'overwrite' ? '（勾选后覆盖）' : '（将跳过）' }}
                   </span>
+                  <span v-if="!item.support.supported" class="drawer-support-tag">
+                    当前客户端不支持：{{ item.support.issues.map((issue) => issue.message).join('；') }}
+                  </span>
                 </span>
               </label>
               <span class="drawer-env-url">{{ item.url }}</span>
@@ -674,6 +677,15 @@ function confirm() {
   background: rgba(245, 158, 11, 0.15);
   border-radius: 4px;
   padding: 1px 6px;
+}
+
+.drawer-support-tag {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--warning);
 }
 
 .drawer-env-url {

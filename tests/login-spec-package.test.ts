@@ -209,13 +209,10 @@ describe("validateConfigPackage — 导入", () => {
     expect(issues[0].message).toContain("dt-login-config/v1");
   });
 
-  it("specVersion 高于当前 → 拒绝并说明『先升级扩展』", () => {
+  it("specVersion 高于当前 → 外壳仍合法，由逐环境能力检查禁用", () => {
     const raw = validRaw() as Record<string, unknown>;
     raw.specVersion = 99;
-    const issues = validateConfigPackage(raw);
-    expect(issues).toHaveLength(1);
-    expect(issues[0].code).toBe("CONFIG_INVALID");
-    expect(issues[0].message).toContain("高于当前扩展");
+    expect(validateConfigPackage(raw)).toEqual([]);
   });
 
   it("导入含 script 的包 → CONFIG_INVALID 指出步骤", () => {

@@ -32,6 +32,42 @@ export function matchDomain(domain: string, origin: string): boolean {
   return regex.test(origin);
 }
 
+/**
+ * 归一化 origin，保留通配符 `*`。
+ *
+ * 不能用 new URL().origin：Chromium 会把 host 中的 `*` 编码为 `%2A`，
+ * 使 `https://*.example.com` 永远无法与具体子域比较/匹配。
+ */
+export function normalizedOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed.includes('*')) {
+    try {
+      return new URL(trimmed).origin;
+    } catch {
+      return '';
+    }
+  }
+  const match = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^/?#]*)/);
+  if (!match) return '';
+  const scheme = match[1].toLowerCase();
+  let host = match[2].toLowerCase();
+  const defaultPort = scheme === 'http' ? ':80' : scheme === 'https' ? ':443' : '';
+  if (defaultPort && host.endsWith(defaultPort)) {
+    host = host.slice(0, -defaultPort.length);
+  }
+  return `${scheme}://${host}`;
+}
+
+/** 实际 origin 是否命中期望 origin（支持 `*` 通配符子域）。 */
+export function originMatches(expected: string, actual: string): boolean {
+  const normalizedExpected = normalizedOrigin(expected);
+  const normalizedActual = normalizedOrigin(actual);
+  if (!normalizedExpected || !normalizedActual) return false;
+  if (normalizedExpected === normalizedActual) return true;
+  return normalizedExpected.includes('*') &&
+    matchDomain(normalizedExpected, normalizedActual);
+}
+
 /** 获取当前页面的 origin */
 export async function getCurrentOrigin(): Promise<string> {
   if (window.location.protocol === 'chrome-extension:') {

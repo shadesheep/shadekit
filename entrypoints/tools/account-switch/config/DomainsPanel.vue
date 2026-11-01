@@ -7,19 +7,18 @@ import { projectLegacyDefaultSpec } from '../spec/auto-login';
 import { prepareLoginFormLock, type PreparedLoginFormLock } from '../login-form-lock';
 import { defaultLoginSpec, type LoginSpec } from '../spec';
 import { readSpecFromConfig } from '../spec/migrate';
+import { inspectLoginSpecSupport, type SpecSupportReport } from '../spec/capabilities';
+import { requireSupportedLoginSpec, type SpecDocument } from '../spec/document';
 import {
   BUILTIN_GENERIC,
   listStrategyPresets,
   matchPresetKey,
-  presetTitleOf,
   slugifyKey,
   type StrategyPreset,
 } from '../spec/strategy-presets';
 import { validateLoginSpec } from '../spec/validate';
-import { normalizeAuthWriteTemplates } from '../spec/template';
 import {
   buildConfigPackage,
-  validateConfigPackage,
   type ConfigPackage,
 } from '../spec/package';
 import { strategyTitle, upsertStrategy } from '../spec/strategy-library';
@@ -31,12 +30,18 @@ import type {
 } from '../types';
 import { sendBgMessage } from '../../../shared/messages';
 import type { TrialSignalState } from '../spec/run';
-import { deriveEnvName, deriveEnvTag, normalizeEnvTag, type EnvTag } from '../account-env-view';
+import { deriveEnvName, deriveEnvTag, normalizeEnvTag, planImport, type EnvTag } from '../account-env-view';
+import {
+  environmentLoginSupport,
+  resolveStoredLoginDocument,
+  supportReason,
+} from '../account-view';
 import DtDrawer from '../../../shared/components/DtDrawer.vue';
 import DtButton from '../../../shared/components/DtButton.vue';
 import { useOverlayClose } from '../../../shared/use-overlay-close';
 import { showToast } from '../../../shared/use-toast';
 import { formatLoginError } from '../utils/error-codes';
+import { summarizeLoginSpecRisk } from '../spec/risk-summary';
 
 /**
  * 环境（域名）表单与配置包导入向导 — 从 Config.vue 拆出的子组件
@@ -77,6 +82,8 @@ export interface EnvSavePayload {
   message: string;
   /** 仅新建自动标准表单携带；基础 domains 始终保持自动 spec。 */
   lockCandidate?: PreparedLoginFormLock;
+  /** 用户显式清除的环境默认密码引用；未点名时保持已存储密码不变。 */
+  clearCredentialRefs?: string[];
 }
 
 const emit = defineEmits<{
@@ -107,9 +114,13 @@ const newDomain = ref({
   debugRedirect: '',
   debugRedirectEnabled: false,
   defaultPassword: '',
+  defaultCredentialRef: undefined as string | undefined,
+  secretVarRefs: {} as Record<string, string>,
+  privateSecretVarRefs: {} as Record<string, string>,
   cookieClearIncludeParent: false,
   strategyParams: {} as Record<string, string | number | boolean | undefined>,
   spec: defaultLoginSpec() as LoginSpec,
+  declaredSpecVersion: undefined as number | undefined,
   specMigrated: false,
   /** 读取链给出的不可用原因（旧内置登录 / 结构损坏），空串表示无 */
   specInvalid: '',
@@ -121,6 +132,15 @@ const newDomain = ref({
 const editingDomain = ref<string | null>(null);
 const cloningDomain = ref(false);
 const savingDomain = ref(false);
+/** 用户点了「清除已保存密码」后暂存旧引用，保存时显式提交删除。 */
+const domainDefaultClearRef = ref<string | undefined>(undefined);
+const willClearDomainDefaultPassword = computed(
+  () => Boolean(
+    domainDefaultClearRef.value
+      && !newDomain.value.defaultCredentialRef
+      && !newDomain.value.defaultPassword,
+  ),
+);
 
 // ============================================================
 // 关联账号（环境抽屉底部「关联账号」区块）
@@ -251,19 +271,25 @@ const loginMethodChoice = computed(() => {
   }
   return [
     ...strategyOptions.value,
-    { key, title: `${presetTitleOf(newDomain.value.spec, newDomain.value.name)}（环境私有）`, spec: newDomain.value.spec, builtin: false },
+    { key, title: `${strategyTitle(newDomain.value.spec, newDomain.value.name)}（环境私有）`, spec: newDomain.value.spec, builtin: false },
   ];
 });
 
 /** 声明是否包含 cookie 清理算子（决定是否展示「含父域」开关） */
-const hasClearCookies = computed(() =>
-  newDomain.value.spec.ops.some((op) => op.op === 'clear.cookies'),
-);
+const hasClearCookies = computed(() => {
+  const ops = Array.isArray(newDomain.value.spec.ops)
+    ? newDomain.value.spec.ops
+    : [];
+  return ops.some((op) => op && typeof op === 'object' && op.op === 'clear.cookies');
+});
 
 /** 可做环境级覆盖的变量：非 secret（敏感值不适合明文落进环境配置） */
-const overridableVars = computed(() =>
-  (newDomain.value.spec.vars ?? []).filter((v) => v.secret !== true),
-);
+const overridableVars = computed(() => {
+  const vars = Array.isArray(newDomain.value.spec.vars)
+    ? newDomain.value.spec.vars
+    : [];
+  return vars.filter((v) => v && typeof v === 'object' && v.secret !== true);
+});
 
 /**
  * 当前声明是否已偏离所绑定的库条目。
@@ -299,9 +325,12 @@ function setEnvVar(name: string, value: string): void {
 /** 声明被编辑：读取链的旧错误已不再描述当前表单，清掉提示 */
 function onSpecChange(spec: LoginSpec): void {
   newDomain.value.spec = spec;
+  domainSupport.value = null;
   specValidationError.value = '';
 }
 const specValidationError = ref('');
+/** 当前表单声明的能力报告；仅不支持时存在，供详情页展示具体原因。 */
+const domainSupport = ref<SpecSupportReport | null>(null);
 
 /**
  * 用户切换登录方式：套用所选预设的声明。
@@ -314,8 +343,10 @@ function onLoginMethodChange(): void {
   if (!preset) return;
   newDomain.value.strategyId = props.strategies?.[key] ? key : '';
   newDomain.value.spec = JSON.parse(JSON.stringify(preset.spec)) as LoginSpec;
+  newDomain.value.declaredSpecVersion = props.strategies?.[key]?.declaredSpecVersion;
   newDomain.value.specMigrated = false;
   newDomain.value.specInvalid = '';
+  domainSupport.value = null;
 }
 
 /**
@@ -329,7 +360,7 @@ function unbindStrategy(): void {
   newDomain.value.strategyId = '';
   if (newDomain.value.loginMethod !== BUILTIN_GENERIC) {
     newDomain.value.loginMethod = `private:${slugifyKey(
-      presetTitleOf(newDomain.value.spec, newDomain.value.name),
+      strategyTitle(newDomain.value.spec, newDomain.value.name),
     )}`;
   }
 }
@@ -347,7 +378,13 @@ function saveToLibrary(): void {
     return;
   }
   const title = strategyTitle(newDomain.value.spec, newDomain.value.name);
-  const upsert = upsertStrategy(props.strategies, newDomain.value.spec, title);
+  const upsert = upsertStrategy(
+    props.strategies,
+    newDomain.value.spec,
+    title,
+    Date.now(),
+    newDomain.value.declaredSpecVersion,
+  );
   // 先切到绑定态，再让父组件落盘；spec 保持不变（就是刚入库的那份）
   newDomain.value.strategyId = upsert.id;
   newDomain.value.loginMethod = upsert.id;
@@ -373,10 +410,12 @@ function resetDomainForm() {
   urlTouched.value = false;
   nameTouched.value = false;
   tagsTouched.value = false;
+  domainDefaultClearRef.value = undefined;
   boundAccountIds.value = new Set();
   initialBoundAccountIds.value = new Set();
   newAccountDrafts.value = [];
   specValidationError.value = '';
+  domainSupport.value = null;
   newDomain.value = {
     url: '',
     name: '',
@@ -385,9 +424,13 @@ function resetDomainForm() {
     debugRedirect: '',
     debugRedirectEnabled: false,
     defaultPassword: '',
+  defaultCredentialRef: undefined as string | undefined,
+  secretVarRefs: {} as Record<string, string>,
+  privateSecretVarRefs: {} as Record<string, string>,
     cookieClearIncludeParent: false,
     strategyParams: {},
     spec: defaultLoginSpec(),
+    declaredSpecVersion: undefined,
     specMigrated: false,
     specInvalid: '',
     /** 绑定的策略库条目 id（空 = 环境私有声明） */
@@ -409,6 +452,10 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
   newDomain.value.debugRedirect = d.debugRedirect || '';
   newDomain.value.debugRedirectEnabled = d.debugRedirectEnabled ?? false;
   newDomain.value.defaultPassword = d.defaultPassword || '';
+  newDomain.value.defaultCredentialRef = d.defaultCredentialRef;
+  domainDefaultClearRef.value = undefined;
+  newDomain.value.secretVarRefs = { ...(d.secretVarRefs ?? {}) };
+  newDomain.value.privateSecretVarRefs = { ...(d.strategyConfig?.secretVarRefs ?? {}) };
   newDomain.value.cookieClearIncludeParent = d.cookieClearIncludeParent === true;
   // 编辑与克隆都继承原账号关联；克隆通过独立新建提交，不会改动原绑定。
   const initialBound = new Set<string>();
@@ -430,55 +477,90 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
   const presets = listStrategyPresets(props.domains, props.strategies);
   // 策略库绑定优先（ADR-0019）：绑定存在且条目还在 → 下拉直接选中该条目
   const bound = d.strategyId && props.strategies?.[d.strategyId] ? d.strategyId : '';
+  newDomain.value.declaredSpecVersion =
+    d.strategyConfig?.declaredSpecVersion ??
+    (bound ? props.strategies?.[bound]?.declaredSpecVersion : undefined);
   newDomain.value.strategyId = bound;
-  if (storedSpec) {
-    newDomain.value.spec = storedSpec;
-    // 归属哪条登录方式：有绑定用绑定；否则显式自定义 key 原样保留；generic
-    // 但声明不是默认模板时，按内容归到对应动态预设（否则下拉会显示
-    // 「通用登录」而实际跑的是导入策略）
-    newDomain.value.loginMethod = bound
-      ? bound
-      : loginMethod !== BUILTIN_GENERIC
-        ? loginMethod
-        : matchPresetKey(storedSpec, d.name, presets);
+
+  // 能力不支持：保留原始文档（不迁移、不归一化），展示精确原因；
+  // 其余环境字段与关联账号仍可编辑保存，保存时原样写回声明。
+  const support = environmentLoginSupport(d, props.strategies);
+  const unsupportedDocument = support.supported
+    ? null
+    : resolveStoredLoginDocument(d, props.strategies);
+  if (unsupportedDocument) {
+    domainSupport.value = support;
+    newDomain.value.spec = unsupportedDocument.raw as LoginSpec;
+    newDomain.value.loginMethod = bound || loginMethod;
     newDomain.value.specMigrated = false;
-    newDomain.value.specInvalid = '';
-  } else if (bound) {
-    // 镜像态（ADR-0019 修订）：环境未持私有声明，把库条目读出来供表单显示；
-    // 用户不动它，保存时依然不落盘（继续镜像）。
-    const mirrorSpec = props.strategies?.[bound]?.spec;
-    newDomain.value.spec = mirrorSpec
-      ? (JSON.parse(JSON.stringify(mirrorSpec)) as LoginSpec)
-      : defaultLoginSpec();
-    newDomain.value.loginMethod = bound;
-    newDomain.value.specMigrated = false;
-    newDomain.value.specInvalid = mirrorSpec ? '' : '策略库条目缺失，请重新选择登录方式';
+    newDomain.value.specInvalid =
+      `当前客户端不支持该登录声明：${supportReason(support)}。` +
+      '原始声明会原样保留，升级客户端后自动恢复。';
   } else {
-    // 无内联声明（旧配方 / 扁平参数 / 已移除的内置登录 / 未配置）：
-    // 统一经读取链拿 spec，拿不到就落到默认模板并回到通用登录
+    domainSupport.value = null;
     const read = readSpecFromConfig(d, props.strategies);
-    newDomain.value.spec = read.spec ?? defaultLoginSpec();
-    newDomain.value.specMigrated = read.invalid ? false : read.migrated;
-    // 「尚未配置」是新建环境的正常状态，不必告警；只有存量声明读不出来
-    // （旧内置登录 / 版本过高 / 结构损坏）才把原因摆到表单上。
-    const hadStrategy =
-      !!d.strategyConfig ||
-      loginMethod !== BUILTIN_GENERIC ||
-      Object.keys(d.strategyParams ?? {}).length > 0;
-    newDomain.value.specInvalid = read.invalid && hadStrategy ? read.invalid : '';
-    if (read.invalid) newDomain.value.loginMethod = BUILTIN_GENERIC;
+    if (storedSpec && read.spec) {
+      newDomain.value.spec = read.spec;
+      // 归属哪条登录方式：有绑定用绑定；否则显式自定义 key 原样保留；generic
+      // 但声明不是默认模板时，按内容归到对应动态预设（否则下拉会显示
+      // 「通用登录」而实际跑的是导入策略）
+      newDomain.value.loginMethod = bound
+        ? bound
+        : loginMethod !== BUILTIN_GENERIC
+          ? loginMethod
+          : matchPresetKey(read.spec, d.name, presets);
+      newDomain.value.specMigrated = false;
+      newDomain.value.specInvalid = '';
+    } else if (bound && !storedSpec) {
+      // 镜像态（ADR-0019 修订）：环境未持私有声明，把库条目读出来供表单显示；
+      // 用户不动它，保存时依然不落盘（继续镜像）。
+      const mirrorSpec = props.strategies?.[bound]?.spec;
+      newDomain.value.spec = read.spec ?? defaultLoginSpec();
+      newDomain.value.loginMethod = bound;
+      newDomain.value.specMigrated = false;
+      newDomain.value.specInvalid = read.invalid ?? (mirrorSpec ? '' : '策略库条目缺失，请重新选择登录方式');
+    } else {
+      // 无内联声明（旧配方 / 扁平参数 / 已移除的内置登录 / 未配置）：
+      // 统一经读取链拿 spec，拿不到就落到默认模板并回到通用登录
+      newDomain.value.spec = read.spec ?? defaultLoginSpec();
+      newDomain.value.specMigrated = read.invalid ? false : read.migrated;
+      // 「尚未配置」是新建环境的正常状态，不必告警；只有存量声明读不出来
+      // （旧内置登录 / 版本过高 / 结构损坏）才把原因摆到表单上。
+      const hadStrategy =
+        !!d.strategyConfig ||
+        loginMethod !== BUILTIN_GENERIC ||
+        Object.keys(d.strategyParams ?? {}).length > 0;
+      newDomain.value.specInvalid = read.invalid && hadStrategy ? read.invalid : '';
+      if (read.invalid) newDomain.value.loginMethod = BUILTIN_GENERIC;
+    }
+    // 历史原版默认模板只在编辑器投影；原始 storage 不发生批量改写。
+    newDomain.value.spec = projectLegacyDefaultSpec(newDomain.value.spec);
   }
-  // 历史原版默认模板只在编辑器投影；原始 storage 不发生批量改写。
-  newDomain.value.spec = projectLegacyDefaultSpec(newDomain.value.spec);
   // 父域清理开关以声明为准（execution 只认 clear.cookies.includeParent）
-  newDomain.value.cookieClearIncludeParent = hasCookieIncludeParent(d);
+  newDomain.value.cookieClearIncludeParent = unsupportedDocument
+    ? d.cookieClearIncludeParent === true
+    : hasCookieIncludeParent(d);
+}
+
+/**
+ * 显式清除环境默认密码：记录旧引用供保存时提交，同时清空表单里的引用。
+ * 仅清空输入框不会被当成删除（未提及的引用保持现状）。
+ */
+function clearDomainDefaultPassword() {
+  const ref = newDomain.value.defaultCredentialRef;
+  if (!ref) return;
+  domainDefaultClearRef.value = ref;
+  newDomain.value.defaultCredentialRef = undefined;
+  newDomain.value.defaultPassword = '';
 }
 
 /** 声明里任一 `clear.cookies` 勾了含父域 → 表单开关为开 */
 function hasCookieIncludeParent(d: DomainConfig): boolean {
-  const ops = d.strategyConfig?.spec?.ops;
-  if (!ops) return false;
-  return ops.some((op) => op.op === 'clear.cookies' && op.includeParent === true);
+  const spec = readSpecFromConfig(d, props.strategies).spec;
+  if (!spec) return false;
+  return spec.ops.some(
+    (op) => op.op === 'clear.cookies' && op.includeParent === true,
+  );
 }
 
 /**
@@ -491,10 +573,13 @@ function hasCookieIncludeParent(d: DomainConfig): boolean {
  */
 function buildDomainEntry(): DomainConfig {
   const tags = [...newDomain.value.tags];
-  const spec = withCookieIncludeParent(
-    newDomain.value.spec,
-    newDomain.value.cookieClearIncludeParent,
-  );
+  // 不支持的原始声明原样保留：不做任何归一化/字段投影，避免改写未知结构。
+  const spec = domainSupport.value && !domainSupport.value.supported
+    ? newDomain.value.spec
+    : withCookieIncludeParent(
+        newDomain.value.spec,
+        newDomain.value.cookieClearIncludeParent,
+      );
   const vars = Object.fromEntries(
     Object.entries(newDomain.value.vars).filter(([, value]) => value !== ''),
   );
@@ -515,10 +600,24 @@ function buildDomainEntry(): DomainConfig {
     debugRedirect: newDomain.value.debugRedirect || undefined,
     debugRedirectEnabled: newDomain.value.debugRedirectEnabled || undefined,
     defaultPassword: newDomain.value.defaultPassword || undefined,
+    defaultCredentialRef: newDomain.value.defaultCredentialRef,
+    secretVarRefs: Object.keys(newDomain.value.secretVarRefs).length > 0
+      ? { ...newDomain.value.secretVarRefs }
+      : undefined,
     cookieClearIncludeParent: newDomain.value.cookieClearIncludeParent || undefined,
     strategyParams: {},
     // 镜像态不写 strategyConfig；脱镜 / 未绑定时才落盘
-    ...(boundEntry && !diverged ? {} : { strategyConfig: { spec } }),
+    ...(boundEntry && !diverged ? {} : {
+      strategyConfig: {
+        spec,
+        ...(newDomain.value.declaredSpecVersion === undefined ? {} : {
+          declaredSpecVersion: newDomain.value.declaredSpecVersion,
+        }),
+        ...(Object.keys(newDomain.value.privateSecretVarRefs).length > 0
+          ? { secretVarRefs: { ...newDomain.value.privateSecretVarRefs } }
+          : {}),
+      },
+    }),
     // 绑定只在策略库条目仍存在时落盘：库里已被别处删掉时不留下悬空 id
     ...(boundEntry ? { strategyId: newDomain.value.strategyId } : {}),
     ...(Object.keys(vars).length > 0 ? { vars } : {}),
@@ -556,6 +655,12 @@ const formOrigin = computed(() => {
  * 执行只认 `strategyConfig.spec`，导入的具名策略同样要过校验。
  */
 function validateRecipeForSave(): boolean {
+  // 不支持的能力缺口不是结构错误：原始文档原样保留，允许保存环境名称、
+  // 标签、关联账号等其它字段。
+  if (domainSupport.value && !domainSupport.value.supported) {
+    specValidationError.value = '';
+    return true;
+  }
   const issues = validateLoginSpec(newDomain.value.spec);
   specValidationError.value = issues[0]
     ? `登录声明校验失败：${issues[0].message}`
@@ -599,7 +704,7 @@ async function addDomain() {
     try {
       lockCandidate = (await prepareLoginFormLock({
         envKey,
-        spec: entry.strategyConfig?.spec ?? newDomain.value.spec,
+        spec: newDomain.value.spec,
       })) ?? undefined;
     } catch {
       // 识别只是保存后的优化；任何准备异常都不阻断基础环境与账号保存。
@@ -677,7 +782,7 @@ function buildSavePayload(args: {
       id: 'acc_' + Date.now() + '_' + i,
       name: d.username.trim(),
       username: d.username.trim(),
-      password: d.password,
+      ...(d.password ? { password: d.password } : {}),
       roles: [],
       domains: [envKey],
     }));
@@ -708,6 +813,11 @@ function buildSavePayload(args: {
   if (boundAccountIdsList.length > 0) parts.push(`绑定 ${boundAccountIdsList.length} 个账号`);
   if (unboundAccountIdsList.length > 0) parts.push(`解绑 ${unboundAccountIdsList.length} 个账号`);
 
+  const clearCredentialRefs = willClearDomainDefaultPassword.value
+    && domainDefaultClearRef.value
+    ? [domainDefaultClearRef.value]
+    : [];
+
   return {
     domains,
     addedAccounts,
@@ -716,6 +826,7 @@ function buildSavePayload(args: {
     envKey,
     previousEnvKey,
     message: parts.join('，'),
+    clearCredentialRefs,
   };
 }
 
@@ -787,10 +898,15 @@ function toast(message: string, type: 'success' | 'error' = 'success') {
 }
 
 /** 需要随包分发的变量 = spec.vars 里非 secret 的全部名字（接收方都可填写） */
-function availableRequiredVars(spec: LoginSpec): string[] {
-  return (spec.vars ?? [])
-    .filter((v) => v.secret !== true)
-    .map((v) => v.name);
+function availableRequiredVars(spec: SpecDocument): string[] {
+  if (!Array.isArray(spec.vars)) return [];
+  return spec.vars.flatMap((value) => {
+    if (typeof value !== 'object' || value === null) return [];
+    const variable = value as Record<string, unknown>;
+    return variable.secret !== true && typeof variable.name === 'string'
+      ? [variable.name]
+      : [];
+  });
 }
 
 function exportConfigPackage(url: string) {
@@ -804,11 +920,20 @@ function exportConfigPackage(url: string) {
     toast(`环境「${d.name}」没有可导出的登录声明`, 'error');
     return;
   }
-  // 导出前结构校验（R1–R7），失败的声明不让分发
-  const specIssues = validateLoginSpec(spec);
-  if (specIssues.length > 0) {
-    toast(`环境「${d.name}」的登录声明存在校验错误，无法导出登录策略包`, 'error');
-    return;
+  // 导出前仅深度校验当前客户端支持的声明；未来声明允许原样导出。
+  const declaredSpecVersion = d.strategyConfig?.spec
+    ? d.strategyConfig.declaredSpecVersion
+    : d.strategyId
+      ? props.strategies?.[d.strategyId]?.declaredSpecVersion
+      : undefined;
+  if (inspectLoginSpecSupport(spec, declaredSpecVersion).supported) {
+    const specIssues = validateLoginSpec(
+      requireSupportedLoginSpec(spec, declaredSpecVersion),
+    );
+    if (specIssues.length > 0) {
+      toast(`环境「${d.name}」的登录声明存在校验错误，无法导出登录策略包`, 'error');
+      return;
+    }
   }
   const result = buildConfigPackage(d, url, availableRequiredVars(spec), props.strategies);
   if (result.issues.length > 0 || !result.package) {
@@ -843,7 +968,11 @@ async function importConfigPackage() {
     toast('登录策略包不是合法 JSON', 'error');
     return;
   }
-  const issues = validateConfigPackage(parsed);
+  const preview = planImport(parsed, {
+    accounts: [],
+    domains: props.domains,
+  });
+  const issues = preview.issues;
   if (issues.length > 0) {
     const first = issues[0];
     toast(
@@ -855,7 +984,8 @@ async function importConfigPackage() {
   }
   const pkg = parsed as ConfigPackage;
   // 初始化导入向导：每个环境一条计划，非冲突默认勾选，冲突默认不勾选
-  importPlan.value = pkg.environments.map((env) => {
+  importPlan.value = pkg.environments.map((env, envIndex) => {
+    const planned = preview.envs[envIndex];
     const rawUrl = env.url.trim();
     // 字面 `{origin}` 占位：skill 产出的策略把真实服务地址留空（无法提前知道
     // 用户环境），提升为「环境地址」必填，落地时用它作环境 key——
@@ -868,7 +998,9 @@ async function importConfigPackage() {
     return {
       url,
       name: env.name,
-      spec: env.spec,
+      spec: planned?.domain.strategyConfig?.spec ?? env.spec,
+      declaredSpecVersion: pkg.specVersion,
+      support: planned?.support ?? inspectLoginSpecSupport(env.spec, pkg.specVersion),
       conflict: taken,
       checked: !taken,
       requiredVars: env.requiredVars,
@@ -885,7 +1017,9 @@ async function importConfigPackage() {
 interface ImportPlanItem {
   url: string;
   name: string;
-  spec: LoginSpec;
+  spec: SpecDocument;
+  declaredSpecVersion?: number;
+  support: SpecSupportReport;
   conflict: boolean;
   checked: boolean;
   requiredVars: ConfigPackage['environments'][number]['requiredVars'];
@@ -901,6 +1035,16 @@ const showImportDialog = ref(false);
 // 遮罩空白处点击关闭：mousedown+click 同源才触发，见 useOverlayClose 说明
 const importOverlay = useOverlayClose(() => { showImportDialog.value = false; });
 const importPlan = ref<ImportPlanItem[]>([]);
+const importRiskSummaries = computed(() => importPlan.value.map((item) => ({
+  name: item.name,
+  support: item.support,
+  summary: item.support.supported
+    ? summarizeLoginSpecRisk(
+        requireSupportedLoginSpec(item.spec, item.declaredSpecVersion),
+        item.url || undefined,
+      )
+    : null,
+})));
 /**
  * 导入时是否同时创建包内环境（ADR-0019）。
  * 默认 false：策略先入库、不碰环境列表；勾选后每个环境绑定到入库的策略。
@@ -921,15 +1065,18 @@ function confirmImport() {
   let added = 0;
   let addedStrategies = 0;
   for (const item of importPlan.value) {
-    // 导入容错：把「cookie value 为字面 JSON 对象」这类手写包的结构花括号自动
-    // 转义（{{/}}），再落地，保证存盘的是合法模板（escapeLiteralBraces）
-    const normalizedSpec = normalizeAuthWriteTemplates(item.spec) as LoginSpec;
     const title = strategyTitle(
-      normalizedSpec,
+      item.spec,
       item.name || DEFAULT_LOGIN_METHOD,
     );
     // 策略入库：同内容幂等复用（重复导入同一份包不会堆条目）
-    const upsert = upsertStrategy(nextStrategies, normalizedSpec, title);
+    const upsert = upsertStrategy(
+      nextStrategies,
+      item.spec,
+      title,
+      Date.now(),
+      item.declaredSpecVersion,
+    );
     if (upsert.created) addedStrategies += 1;
     Object.assign(nextStrategies, upsert.strategies);
     // 冲突环境默认不勾选；勾选即覆盖（向导里已标注）
@@ -1107,6 +1254,7 @@ async function runTrialLogin(): Promise<void> {
         <p v-else-if="strategyOptions.length > 2" class="field-hint">策略库条目会出现在这里，选中即关联并套用其登录声明（保存后可再编辑环境私有副本）。</p>
       </div>
       <LoginFormLocator
+        v-if="!domainSupport || domainSupport.supported"
         class="form-row"
         ref="loginFormLocatorRef"
         :spec="newDomain.spec"
@@ -1230,8 +1378,22 @@ async function runTrialLogin(): Promise<void> {
       -->
 
       <div class="form-row">
-        <label for="domain-default-password">默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span></label>
-        <input id="domain-default-password" class="dt-input" v-model="newDomain.defaultPassword" type="password" placeholder="留空表示不使用默认密码" />
+        <label for="domain-default-password">
+          默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span>
+          <span v-if="newDomain.defaultCredentialRef" class="stored-secret-badge">已设置</span>
+        </label>
+        <input
+          id="domain-default-password"
+          class="dt-input"
+          v-model="newDomain.defaultPassword"
+          type="password"
+          :placeholder="newDomain.defaultCredentialRef ? '已保存密码；留空保持不变' : '留空表示不使用默认密码'"
+        />
+        <p v-if="newDomain.defaultCredentialRef" class="field-hint">
+          已保存的环境默认密码不会显示明文；输入新密码可替换，
+          <button type="button" class="secret-clear-link" @click="clearDomainDefaultPassword">清除已保存密码</button>
+        </p>
+        <p v-else-if="willClearDomainDefaultPassword" class="field-hint field-hint-warning">保存后将清除环境默认密码。</p>
         <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
       </div>
 
@@ -1265,7 +1427,7 @@ async function runTrialLogin(): Promise<void> {
             <label id="domain-spec-label">
               登录声明
               <button
-                v-if="canSaveToLibrary"
+                v-if="canSaveToLibrary && (!domainSupport || domainSupport.supported)"
                 type="button"
                 class="strategy-save-link"
                 :title="specDiverged ? '把修改后的声明另存为一条新策略' : '把这份声明存入策略库，供其它环境复用（不产生环境记录）'"
@@ -1273,7 +1435,16 @@ async function runTrialLogin(): Promise<void> {
               >{{ specDiverged ? '另存为新策略' : '存入策略库' }}</button>
             </label>
             <p v-if="specValidationError" class="field-error" role="alert">{{ specValidationError }}</p>
+            <p
+              v-if="domainSupport && !domainSupport.supported"
+              class="risk-note spec-unsupported-note"
+              role="alert"
+            >
+              <span class="i-lucide-shield-alert w-3.5 h-3.5" />
+              原始声明来自更新版本的客户端，当前版本不会执行或改写它。
+            </p>
             <SpecEditor
+              v-else
               :spec="newDomain.spec"
               :origin="formOrigin"
               :migrated="newDomain.specMigrated"
@@ -1335,6 +1506,24 @@ async function runTrialLogin(): Promise<void> {
           <div class="i-lucide-download w-4 h-4 mr-1" />导入登录策略包
         </h3>
         <p class="import-dialog-hint">策略一律存入策略库；需要时再勾选「同时创建环境」把包内环境一并落地。</p>
+
+        <div v-for="entry in importRiskSummaries" :key="entry.name" class="import-risk-summary">
+          <strong>{{ entry.name }}：执行能力摘要</strong>
+          <template v-if="entry.summary">
+            <p>Origins：{{ entry.summary.origins.join('、') || '仅动态地址' }}</p>
+            <p v-if="entry.summary.crossOriginGotos.length > 0">跨 origin goto：{{ entry.summary.crossOriginGotos.join('、') }}</p>
+            <p>
+              Cookie 清理 {{ entry.summary.cookieClearCount }} 处<template v-if="entry.summary.includesParentCookieClear">（含父域）</template>；
+              Storage 清理 {{ entry.summary.storageClearCount }} 处；
+              会话读取 {{ entry.summary.sessionCaptureCount }} 处 / 写入 {{ entry.summary.sessionWriteCount }} 处。
+            </p>
+            <p>所需变量：{{ entry.summary.requiredVariables.join('、') || '无' }}</p>
+          </template>
+          <p v-else>
+            当前客户端不支持：{{ entry.support.issues.map((issue) => issue.message).join('；') }}
+          </p>
+          <small>摘要只列出声明中的可见能力，不表示该策略安全或可信。</small>
+        </div>
 
         <!-- 导入目标（ADR-0019）：默认只入库，不产生环境记录 -->
         <div class="import-dest">
@@ -1405,6 +1594,13 @@ async function runTrialLogin(): Promise<void> {
 <style scoped>
 @import '../../../shared/component-styles.scss';
 @import './config-panel-shared.scss';
+
+.import-risk-summary { margin: 10px 0; padding: 10px 12px; border: 1px solid #fcd34d; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.55; }
+.import-risk-summary strong { display: block; margin-bottom: 4px; }
+.import-risk-summary p { margin: 3px 0; overflow-wrap: anywhere; }
+.import-risk-summary small { display: block; margin-top: 5px; color: #b45309; }
+[data-dt-dark] .import-risk-summary { background: #352711; border-color: #713f12; color: #fcd34d; }
+[data-dt-dark] .import-risk-summary small { color: #fbbf24; }
 
 /* 抽屉表单：统一字段节奏与控件高度，嵌套编辑器也沿用同一尺寸。 */
 .domain-form > .form-row {
@@ -2019,4 +2215,33 @@ async function runTrialLogin(): Promise<void> {
   gap: 4px;
   opacity: .8;
 }
+.stored-secret-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, .1);
+}
+[data-dt-dark] .stored-secret-badge {
+  color: #93c5fd;
+  background: #1e3a5f;
+}
+.secret-clear-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #dc2626;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.secret-clear-link:hover { color: #b91c1c; }
+[data-dt-dark] .secret-clear-link { color: #f87171; }
+.field-hint-warning { color: #dc2626; }
+[data-dt-dark] .field-hint-warning { color: #f87171; }
 </style>

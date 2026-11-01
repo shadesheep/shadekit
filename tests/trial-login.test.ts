@@ -42,6 +42,7 @@ vi.mock("../entrypoints/tools/account-switch/strategies/generic-settle", async (
 });
 
 const chromeStub = {
+  permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
   cookies: { getAll: vi.fn(async () => []), set: vi.fn(async () => {}) },
   scripting: { executeScript: vi.fn(async () => []) },
   tabs: { get: vi.fn(async () => ({ url: "https://example.com/dashboard" })) },
@@ -380,5 +381,56 @@ describe("试登录 — 后台 handler（S3）", () => {
     // 不触达标签页：handler 不调用 tabs.query / tabs.create / tabs.get / tabs.update
     expect(chromeStub.tabs.get).not.toHaveBeenCalled();
     // sessionStub 未覆盖 tabs.query/create/update → 断言没有调用也成立
+  });
+
+  it("能力不支持时在发送任何凭据前拒绝，且不触达标签页权限", async () => {
+    stubFetch(() => jsonResponse({ ok: true }));
+    const { handleTrialLogin } =
+      await import("../entrypoints/tools/account-switch/background-handler");
+    const futureSpec = {
+      ...spec([
+        { op: "future.op" } as unknown as SpecOp,
+        { op: "http.execute", url: "{origin}/login", method: "POST", as: "resp" },
+      ]),
+    };
+
+    const res = await handleTrialLogin({
+      spec: futureSpec,
+      origin: "https://example.com",
+      username: "alice",
+      password: "ONE-TIME-91",
+    });
+
+    expect(res).toMatchObject({
+      ok: false,
+      errorCode: ErrorCodes.OP_UNSUPPORTED,
+      requestSent: false,
+      sessionWritten: false,
+    });
+    expect(fetchHistory).toEqual([]);
+    expect(chromeStub.permissions.request).not.toHaveBeenCalled();
+    expect(chromeStub.tabs.get).not.toHaveBeenCalled();
+  });
+
+  it("runTrialLogin / runSpec 对直接调用者同样拒绝不支持的能力", async () => {
+    stubFetch(() => jsonResponse({ ok: true }));
+    const futureSpec = spec([
+      { op: "future.op" } as unknown as SpecOp,
+      { op: "http.execute", url: "{origin}/login", as: "resp" },
+    ]);
+
+    const trial = await runTrialLogin(futureSpec, buildCtx());
+    expect(trial).toMatchObject({
+      ok: false,
+      errorCode: ErrorCodes.OP_UNSUPPORTED,
+      requestSent: false,
+      sessionWritten: false,
+    });
+    expect(trial.bindings).toEqual({});
+
+    await expect(runSpec(futureSpec, buildCtx())).rejects.toMatchObject({
+      code: ErrorCodes.OP_UNSUPPORTED,
+    });
+    expect(fetchHistory).toEqual([]);
   });
 });

@@ -1,23 +1,26 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { getConfig, updateConfig } from "../../shared/tool-config";
 import { showToast } from "../../shared/use-toast";
 import {
   collectRoleFilterOptions,
   collectRoles,
+  environmentLoginSupport,
   ROLE_NAMES,
   roleColorStyle,
+  supportReason,
 } from "./account-view";
 import { accountInitial } from "./account-palette";
 import { buildEnvGroups, normalizeEnvTag, removeEnvironment, tagColor } from "./account-env-view";
 import { sendBgMessage } from "../../shared/messages";
 import { validateLoginSpec } from "./spec/validate";
 import { readSpecFromConfig } from "./spec/migrate";
+import type { SpecSupportReport } from "./spec/capabilities";
 import {
   finalizeNewEnvironmentSave,
   newEnvironmentSaveMessage,
 } from "./login-form-lock";
 import { showLoginRecoveryToast } from "./login-recovery-toast";
+import { guardConfigSavePatch } from "./config-save-guard";
 import { resolveRequestedEnv } from "../../options/options-route";
 import { LOGIN_BUSY_ERROR } from "./utils/error-codes";
 import type {
@@ -46,7 +49,6 @@ import DtEmptyState from "../../shared/components/DtEmptyState.vue";
 const props = defineProps<{ editEnv?: string }>();
 const emit = defineEmits<{ editEnvConsumed: [] }>();
 
-const TOOL_ID = "account-switch";
 
 // 主视图（环境卡片）为默认视图；设置页承载环境指示器等次级配置
 const activeTab = ref<"main" | "settings">("main");
@@ -57,6 +59,8 @@ const config = ref<AccountSwitchConfig>({
 });
 const quickLoginDefaultDomain = ref("");
 const globalDefaultPassword = ref("");
+// 加载失败时表单停在空集合：必须阻断所有保存/编辑/导入入口，避免覆盖真实数据。
+const loadError = ref("");
 
 const formHighlight = ref(false);
 
@@ -92,10 +96,28 @@ const showCustomRole = ref(false);
 const showAccountPassword = ref(false);
 const showGlobalPassword = ref(false);
 const accountFormError = ref("");
+// 显式清除与「留空保持不变」区分：只有点了清除按钮才删除已存储引用。
+const clearAccountPasswordOnSave = ref(false);
 
 watch(() => newAccount.value.username, () => {
   accountFormError.value = "";
 });
+
+watch(() => newAccount.value.password, (value) => {
+  if (value) clearAccountPasswordOnSave.value = false;
+});
+
+const editingAccountHasStoredPassword = computed(() => {
+  if (!editingAccount.value || clearAccountPasswordOnSave.value) return false;
+  return Boolean(
+    config.value.accounts.find((account) => account.id === editingAccount.value)
+      ?.credentialRef,
+  );
+});
+
+const hasGlobalDefaultPassword = computed(() =>
+  Boolean(config.value.globalDefaultCredentialRef),
+);
 
 // 预定义角色与角色色同源（account-view，ADR-0004 D6）
 // 新增账号表单的 chip 列表直接用 roleChipOptions（预设 + 已用自定义，
@@ -106,12 +128,13 @@ function cloneAccount(id: string) {
   if (!acc) return;
   editingAccount.value = null;
   showAccountPassword.value = false;
+  clearAccountPasswordOnSave.value = false;
   accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
     name: acc.name + " (副本)",
     username: acc.username,
-    password: acc.password,
+    password: acc.password ?? "",
     roles: [...acc.roles],
     domains: [...acc.domains],
   };
@@ -138,24 +161,44 @@ const domainOptions = computed(() => {
   }));
 });
 
-async function loadConfig() {
-  const data = await getConfig<AccountSwitchConfig>(TOOL_ID);
-  config.value = {
-    accounts: Array.isArray(data?.accounts) ? data.accounts : [],
-    domains:
-      data?.domains && typeof data.domains === "object" ? data.domains : {},
-    // 策略库（ADR-0019）：与账户/环境同住一个 key，备份与同步天然覆盖
-    strategies:
-      data?.strategies && typeof data.strategies === "object"
-        ? data.strategies
-        : {},
-    // 指示器配置入响应式：设置页与主视图卡头开关共写 envBadge
-    envBadge: data?.envBadge,
-  };
+async function loadConfig(): Promise<boolean> {
+  try {
+    const response = await sendBgMessage("VAULT_GET_CONFIG");
+    if (!response.success || !response.config) {
+      loadError.value = response.error || "配置读取失败";
+      return false;
+    }
+    const data = response.config;
+    config.value = {
+      ...(data ?? {}),
+      accounts: Array.isArray(data?.accounts) ? data.accounts : [],
+      domains:
+        data?.domains && typeof data.domains === "object" ? data.domains : {},
+      // 策略库（ADR-0019）：与账户/环境同住一个 key，备份与同步天然覆盖
+      strategies:
+        data?.strategies && typeof data.strategies === "object"
+          ? data.strategies
+          : {},
+      // 指示器配置入响应式：设置页与主视图卡头开关共写 envBadge
+      envBadge: data?.envBadge,
+    };
 
-  // tabOrder 存储字段保留（SwitcherPanel 仍读取），本页不再提供配置 UI
-  quickLoginDefaultDomain.value = data?.quickLoginDefaultDomain || "";
-  globalDefaultPassword.value = data?.globalDefaultPassword || "";
+    // tabOrder 存储字段保留（SwitcherPanel 仍读取），本页不再提供配置 UI
+    quickLoginDefaultDomain.value = data?.quickLoginDefaultDomain || "";
+    globalDefaultPassword.value = data?.globalDefaultPassword || "";
+    loadError.value = "";
+    return true;
+  } catch (error: unknown) {
+    loadError.value = error instanceof Error ? error.message : "配置读取失败";
+    return false;
+  }
+}
+
+async function retryLoad(): Promise<void> {
+  if (await loadConfig()) {
+    configReady.value = true;
+    void refresh();
+  }
 }
 
 /** 深拷贝当前账号列表（避免把响应式对象交给 storage / 后续内存修改污染已写数据） */
@@ -175,13 +218,30 @@ function accountsPatch(): Pick<AccountSwitchConfig, "accounts"> {
  */
 async function saveFields(
   patch: Partial<AccountSwitchConfig>,
+  clearCredentialRefs: string[] = [],
 ): Promise<boolean> {
+  const guardedPatch = guardConfigSavePatch(loadError.value, patch);
+  if (!guardedPatch) {
+    showToast("配置未成功加载，已阻止保存以免覆盖现有数据", "error");
+    return false;
+  }
   try {
-    // JSON 深拷贝：patch 中的值来自响应式状态，需先剥离 Proxy
-    return await updateConfig<AccountSwitchConfig>(
-      TOOL_ID,
-      JSON.parse(JSON.stringify(patch)),
-    );
+    const sanitizedPatch = JSON.parse(JSON.stringify(guardedPatch)) as Partial<AccountSwitchConfig>;
+    const clearRefs = clearCredentialRefs.filter(Boolean);
+    const response = await sendBgMessage("VAULT_SAVE_CONFIG", {
+      patch: sanitizedPatch,
+      ...(clearRefs.length > 0 ? { clearCredentialRefs: clearRefs } : {}),
+    });
+    if (!response.success || !response.config) {
+      showToast(response.error || "保存配置失败", "error");
+      return false;
+    }
+    config.value = {
+      ...config.value,
+      ...response.config,
+    };
+    globalDefaultPassword.value = "";
+    return true;
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "未知错误";
     console.error("[account-switch] 保存配置失败:", msg);
@@ -196,8 +256,9 @@ async function saveFields(
 async function saveWithFeedback(
   patch: Partial<AccountSwitchConfig>,
   successMessage: string,
+  clearCredentialRefs: string[] = [],
 ): Promise<void> {
-  if (await saveFields(patch)) {
+  if (await saveFields(patch, clearCredentialRefs)) {
     showToast(successMessage, "success");
   }
 }
@@ -217,6 +278,13 @@ async function onDomainsSave(
  * - accounts 追加 addedAccounts，并按 boundAccountIds/unboundAccountIds
  *   往已有账号的 domains 里追加/移除 envKey（编辑改名时同时按 previousEnvKey 清老 key）。
  */
+async function requestEnvironmentPermission(environmentId: string): Promise<void> {
+  const response = await sendBgMessage("REQUEST_ENVIRONMENT_PERMISSIONS", { environmentId });
+  if (!response?.success) {
+    showToast(response?.error || "环境权限未授予，登录前请重新授权", "error");
+  }
+}
+
 async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
   const { envKey, previousEnvKey } = payload;
   const keysToUnbind = new Set<string>(
@@ -241,21 +309,29 @@ async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
   nextAccounts.push(...payload.addedAccounts);
 
   const saveBase = () =>
-    saveFields({ domains: payload.domains, accounts: nextAccounts });
+    saveFields(
+      { domains: payload.domains, accounts: nextAccounts },
+      payload.clearCredentialRefs,
+    );
   if (previousEnvKey === null) {
     const result = await finalizeNewEnvironmentSave({
       candidate: payload.lockCandidate,
       saveBase,
-      reload: loadConfig,
+      reload: async () => {
+        await loadConfig();
+      },
     });
-    if (result.saved)
+    if (result.saved) {
       showToast(newEnvironmentSaveMessage(result.lockStatus), "success");
-    return;
+      await requestEnvironmentPermission(envKey);
+    }
+      return;
   }
 
   if (await saveBase()) {
     await loadConfig();
     showToast(payload.message, "success");
+    await requestEnvironmentPermission(envKey);
   }
 }
 
@@ -319,7 +395,7 @@ async function addAccount() {
     id: "acc_" + Date.now(),
     name: values.name,
     username: values.username,
-    password: newAccount.value.password,
+    ...(newAccount.value.password ? { password: newAccount.value.password } : {}),
     roles: [...newAccount.value.roles],
     domains: [...newAccount.value.domains],
   });
@@ -341,12 +417,13 @@ function editAccount(id: string) {
   if (!acc) return;
   editingAccount.value = id;
   showAccountPassword.value = false;
+  clearAccountPasswordOnSave.value = false;
   accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
     name: acc.name,
     username: acc.username,
-    password: acc.password,
+    password: acc.password ?? "",
     roles: [...acc.roles],
     domains: [...acc.domains],
   };
@@ -356,14 +433,24 @@ async function saveEditAccount() {
   const values = accountFormValues();
   if (!editingAccount.value || !values) return;
   const acc = config.value.accounts.find((a) => a.id === editingAccount.value);
+  const clearRefs: string[] = [];
   if (acc) {
     acc.name = values.name;
     acc.username = values.username;
-    acc.password = newAccount.value.password;
+    if (newAccount.value.password) {
+      acc.password = newAccount.value.password;
+    } else if (clearAccountPasswordOnSave.value && acc.credentialRef) {
+      // 只登记清除，保存成功前不改动响应式引用：失败时本地状态仍反映
+      // 真实存储，成功后由后台回包覆盖为无引用的新配置。
+      clearRefs.push(acc.credentialRef);
+    } else {
+      delete acc.password;
+    }
     acc.roles = [...newAccount.value.roles];
     acc.domains = [...newAccount.value.domains];
   }
   editingAccount.value = null;
+  clearAccountPasswordOnSave.value = false;
   const savedAccountName = values.name;
   newAccount.value = {
     name: "",
@@ -374,12 +461,17 @@ async function saveEditAccount() {
   };
   customRoleInput.value = "";
   showAccountForm.value = false;
-  await saveWithFeedback(accountsPatch(), `账号「${savedAccountName}」已保存`);
+  await saveWithFeedback(
+    accountsPatch(),
+    `账号「${savedAccountName}」已保存`,
+    clearRefs,
+  );
 }
 
 function cancelEditAccount() {
   editingAccount.value = null;
   showAccountPassword.value = false;
+  clearAccountPasswordOnSave.value = false;
   newAccount.value = {
     name: "",
     username: "",
@@ -409,6 +501,18 @@ async function deleteAccount(id: string) {
 // 渲染数据来源只有 buildEnvGroups 投影；UI 不自行遍历 config.domains。
 // ============================================================
 const envGroups = computed(() => buildEnvGroups(config.value));
+// 每次配置/策略变化都重新从原始声明派生；不落盘 support 标志。
+const envSupports = computed(() =>
+  Object.fromEntries(
+    Object.entries(config.value.domains ?? {}).map(([key, env]) => [
+      key,
+      environmentLoginSupport(env, config.value.strategies),
+    ]),
+  ) as Record<string, SpecSupportReport>,
+);
+function envSupportOf(key: string): SpecSupportReport {
+  return envSupports.value[key] ?? { supported: true, issues: [] };
+}
 const envCount = computed(() => envGroups.value.groups.length);
 const accountCount = computed(() => config.value.accounts.length);
 // 初次进入（0 环境 0 账号）：只显示空态引导卡，不渲染空的轨道+表格骨架
@@ -799,19 +903,20 @@ function verifyStateOf(envKey: string, accId: string): VerifyState | undefined {
   return verifyStates.value[verifyKey(envKey, accId)];
 }
 
-/** 行内验证密码回退：账号密码 > 环境默认密码 > 全局默认密码（与快捷登录同源） */
-function resolveRowPassword(env: DomainConfig, acc: Account): string {
-  return (
-    acc.password || env.defaultPassword || globalDefaultPassword.value || ""
+/** 行内验证只判断密码来源是否存在；实际秘密由 Background 按 ID 解析。 */
+function hasRowPassword(env: DomainConfig, acc: Account): boolean {
+  return Boolean(
+    acc.credentialRef || acc.password || env.defaultCredentialRef || env.defaultPassword ||
+    config.value.globalDefaultCredentialRef || globalDefaultPassword.value
   );
 }
 
 function accountPasswordState(acc: Account): { label: string; missing: boolean } {
-  if (acc.password) return { label: "已配置", missing: false };
-  if (accEnvList(acc).some(({ env }) => env.defaultPassword)) {
+  if (acc.credentialRef || acc.password) return { label: "已配置", missing: false };
+  if (accEnvList(acc).some(({ env }) => env.defaultCredentialRef || env.defaultPassword)) {
     return { label: "环境默认", missing: false };
   }
-  if (globalDefaultPassword.value) {
+  if (config.value.globalDefaultCredentialRef || globalDefaultPassword.value) {
     return { label: "全局默认", missing: false };
   }
   return { label: "未配置", missing: true };
@@ -820,6 +925,15 @@ function accountPasswordState(acc: Account): { label: string; missing: boolean }
 async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   const k = verifyKey(envKey, acc.id);
   if (verifyStates.value[k]?.status === "running") return;
+  // 能力缺口先于结构校验给出精确原因（版本/算子/算法）。
+  const support = environmentLoginSupport(env, config.value.strategies);
+  if (!support.supported) {
+    verifyStates.value[k] = {
+      status: "fail",
+      message: "当前客户端不支持该环境的登录声明：" + supportReason(support),
+    };
+    return;
+  }
   // 与 DomainsPanel / 登录 prelude 同一条读取链：私有声明 > 库镜像 > 旧配方迁移，
   // 保证「这里能验证的」就是「实际会执行的」。
   const { spec } = readSpecFromConfig(env, config.value.strategies);
@@ -839,8 +953,7 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
     };
     return;
   }
-  const password = resolveRowPassword(env, acc);
-  if (!password) {
+  if (!hasRowPassword(env, acc)) {
     verifyStates.value[k] = {
       status: "fail",
       message: "未配置密码：请填写账号密码，或设置环境/全局默认密码",
@@ -849,12 +962,9 @@ async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
   }
   verifyStates.value[k] = { status: "running", message: "" };
   try {
-    const res = await sendBgMessage("TRIAL_LOGIN", {
-      spec,
-      origin: envKey,
-      username: acc.username,
-      password,
-      // writeSession 缺省 false：只发请求验证，不写会话
+    const res = await sendBgMessage("TRIAL_SAVED_ACCOUNT", {
+      accountId: acc.id,
+      environmentId: envKey,
     });
     verifyStates.value[k] = res.ok
       ? { status: "ok", message: res.sessionWritten ? "当前已是该账号" : "账号密码可用" }
@@ -874,6 +984,11 @@ const envCheckStates = ref<Record<string, { ok: boolean; message: string }>>(
 
 function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
   const problems: string[] = [];
+  // 能力缺口：直接给出精确原因，避免与结构校验问题混淆。
+  const support = environmentLoginSupport(env, config.value.strategies);
+  if (!support.supported) {
+    problems.push("当前客户端不支持该环境的登录声明：" + supportReason(support));
+  }
   // spec 校验（有登录声明时；无声明按通用登录默认三步执行，不算问题）
   // 镜像环境不持私有声明，回落读库条目（ADR-0019 修订）
   const spec =
@@ -881,7 +996,7 @@ function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
     (env.strategyId
       ? config.value.strategies?.[env.strategyId]?.spec
       : undefined);
-  if (spec) {
+  if (spec && support.supported) {
     for (const issue of validateLoginSpec(spec)) {
       const where =
         issue.opIndex !== undefined ? ` 第 ${issue.opIndex + 1} 步` : "";
@@ -893,7 +1008,7 @@ function verifyEnv(envKey: string, env: DomainConfig, accounts: Account[]) {
   // 必填项：用户名 / 密码齐全性（密码含环境与全局默认回退）
   for (const acc of accounts) {
     if (!acc.username) problems.push(`账号「${acc.name}」缺用户名`);
-    if (!resolveRowPassword(env, acc)) {
+    if (!hasRowPassword(env, acc)) {
       problems.push(`账号「${acc.name}」缺密码`);
     }
   }
@@ -918,8 +1033,8 @@ async function loginAccount(envKey: string, acc: Account) {
   showToast("正在登录 " + acc.name + "…", "info");
   try {
     const response = await sendBgMessage("SWITCH_ACCOUNT", {
-      account: acc,
-      domain: envKey,
+      accountId: acc.id,
+      environmentId: envKey,
     });
     if (response?.success) {
       showToast("已切换至 " + acc.name, "success");
@@ -957,9 +1072,10 @@ async function loginAccount(envKey: string, acc: Account) {
 }
 
 onMounted(async () => {
-  await loadConfig();
-  configReady.value = true;
-  void refresh();
+  if (await loadConfig()) {
+    configReady.value = true;
+    void refresh();
+  }
   // 「⋯」菜单：点页面任意处关闭（⋯ 按钮自身 @click.stop 除外）
   document.addEventListener("click", handleDocumentClick);
 });
@@ -983,7 +1099,16 @@ function saveQuickLoginDefaultDomain() {
   );
 }
 
+function clearGlobalDefaultPassword() {
+  const ref = config.value.globalDefaultCredentialRef;
+  if (!ref) return;
+  globalDefaultPassword.value = "";
+  void saveWithFeedback({}, "已清除全局默认密码", [ref]);
+}
+
 function saveGlobalDefaultPassword() {
+  // 留空本身不写数据；只有显式清除按钮才删除已存储的默认密码。
+  if (!globalDefaultPassword.value) return;
   void saveWithFeedback(
     { globalDefaultPassword: globalDefaultPassword.value },
     "设置已保存",
@@ -993,6 +1118,23 @@ function saveGlobalDefaultPassword() {
 
 <template>
   <div class="config-panel">
+    <!-- 加载失败：表单停在空集合，任何保存都会覆盖真实数据 → 阻断全部编辑入口 -->
+    <div v-if="loadError" class="config-load-error" role="alert">
+      <div class="i-lucide-shield-alert w-5 h-5 config-load-error-icon" />
+      <div class="config-load-error-body">
+        <strong>无法读取账号配置，已禁用编辑、保存与导入</strong>
+        <p class="config-load-error-detail">{{ loadError }}</p>
+        <p>
+          当前保险库可能来自旧主密码或未知格式。ShadeKit 不会自动转换、改写或清空它，
+          请先恢复原保险库或导入备份，再刷新本页。
+        </p>
+        <DtButton size="sm" variant="primary" @click="retryLoad">
+          <div class="i-lucide-refresh-cw w-3.5 h-3.5 mr-1" />重试
+        </DtButton>
+      </div>
+    </div>
+
+    <template v-else>
     <!-- Pill tabs -->
     <div class="tabs">
       <button :class="['tab-btn', { active: activeTab === 'main' }]" @click="activeTab = 'main'">
@@ -1047,14 +1189,22 @@ function saveGlobalDefaultPassword() {
             </p>
           </div>
           <div class="form-row">
-            <label for="account-password">密码 <span class="optional">（选填）</span></label>
+            <label for="account-password">
+              密码 <span class="optional">（选填）</span>
+              <span v-if="editingAccountHasStoredPassword" class="stored-secret-badge">已设置</span>
+            </label>
             <div class="password-input-wrapper">
-              <input id="account-password" class="dt-input password-input" v-model="newAccount.password" :type="showAccountPassword ? 'text' : 'password'" placeholder="留空时使用环境或全局默认密码" />
+              <input id="account-password" class="dt-input password-input" v-model="newAccount.password" :type="showAccountPassword ? 'text' : 'password'" :placeholder="editingAccountHasStoredPassword ? '已保存密码；留空保持不变' : '留空时使用环境或全局默认密码'" />
               <button class="password-toggle" type="button" @click="showAccountPassword = !showAccountPassword" :title="showAccountPassword ? '隐藏密码' : '显示密码'" :aria-label="showAccountPassword ? '隐藏账号密码' : '显示账号密码'" :aria-pressed="showAccountPassword">
                 <div :class="showAccountPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
               </button>
             </div>
-            <p class="field-hint">使用时依次读取：账号密码 → 环境默认密码 → 全局默认密码。</p>
+            <p v-if="editingAccountHasStoredPassword" class="field-hint">
+              已保存密码不会显示明文；输入新密码可替换，
+              <button type="button" class="secret-clear-link" @click="clearAccountPasswordOnSave = true; newAccount.password = ''">清除已保存密码</button>
+            </p>
+            <p v-if="clearAccountPasswordOnSave" class="field-hint field-hint-warning">保存后将清除该账号已存储的密码。</p>
+            <p v-else class="field-hint">使用时依次读取：账号密码 → 环境默认密码 → 全局默认密码。</p>
           </div>
           <div class="form-row">
             <label id="account-roles-label">角色 <span class="optional">（选填，用于筛选）</span></label>
@@ -1160,6 +1310,12 @@ function saveGlobalDefaultPassword() {
           >
             <span class="rail-dot" :style="{ backgroundColor: envDotColor(g.env) }" />
             <span class="rail-label">{{ g.env.name }}</span>
+            <span
+              v-if="!envSupportOf(g.key).supported"
+              class="rail-support-warn"
+              :title="supportReason(envSupportOf(g.key))"
+              aria-label="当前客户端不支持该环境的登录声明"
+            >!</span>
             <span class="rail-count">{{ g.accounts.length }}</span>
           </button>
 
@@ -1217,6 +1373,19 @@ function saveGlobalDefaultPassword() {
                   <button type="button" role="menuitem" class="more-item more-danger" @click="closeMenu(true); deleteEnv(envFilter)">删除环境</button>
                 </div>
               </Teleport>
+            </div>
+          </div>
+          <!-- 能力缺口：环境详情展示精确原因；导出/删除/关联账号等操作保持可用 -->
+          <div
+            v-if="envFilter !== 'all' && envFilter !== 'unbound' && !envSupportOf(envFilter).supported"
+            class="env-support-note"
+            role="alert"
+          >
+            <div class="i-lucide-shield-alert w-4 h-4 env-support-note-icon" />
+            <div>
+              <strong>当前客户端不支持该环境的登录声明</strong>
+              <p>{{ supportReason(envSupportOf(envFilter)) }}</p>
+              <p class="env-support-note-hint">环境与账号仍可编辑、导出或删除；升级客户端后会自动恢复执行。</p>
             </div>
           </div>
           <!-- 环境校验结论横幅：随「验证环境」按钮一并隐藏，功能恢复时一并放回
@@ -1370,7 +1539,6 @@ function saveGlobalDefaultPassword() {
 
     <!-- 设置：快捷键 / 环境指示器 / 登录策略库 / 快捷登录默认值 -->
     <div v-show="activeTab === 'settings'" class="tab-content">
-
       <!-- 快捷键（ADR-0001 D4 可见性底线：从主视图迁入设置区，B 布局下收进设置） -->
       <div v-if="shortcut !== null" class="form-card">
         <h3>
@@ -1497,7 +1665,10 @@ function saveGlobalDefaultPassword() {
           </template>
         </div>
         <div class="form-row">
-          <label for="global-default-password">全局默认密码</label>
+          <label for="global-default-password">
+            全局默认密码
+            <span v-if="hasGlobalDefaultPassword" class="stored-secret-badge">已设置</span>
+          </label>
           <div class="password-input-wrapper">
             <input
               id="global-default-password"
@@ -1505,17 +1676,21 @@ function saveGlobalDefaultPassword() {
               v-model="globalDefaultPassword"
               :type="showGlobalPassword ? 'text' : 'password'"
               @change="saveGlobalDefaultPassword()"
-              placeholder="留空表示不使用全局默认密码"
+              :placeholder="hasGlobalDefaultPassword ? '已保存密码；留空保持不变' : '输入后保存'"
             />
             <button class="password-toggle" type="button" @click="showGlobalPassword = !showGlobalPassword" :title="showGlobalPassword ? '隐藏密码' : '显示密码'" :aria-label="showGlobalPassword ? '隐藏全局默认密码' : '显示全局默认密码'" :aria-pressed="showGlobalPassword">
               <div :class="showGlobalPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
             </button>
           </div>
+          <p v-if="hasGlobalDefaultPassword" class="field-hint">
+            已保存的密码不会显示明文；输入新密码可替换，
+            <button type="button" class="secret-clear-link" @click="clearGlobalDefaultPassword()">清除已保存密码</button>
+          </p>
         </div>
       </div>
 
     </div>
-
+    </template>
   </div>
 </template>
 
@@ -1525,6 +1700,52 @@ function saveGlobalDefaultPassword() {
 
 .config-panel {
   min-height: 400px;
+}
+
+/* 加载失败阻断页：表单为空集合时不允许任何写操作 */
+.config-load-error {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 18px 20px;
+  border: 1px solid #fca5a5;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+[data-dt-dark] .config-load-error {
+  background: #2a1215;
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+.config-load-error-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.config-load-error-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.config-load-error-body strong {
+  font-size: 14px;
+}
+
+.config-load-error-body p {
+  margin: 0;
+}
+
+.config-load-error-detail {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0.9;
+  word-break: break-word;
 }
 
 /* 抽屉内表单提交区：与全页操作区（顶栏/表尾/操作列）一致靠右，覆盖共享 .form-actions 默认左对齐 */
@@ -2102,6 +2323,50 @@ select[multiple] option {
   color: #6e7681;
 }
 
+.stored-secret-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+[data-dt-dark] .stored-secret-badge {
+  color: #93c5fd;
+  background: #1e3a5f;
+}
+
+.secret-clear-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #dc2626;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.secret-clear-link:hover {
+  color: #b91c1c;
+}
+
+[data-dt-dark] .secret-clear-link {
+  color: #f87171;
+}
+
+.field-hint-warning {
+  color: #dc2626;
+}
+
+[data-dt-dark] .field-hint-warning {
+  color: #f87171;
+}
+
 /* 显示范围「仅这些环境」的勾选列表 */
 .env-whitelist {
   margin-top: 10px;
@@ -2411,6 +2676,72 @@ select[multiple] option {
 [data-dt-dark] .env-context-bar {
   background: var(--dt-dark-surface-1, #161b22);
   border-color: var(--dt-dark-border, #30363d);
+}
+
+.rail-support-warn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+[data-dt-dark] .rail-support-warn {
+  background: #422006;
+  color: #fcd34d;
+}
+
+.env-support-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.env-support-note strong {
+  display: block;
+  color: #78350f;
+  font-size: 12.5px;
+}
+
+.env-support-note p {
+  margin: 2px 0 0;
+}
+
+.env-support-note-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.env-support-note-hint {
+  color: #a16207;
+}
+
+[data-dt-dark] .env-support-note {
+  background: #2a1f0a;
+  border-color: #854d0e;
+  color: #fcd34d;
+}
+
+[data-dt-dark] .env-support-note strong {
+  color: #fde68a;
+}
+
+[data-dt-dark] .env-support-note-hint {
+  color: #d6b25e;
 }
 
 .context-spacer {

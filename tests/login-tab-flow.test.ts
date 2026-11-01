@@ -31,6 +31,7 @@ const tabsMock = {
   reload: vi.fn(),
   remove: vi.fn(),
 };
+const tabUrls = new Map<number, string>();
 vi.stubGlobal('chrome', { tabs: tabsMock });
 
 import {
@@ -54,9 +55,22 @@ function buildInject(): (tabId: number, tokenData: TokenData) => Promise<void> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  tabsMock.create.mockResolvedValue({ id: 99 });
-  tabsMock.get.mockResolvedValue({ id: 42, url: 'http://a.com/home', status: 'complete' });
-  tabsMock.update.mockResolvedValue(undefined);
+  tabUrls.clear();
+  tabUrls.set(1, 'http://a.com/home');
+  tabUrls.set(42, 'http://a.com/home');
+  tabsMock.create.mockImplementation(async ({ url }: { url: string }) => {
+    tabUrls.set(99, url);
+    return { id: 99, url };
+  });
+  tabsMock.get.mockImplementation(async (tabId: number) => {
+    const url = tabUrls.get(tabId);
+    if (!url) throw new Error(`No tab with id: ${tabId}`);
+    return { id: tabId, url, status: 'complete' };
+  });
+  tabsMock.update.mockImplementation(async (tabId: number, props: { url?: string }) => {
+    if (props.url) tabUrls.set(tabId, props.url);
+    return undefined;
+  });
   tabsMock.reload.mockResolvedValue(undefined);
   tabsMock.remove.mockResolvedValue(undefined);
   restoreAuthMock.mockResolvedValue(undefined);
@@ -198,7 +212,7 @@ describe('setupAuthTab', () => {
   });
 
   it('tab 不存在时按「地址不同」降级：走导航而不是直接写', async () => {
-    tabsMock.get.mockRejectedValue(new Error('No tab with id: 42'));
+    tabsMock.get.mockRejectedValueOnce(new Error('No tab with id: 42'));
 
     await setupAuthTab(
       buildInject(),

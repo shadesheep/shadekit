@@ -1,7 +1,7 @@
 /**
  * SQL 代码格式化（基于 sql-formatter 库）
  */
-import { format } from 'sql-formatter';
+import { formatDialect, sql } from 'sql-formatter';
 
 /**
  * 格式化 SQL 代码
@@ -11,8 +11,9 @@ import { format } from 'sql-formatter';
  */
 export function beautifySql(text: string, step: number | string = 4): string {
   const tabWidth = typeof step === 'string' ? step.length : step;
-  return format(text, {
-    language: 'sql',
+  // formatDialect + 单一 sql 方言：避免把 sql-formatter 的 20 种方言全部打进包
+  return formatDialect(text, {
+    dialect: sql,
     tabWidth,
     keywordCase: 'upper',
     linesBetweenQueries: 2,

@@ -25,6 +25,8 @@ import {
   type StrategyListItem,
 } from '../spec/strategy-library';
 import type { LoginSpec } from '../spec';
+import { inspectLoginSpecSupport } from '../spec/capabilities';
+import { requireSupportedLoginSpec } from '../spec/document';
 import type { DomainConfig, StrategyEntry } from '../types';
 
 const props = defineProps<{
@@ -37,7 +39,12 @@ const emit = defineEmits<{
   saveDomains: [domains: Record<string, DomainConfig>, message: string];
 }>();
 
-const items = computed(() => listStrategies(props.strategies, props.domains));
+const items = computed(() =>
+  listStrategies(props.strategies, props.domains).map((item) => ({
+    ...item,
+    support: inspectLoginSpecSupport(item.spec, item.declaredSpecVersion),
+  })),
+);
 
 /** 编辑抽屉 */
 const editingId = ref('');
@@ -45,9 +52,15 @@ const editingName = ref('');
 const editingSpec = ref<LoginSpec | null>(null);
 
 function openEdit(item: StrategyListItem): void {
+  let spec: LoginSpec;
+  try {
+    spec = requireSupportedLoginSpec(item.spec, item.declaredSpecVersion);
+  } catch {
+    return;
+  }
   editingId.value = item.id;
   editingName.value = item.name;
-  editingSpec.value = JSON.parse(JSON.stringify(item.spec)) as LoginSpec;
+  editingSpec.value = JSON.parse(JSON.stringify(spec)) as LoginSpec;
 }
 
 function closeEdit(): void {
@@ -123,6 +136,10 @@ function remove(item: StrategyListItem): void {
   );
 }
 
+function arrayLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
 function formatTime(ts: number): string {
   if (!Number.isFinite(ts) || ts <= 0) return '';
   return new Date(ts).toLocaleString();
@@ -155,12 +172,20 @@ function formatTime(ts: number): string {
             <span v-else class="strategy-badge muted">未关联</span>
           </div>
           <div class="strategy-meta">
-            {{ item.spec.vars?.length ?? 0 }} 个变量 · {{ item.spec.ops.length }} 个算子
+            {{ arrayLength(item.spec.vars) }} 个变量 · {{ arrayLength(item.spec.ops) }} 个算子
+            <span v-if="!item.support.supported">
+              · 当前客户端不支持：{{ item.support.issues.map((issue) => issue.message).join('；') }}
+            </span>
             <span v-if="formatTime(item.updatedAt)"> · 更新于 {{ formatTime(item.updatedAt) }}</span>
           </div>
         </div>
         <div class="strategy-actions">
-          <DtButton size="sm" @click="openEdit(item)">
+          <DtButton
+            size="sm"
+            :disabled="!item.support.supported"
+            :title="item.support.supported ? '' : '当前客户端不支持编辑该声明'"
+            @click="openEdit(item)"
+          >
             <div class="i-lucide-pencil w-3.5 h-3.5 mr-1" />编辑
           </DtButton>
           <DtButton

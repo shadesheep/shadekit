@@ -6,19 +6,21 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { sendBgMessage } from "../../shared/messages";
-import { getConfig } from "../../shared/tool-config";
 import { showToast } from "../../shared/use-toast";
-import type { Account, AccountSwitchConfig, DomainConfig } from "./types";
-import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
+import type {
+  AccountPanelData,
+  PublicAccount,
+  PublicEnvironment,
+} from "./account-view";
 import {
   collectRoles,
   filterAccounts,
-  normalizeAccount,
   resolveEnvironment,
-  resolvePassword,
   roleColor,
   roleColorStyle,
+  supportReason,
 } from "./account-view";
+import type { SpecSupportReport } from "./spec/capabilities";
 import { accountInitial } from "./account-palette";
 import { closePanel, getCurrentOrigin } from "./utils/env";
 import {
@@ -29,15 +31,23 @@ import {
 import { showLoginRecoveryToast } from "./login-recovery-toast";
 import { LOGIN_BUSY_ERROR } from "./utils/error-codes";
 import { parseLoginText, type ParsedLogin } from "./utils/parse-text";
-import { readSpecFromConfig } from "./spec/migrate";
 import type { LoginSpec } from "./spec/types";
 
-const accounts = ref<Account[]>([]);
+const accounts = ref<PublicAccount[]>([]);
 const origin = ref("");
-const matchedEnv = ref<DomainConfig | null>(null);
+const matchedEnv = ref<PublicEnvironment | null>(null);
 const matchedEnvKey = ref("");
-const strategies = ref<AccountSwitchConfig["strategies"]>({});
+const publicDomains = ref<Record<string, PublicEnvironment>>({});
 const configLoadFailed = ref(false);
+
+/**
+ * 公共 DTO 只在不支持时携带 support；这里仅用于展示原因。
+ * 登录入口不由客户端禁用：Background 的 assertEnvironmentLoginSupported
+ * 会在权限/tab/HTTP/秘密解析之前做同一个能力判断并返回结构化错误。
+ */
+const matchedEnvSupport = computed<SpecSupportReport | null>(
+  () => matchedEnv.value?.support ?? null,
+);
 
 // 搜索 & 筛选
 const searchQuery = ref("");
@@ -57,46 +67,64 @@ const isCompact = computed(() => filteredAccounts.value.length > 6);
 // 三段过滤（域 → 角色 → 搜索）收口于 account-view（ADR-0004 D6）
 const filteredAccounts = computed(() =>
   filterAccounts(accounts.value, {
-    origin: origin.value,
     role: activeRole.value,
     query: searchQuery.value,
   }),
 );
 
-// 角色列表：从当前域下的账号中提取（origin 未解析时保持旧行为：空列表）
+// Background 已按当前环境裁剪账号，这里只提取公开角色。
 const availableRoles = computed(() => {
   if (!origin.value) return [];
-  return collectRoles(filterAccounts(accounts.value, { origin: origin.value }));
+  return collectRoles(accounts.value);
 });
+
+/**
+ * Background 的拒绝信封 `{ success: false, ... }` 可能出现在任何消息 type 上，
+ * 不能直接当成公共 DTO 使用；写入响应式状态前先校验，避免 undefined 账号/
+ * tabOrder 进入渲染并在错误态里再次抛错。
+ */
+function isAccountPanelData(value: unknown): value is AccountPanelData {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    Array.isArray(candidate.accounts) &&
+    Array.isArray(candidate.tabOrder) &&
+    typeof candidate.domains === "object" &&
+    candidate.domains !== null &&
+    !Array.isArray(candidate.domains)
+  );
+}
 
 const loadConfig = async () => {
   configLoadFailed.value = false;
   try {
-    // getConfig + defaults：享受旧 key 迁移与缺失字段补齐（ADR-0003 D5）
-    const cfg = await getConfig<AccountSwitchConfig>(
-      "account-switch",
-      ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-    );
-
-    // 环境匹配链收口于 account-view(resolveEnvironment)
-    const resolved = resolveEnvironment(origin.value, cfg?.domains ?? {});
-    matchedEnvKey.value = resolved?.domain ?? "";
-    matchedEnv.value = resolved?.env ?? null;
-    strategies.value = cfg?.strategies ?? {};
-    // role? 兼容归一化下沉至 account-view(ADR-0004 D6)
-    accounts.value = (cfg?.accounts ?? []).map(normalizeAccount);
-    // 读取 tab 顺序配置
-    if (Array.isArray(cfg?.tabOrder) && cfg.tabOrder.length === 2) {
-      tabOrder.value = cfg.tabOrder;
+    // 完整配置和已保存秘密只留在 Background；面板只消费公共 DTO。
+    const response: unknown = await sendBgMessage("GET_ACCOUNT_PANEL");
+    if (!isAccountPanelData(response)) {
+      throw new Error(
+        typeof response === "object" &&
+          response !== null &&
+          "error" in response &&
+          typeof response.error === "string"
+          ? response.error
+          : "账号面板数据格式无效",
+      );
     }
-    // 默认选中第一个 tab
+    const cfg = response;
+    publicDomains.value = cfg.domains;
+    const resolved = resolveEnvironment(origin.value, cfg.domains);
+    matchedEnvKey.value = cfg.matchedEnvKey || resolved?.domain || "";
+    matchedEnv.value = resolved?.env ?? null;
+    accounts.value = cfg.accounts;
+    tabOrder.value = cfg.tabOrder;
     activeTab.value = tabOrder.value[0];
-    // 读取快捷登录默认域名
-    quickLoginDefaultDomain.value = cfg?.quickLoginDefaultDomain || "";
-    globalDefaultPassword.value = cfg?.globalDefaultPassword || "";
+    quickLoginDefaultDomain.value = cfg.quickLoginDefaultDomain;
+    hasGlobalDefaultPassword.value = cfg.hasGlobalDefaultPassword;
   } catch (e) {
     configLoadFailed.value = true;
-    console.warn("[account-switch] Failed to load config:", e);
+    console.warn("[account-switch] Failed to load public panel data:", e);
   }
 
   // 自动聚焦搜索框（仅在搜索框可见时）
@@ -125,6 +153,9 @@ const openAccountSettings = async () => {
 
 // 登录防重：登录进行中的账号 id，非 null 时所有卡片置灰禁用
 const switchingAccountId = ref<string | null>(null);
+const temporaryAccount = ref<PublicAccount | null>(null);
+const temporaryPassword = ref("");
+const temporaryLoading = ref(false);
 
 /**
  * 登录失败 Toast：附「复制详情」按钮，
@@ -153,23 +184,28 @@ const showLoginErrorToast = (
   });
 };
 
-const switchAccount = async (account: Account) => {
+const switchAccount = async (account: PublicAccount) => {
+  if (account.hasSavedPassword === false) {
+    temporaryAccount.value = account;
+    temporaryPassword.value = "";
+    return;
+  }
   // 登录期间拒绝重复触发（点击其他卡片 / 回车键）
   if (switchingAccountId.value) return;
   switchingAccountId.value = account.id;
   showToast("正在切换至 " + account.name + "...", "info");
   try {
     const response = await sendBgMessage("SWITCH_ACCOUNT", {
-      account,
-      domain: origin.value,
+      accountId: account.id,
+      environmentId: matchedEnvKey.value,
     });
     if (response?.success) {
       showToast("已切换至 " + account.name, "success");
       closePanel();
     } else {
       const err = response?.error || "未知错误";
-      // 并发互斥拒绝是「忙碌」而非失败，不加「切换失败」前缀
       if (err === LOGIN_BUSY_ERROR) {
+        // 并发互斥拒绝是「忙碌」而非失败，不加「切换失败」前缀
         showToast(err, "info");
       } else {
         showLoginErrorToast(
@@ -184,10 +220,6 @@ const switchAccount = async (account: Account) => {
           },
           {
             envKey: matchedEnvKey.value || origin.value,
-            spec: matchedEnv.value
-              ? (readSpecFromConfig(matchedEnv.value, strategies.value).spec ??
-                undefined)
-              : undefined,
           },
         );
       }
@@ -205,15 +237,37 @@ const switchAccount = async (account: Account) => {
       },
       {
         envKey: matchedEnvKey.value || origin.value,
-        spec: matchedEnv.value
-          ? (readSpecFromConfig(matchedEnv.value, strategies.value).spec ??
-            undefined)
-          : undefined,
       },
     );
   } finally {
     // 登录结束（成功/失败/超时）后恢复卡片可点击
     switchingAccountId.value = null;
+  }
+};
+
+const loginWithTemporaryPassword = async () => {
+  const account = temporaryAccount.value;
+  if (!account || temporaryLoading.value || !temporaryPassword.value) return;
+  temporaryLoading.value = true;
+  const password = temporaryPassword.value;
+  temporaryPassword.value = "";
+  try {
+    const response = await sendBgMessage("QUICK_LOGIN", {
+      url: matchedEnvKey.value || origin.value,
+      username: account.username,
+      password,
+      hasUrl: false,
+    });
+    if (response.success) {
+      temporaryAccount.value = null;
+      showToast(`已以 ${account.name} 登录`, "success");
+      closePanel();
+    } else {
+      showToast(response.error || "登录失败", "error");
+    }
+  } finally {
+    temporaryPassword.value = "";
+    temporaryLoading.value = false;
   }
 };
 
@@ -228,7 +282,7 @@ const clearSearch = () => {
 const totalItemCount = computed(() => filteredAccounts.value.length);
 
 // 根据索引找到对应账号
-function getAccountByGlobalIndex(globalIdx: number): Account | null {
+function getAccountByGlobalIndex(globalIdx: number): PublicAccount | null {
   return filteredAccounts.value[globalIdx] ?? null;
 }
 
@@ -290,10 +344,13 @@ const selectRole = (role: string | null) => {
 const quickLoginText = ref("");
 const quickLoginLoading = ref(false);
 const quickLoginDefaultDomain = ref("");
-const globalDefaultPassword = ref("");
+const hasGlobalDefaultPassword = ref(false);
 const redirectEnabled = ref(false);
-const quickLoginMatchedEnv = ref<DomainConfig | null>(null);
+const quickLoginMatchedEnv = ref<PublicEnvironment | null>(null);
 const quickLoginMatchedEnvKey = ref("");
+const quickLoginSupport = computed<SpecSupportReport | null>(
+  () => quickLoginMatchedEnv.value?.support ?? null,
+);
 
 /** 从粘贴的快捷登录文本中提取域名（仅 URL） */
 function extractOriginFromText(text: string): string | null {
@@ -326,19 +383,12 @@ const handleQuickLogin = async () => {
   const targetUrl =
     isPureAccount && matchedEnv.value ? origin.value : parsed.url;
 
-  // 密码优先级：用户输入 > 当前页面环境默认密码(纯账号) > 文本URL环境默认密码 > 全局默认密码
-  const currentEnvPassword = isPureAccount
-    ? matchedEnv.value?.defaultPassword
-    : undefined;
-  const textEnvPassword = isPureAccount
-    ? undefined
-    : quickLoginMatchedEnv.value?.defaultPassword;
-  const password = resolvePassword({
-    input: parsed.password,
-    envDefault: currentEnvPassword ?? textEnvPassword,
-    globalDefault: globalDefaultPassword.value,
-  });
-  if (!password) {
+  // 面板只判断“是否存在默认密码”，实际秘密由 Background 按目标环境解析。
+  const hasEnvDefault = isPureAccount
+    ? matchedEnv.value?.hasDefaultPassword
+    : quickLoginMatchedEnv.value?.hasDefaultPassword;
+  const password = parsed.password || undefined;
+  if (!password && !hasEnvDefault && !hasGlobalDefaultPassword.value) {
     showToast("未找到可用密码：请输入完整的账号/密码信息", "error");
     return;
   }
@@ -355,7 +405,7 @@ const handleQuickLogin = async () => {
     const response = await sendBgMessage("QUICK_LOGIN", {
       url: targetUrl,
       username: parsed.username,
-      password,
+      ...(password ? { password } : {}),
       hasUrl: !isPureAccount,
       debugRedirect,
     });
@@ -420,7 +470,7 @@ const handleQuickLoginKeydown = (e: KeyboardEvent) => {
 };
 
 // 根据粘贴文本中的 URL 匹配环境
-watch(quickLoginText, async () => {
+watch(quickLoginText, () => {
   const textOrigin = extractOriginFromText(quickLoginText.value);
   if (!textOrigin) {
     quickLoginMatchedEnv.value = null;
@@ -428,21 +478,12 @@ watch(quickLoginText, async () => {
     redirectEnabled.value = false;
     return;
   }
-  try {
-    // 同上:getConfig + defaults(ADR-0003 D5);匹配链收口于 account-view
-    const cfg = await getConfig<AccountSwitchConfig>(
-      "account-switch",
-      ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-    );
-    const resolved = resolveEnvironment(textOrigin, cfg?.domains ?? {});
-    if (resolved) {
-      quickLoginMatchedEnvKey.value = resolved.domain;
-      quickLoginMatchedEnv.value = resolved.env;
-      redirectEnabled.value = resolved.env.debugRedirectEnabled ?? false;
-      return;
-    }
-  } catch (e) {
-    console.warn("[account-switch] Failed to match environment:", e);
+  const resolved = resolveEnvironment(textOrigin, publicDomains.value);
+  if (resolved) {
+    quickLoginMatchedEnvKey.value = resolved.domain;
+    quickLoginMatchedEnv.value = resolved.env;
+    redirectEnabled.value = resolved.env.debugRedirectEnabled;
+    return;
   }
   quickLoginMatchedEnv.value = null;
   quickLoginMatchedEnvKey.value = "";
@@ -462,19 +503,17 @@ const quickLoginPreview = computed(() => {
     return { ok: false, hint: "格式无法解析" };
   }
 
-  // 密码来源分析
+  // 只展示密码来源，不读取任何默认密码原值。
   const isPureAccount = !parsed.hasUrl;
-  const currentEnvPassword = isPureAccount
-    ? matchedEnv.value?.defaultPassword
-    : undefined;
-  const textEnvPassword = isPureAccount
-    ? undefined
-    : quickLoginMatchedEnv.value?.defaultPassword;
-  const password = resolvePassword({
-    input: parsed.password,
-    envDefault: currentEnvPassword ?? textEnvPassword,
-    globalDefault: globalDefaultPassword.value,
-  });
+  const currentEnvHasDefault = isPureAccount
+    ? matchedEnv.value?.hasDefaultPassword
+    : false;
+  const textEnvHasDefault = isPureAccount
+    ? false
+    : quickLoginMatchedEnv.value?.hasDefaultPassword;
+  const passwordAvailable = Boolean(
+    parsed.password || currentEnvHasDefault || textEnvHasDefault || hasGlobalDefaultPassword.value,
+  );
 
   const parts: string[] = [];
   if (parsed.hasUrl) {
@@ -488,12 +527,12 @@ const quickLoginPreview = computed(() => {
     parts.push(`环境：${matchedEnv.value.name}`);
   }
   parts.push(`账号：${parsed.username}`);
-  if (password) {
+  if (passwordAvailable) {
     if (parsed.password) {
       parts.push("密码：已输入");
-    } else if (currentEnvPassword) {
+    } else if (currentEnvHasDefault) {
       parts.push(`密码：使用${matchedEnv.value?.name || "当前环境"}默认密码`);
-    } else if (textEnvPassword) {
+    } else if (textEnvHasDefault) {
       parts.push("密码：使用目标环境默认密码");
     } else {
       parts.push("密码：使用全局默认密码");
@@ -540,6 +579,15 @@ const quickLoginPreview = computed(() => {
       <button type="button" class="as-role-chip as-empty-action" @click="loadConfig">
         重试
       </button>
+    </div>
+
+    <!-- 能力缺口：展示版本/算子/算法原因；登录仍由 Background 能力门拒绝 -->
+    <div v-if="matchedEnvSupport" class="as-support-note" role="alert">
+      <div class="i-lucide-shield-alert w-4 h-4 as-support-icon" />
+      <div class="as-support-body">
+        <strong>当前客户端不支持该环境的登录声明</strong>
+        <p>{{ supportReason(matchedEnvSupport) }}</p>
+      </div>
     </div>
 
     <!-- 选择账号 Tab 内容 -->
@@ -645,6 +693,14 @@ const quickLoginPreview = computed(() => {
           </div>
         </div>
 
+        <div v-if="quickLoginSupport" class="as-support-note as-ql-support-note" role="alert">
+          <div class="i-lucide-shield-alert w-4 h-4 as-support-icon" />
+          <div class="as-support-body">
+            <strong>当前客户端不支持该环境的登录声明</strong>
+            <p>{{ supportReason(quickLoginSupport) }}</p>
+          </div>
+        </div>
+
         <!-- 输入区 -->
         <textarea
           v-model="quickLoginText"
@@ -671,7 +727,7 @@ const quickLoginPreview = computed(() => {
         </div>
 
         <!-- 默认密码提示 -->
-        <div v-if="quickLoginMatchedEnv?.defaultPassword" class="as-ql-password-hint">
+        <div v-if="quickLoginMatchedEnv?.hasDefaultPassword" class="as-ql-password-hint">
           <div class="i-lucide-lock w-3 h-3" />
           <span>{{ quickLoginMatchedEnv.name }} 已启用默认密码，可仅输入 URL + 账号</span>
         </div>
@@ -716,15 +772,62 @@ const quickLoginPreview = computed(() => {
         </div>
       </div>
     </div>
+
+    <div v-if="temporaryAccount" class="as-vault-dialog" role="dialog" aria-modal="true" aria-label="输入当次密码">
+      <div class="i-lucide-key-round w-5 h-5" />
+      <strong>输入「{{ temporaryAccount.name }}」的当次密码</strong>
+      <p>该账号没有已保存密码。密码仅用于本次登录，不会重新保存。</p>
+      <input data-temporary-password v-model="temporaryPassword" type="password" autocomplete="off" class="as-vault-input" placeholder="当次密码" aria-label="当次密码" @keydown.enter.prevent="loginWithTemporaryPassword" />
+      <div class="as-vault-actions">
+        <button type="button" data-temporary-submit class="as-ql-btn" :disabled="temporaryLoading || !temporaryPassword" @click="loginWithTemporaryPassword">{{ temporaryLoading ? '登录中…' : '仅本次登录' }}</button>
+        <button type="button" class="as-role-chip" :disabled="temporaryLoading" @click="temporaryAccount = null; temporaryPassword = ''">取消</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .as-panel {
+  position: relative;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #fff;
   outline: none;
 }
+
+/* ===== 能力缺口提示（公共 support 投影） ===== */
+.as-support-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.as-support-icon { flex-shrink: 0; margin-top: 1px; }
+.as-support-body { min-width: 0; }
+.as-support-body strong { display: block; color: #78350f; font-size: 12px; }
+.as-support-body p { margin: 2px 0 0; word-break: break-word; }
+.as-ql-support-note { margin: 0 0 10px; }
+[data-dt-dark] .as-support-note { background: #2a1f0a; border-color: #854d0e; color: #fcd34d; }
+[data-dt-dark] .as-support-body strong { color: #fde68a; }
+
+/* ===== 一次性登录密码 ===== */
+.as-vault-dialog { position: absolute; inset: 44px 10px auto; z-index: 20; padding: 16px; border: 1px solid #c7d2fe; border-radius: 10px; background: rgba(255,255,255,.98); color: #6366f1; box-shadow: 0 12px 32px rgba(15,23,42,.18); backdrop-filter: blur(12px); }
+.as-vault-dialog strong { display: block; margin-top: 8px; color: #0f172a; font-size: 14px; }
+.as-vault-dialog p { margin: 6px 0 12px; color: #64748b; font-size: 12px; line-height: 1.5; }
+.as-vault-input { box-sizing: border-box; width: 100%; height: 34px; padding: 6px 9px; border: 1px solid #e2e8f0; border-radius: 6px; outline: none; background: #fff; color: #0f172a; font-size: 13px; }
+.as-vault-input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.1); }
+.as-vault-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.as-vault-actions .as-ql-btn { width: auto; margin: 0; }
+[data-dt-dark] .as-vault-dialog { background: rgba(22,27,34,.98); border-color: #4f46e5; }
+[data-dt-dark] .as-vault-dialog strong { color: #f1f5f9; }
+[data-dt-dark] .as-vault-dialog p { color: #8b949e; }
+[data-dt-dark] .as-vault-input { background: #0f172a; border-color: #30363d; color: #f1f5f9; }
 
 /* ===== Tab bar ===== */
 .as-tab-bar {

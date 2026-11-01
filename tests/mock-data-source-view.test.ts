@@ -13,18 +13,26 @@
  * `EditorView.findFromDOM` 读取容器内活编辑器实例的文档 —— 精确对应
  * 「用户看到的容器里有没有一个带内容的编辑器」。
  */
-import { EditorView } from '@codemirror/view';
-import { createApp, nextTick, type App as VueApp } from 'vue';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import App from '../entrypoints/mock-data/App.vue';
-import { setupCodemirrorJsdom } from './helpers/codemirror-jsdom';
+import { EditorView } from "@codemirror/view";
+import { createApp, nextTick, type App as VueApp } from "vue";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import App from "../entrypoints/mock-data/App.vue";
+import { setupCodemirrorJsdom } from "./helpers/codemirror-jsdom";
 
 // ─── chrome.storage.local stub(与 config-save-toast.test.ts 同款) ──────
 
 let store: Record<string, unknown>;
 
 function stubChromeStorage() {
-  vi.stubGlobal('chrome', {
+  vi.stubGlobal("chrome", {
     storage: {
       local: {
         get: vi.fn(async (keys: string[] | null) => {
@@ -63,7 +71,7 @@ beforeEach(() => {
 afterEach(() => {
   app?.unmount();
   app = null;
-  document.body.innerHTML = '';
+  document.body.innerHTML = "";
   vi.unstubAllGlobals();
 });
 
@@ -75,7 +83,7 @@ async function flush() {
 
 /** 挂载真实 App.vue 并等待 onMounted(异步 getConfig + 首次自动生成)完成 */
 async function mountApp() {
-  root = document.createElement('div');
+  root = document.createElement("div");
   document.body.appendChild(root);
   app = createApp(App);
   app.mount(root);
@@ -84,7 +92,7 @@ async function mountApp() {
 }
 
 async function clickButton(text: string) {
-  const btn = Array.from(root.querySelectorAll('button')).find(
+  const btn = Array.from(root.querySelectorAll("button")).find(
     (b) => b.textContent?.trim() === text,
   );
   expect(btn, `按钮「${text}」应存在`).toBeTruthy();
@@ -94,7 +102,7 @@ async function clickButton(text: string) {
 
 /** 结果区条数徽标文本(导出数据源 rawOutput 是否健在的可观测代理) */
 function countBadgeText(): string {
-  return root.querySelector('.result-panel .count-badge')?.textContent ?? '';
+  return root.querySelector(".result-panel .count-badge")?.textContent ?? "";
 }
 
 /**
@@ -102,33 +110,83 @@ function countBadgeText(): string {
  * 容器里没有 CM 实例(孤儿化/未挂载)时返回 ''。
  */
 function codeEditorDoc(): string {
-  const container = root.querySelector('.code-editor');
-  if (!(container instanceof HTMLElement)) return '';
+  const container = root.querySelector(".code-editor");
+  if (!(container instanceof HTMLElement)) return "";
   const view = EditorView.findFromDOM(container);
-  return view ? view.state.doc.toString() : '';
+  return view ? view.state.doc.toString() : "";
 }
 
 // ─── 用例 ───────────────────────────────────────────────────
 
-describe('mock-data 源码视图', () => {
-  it('对照:挂载后直接切到源码视图,编辑器显示生成内容', async () => {
+describe("mock-data 源码视图", () => {
+  it("对照:挂载后直接切到源码视图,编辑器显示生成内容", async () => {
     await mountApp();
-    // 首屏自动载入 user 模板并生成(10 条)
+    // 首屏自动选中 3 个常用字段并生成(10 条)
     expect(countBadgeText()).toMatch(/\d+ 条/);
 
-    await clickButton('源码');
+    await clickButton("源码");
     expect(codeEditorDoc()).toContain('"name"');
   });
 
-  it('回归:切到快速取数再切回批量,源码视图仍应显示内容', async () => {
+  it("回归:切到快速取数再切回批量,源码视图仍应显示内容", async () => {
     await mountApp();
-    await clickButton('快速取数');
-    await clickButton('批量生成');
-    await clickButton('源码');
+    await clickButton("快速取数");
+    await clickButton("批量生成");
+    await clickButton("源码");
 
     // 导出数据源仍在 —— 对应用户反馈的「能导出」
     expect(countBadgeText()).toMatch(/\d+ 条/);
     // 源码编辑器也必须有内容 —— 修复前此处为空(v-if 卸载导致编辑器 DOM 孤儿化)
     expect(codeEditorDoc()).toContain('"name"');
+  });
+
+  it("首次打开默认用户场景即可生成源码", async () => {
+    await mountApp();
+    // 用户信息场景整组 6 个字段
+    expect(root.querySelectorAll(".selected-chip")).toHaveLength(6);
+
+    await clickButton("源码");
+    expect(codeEditorDoc()).toContain('"name"');
+  });
+
+  it("编辑字段后参数控件按类型显示", async () => {
+    await mountApp();
+    // 勾选清单把每个字段行内联展示，无需再点「编辑字段」
+    const ageRow = Array.from(
+      root.querySelectorAll<HTMLElement>(".field-row"),
+    ).find(
+      (row) =>
+        row.querySelector<HTMLSelectElement>(".row-type")?.value === "age",
+    );
+    expect(ageRow).toBeTruthy();
+    expect(ageRow!.textContent).not.toContain("正态均值");
+    expect(ageRow!.textContent).not.toContain("指数率");
+
+    const distribution = Array.from(
+      ageRow!.querySelectorAll<HTMLSelectElement>(".param-select"),
+    ).find((select) => select.value === "uniform");
+    expect(distribution).toBeTruthy();
+    distribution!.value = "normal";
+    distribution!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+
+    expect(ageRow!.textContent).toContain("正态均值");
+    expect(ageRow!.textContent).toContain("正态标准差");
+    expect(ageRow!.textContent).not.toContain("指数率");
+  });
+
+  it("约束按需展开", async () => {
+    await mountApp();
+
+    const firstRow = root.querySelector<HTMLElement>(".field-row");
+    expect(firstRow?.textContent).not.toContain("高级约束");
+    const settingsButton = firstRow?.querySelector<HTMLButtonElement>(
+      'button[aria-label="字段高级设置"]',
+    );
+    expect(settingsButton).toBeTruthy();
+    settingsButton!.click();
+    await flush();
+    expect(settingsButton!.getAttribute("aria-expanded")).toBe("true");
+    expect(firstRow?.textContent).toContain("空值比例");
   });
 });

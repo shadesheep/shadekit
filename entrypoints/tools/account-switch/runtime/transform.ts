@@ -22,8 +22,8 @@ import {
   resolveTemplate,
   resolveTemplateValue,
   TemplateError,
-} from "./template";
-import type { NormalizeRule, SpecOp } from "./types";
+} from "../spec/template";
+import type { NormalizeRule, SpecOp } from "../spec/types";
 
 /** 模板上下文：数据算子字段都参与模板解析 */
 export interface TransformContext {
@@ -349,7 +349,7 @@ export function runPayloadBuild(
     const out: Record<string, string> = {};
     for (const part of op.parts) {
       const value = resolveValue(ctx, part.value);
-      out[part.key!] = applyNormalizeRules(value, part.normalize);
+      if (part.key !== undefined) out[part.key] = applyNormalizeRules(value, part.normalize);
     }
     return out;
   }

@@ -12,13 +12,9 @@
  * 监听只安装一次，不重复注入、不泄漏。
  */
 
-import { getConfig } from '../../shared/tool-config';
-import {
-  ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-  type AccountSwitchConfig,
-  type EnvBadgeConfig,
-  type EnvBadgePosition,
-} from './types';
+import { sendBgMessage } from '../../shared/messages';
+import type { AccountPanelData } from './account-view';
+import type { EnvBadgeConfig, EnvBadgePosition } from './types';
 import { matchDomain } from './utils/env';
 import { watchSpaRoutes, type SpaRouteWatcher } from './utils/spa-route';
 import { normalizeEnvTag, tagColor } from './account-env-view';
@@ -88,13 +84,10 @@ function installRouteWatcher(): void {
  * 走 getConfig 享受缺失字段补齐（ADR-0003 D5）；envBadge 缺失时按默认值渲染。
  */
 async function readEffectiveConfig(): Promise<{
-  accountCfg: AccountSwitchConfig | undefined;
+  accountCfg: AccountPanelData | undefined;
   badge: EnvBadgeConfig;
 }> {
-  const accountCfg = await getConfig<AccountSwitchConfig>(
-    'account-switch',
-    ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-  );
+  const accountCfg = await sendBgMessage('GET_ACCOUNT_PANEL');
   const badge = accountCfg?.envBadge ?? {
     enabled: false,
     position: 'bottom-right',

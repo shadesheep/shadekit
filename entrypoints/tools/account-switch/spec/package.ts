@@ -15,7 +15,8 @@
  */
 
 import type { DomainConfig, StrategyEntry } from "../types";
-import { LOGIN_SPEC_VERSION, type LoginSpec, type SpecOp } from "./types";
+import type { SpecDocument } from "./document";
+import { LOGIN_SPEC_VERSION } from "./types";
 
 /** 配置包格式标识 */
 export const CONFIG_PACKAGE_FORMAT = "dt-login-config/v1" as const;
@@ -31,15 +32,17 @@ export interface ConfigPackageEnvironment {
   url: string;
   loginMethod?: string;
   /** 该环境的登录声明（不含 script / secret 变量的 spec） */
-  spec: LoginSpec;
+  spec: SpecDocument;
+  /** 环境级非秘密变量覆盖；不支持的环境也原样保留。 */
+  vars?: Record<string, string>;
   /** 需要填写 / 覆盖的变量（必为 spec.vars 子集） */
   requiredVars: ConfigPackageVar[];
 }
 
 export interface ConfigPackage {
   format: typeof CONFIG_PACKAGE_FORMAT;
-  /** 生成包时的扩展 LoginSpec 版本（供导入方校验版本不过高） */
-  specVersion: typeof LOGIN_SPEC_VERSION;
+  /** 生成包时声明的 LoginSpec 版本；高版本由接收方逐环境禁用。 */
+  specVersion: number;
   /** 每个环境渲染后的变量（不含 `{ }`），可整体勾选 */
   requiredVars: ConfigPackageVar[];
   /** 单一环境导出时 = 1（支持多环境时扩展） */
@@ -72,10 +75,11 @@ export const SUPPORTED_PACKAGE_VERSION = 1 as const;
  * 导出前逐算子检查：任一 `op.op === "script"` 即拒绝并指出第几步。
  * 返回空数组 = 可安全分发。
  */
-export function findScriptOps(spec: LoginSpec): PackageIssue[] {
+export function findScriptOps(spec: unknown): PackageIssue[] {
   const issues: PackageIssue[] = [];
-  spec.ops.forEach((op: SpecOp, index) => {
-    if (op.op === "script") {
+  if (!isRecord(spec) || !Array.isArray(spec.ops)) return issues;
+  spec.ops.forEach((op, index) => {
+    if (isRecord(op) && op.op === "script") {
       issues.push({
         opIndex: index,
         message:
@@ -86,11 +90,17 @@ export function findScriptOps(spec: LoginSpec): PackageIssue[] {
   return issues;
 }
 
+function declaredVars(spec: unknown): Record<string, unknown>[] {
+  if (!isRecord(spec) || !Array.isArray(spec.vars)) return [];
+  return spec.vars.filter(isRecord);
+}
+
 /** 收集 spec 里 `secret: true` 的变量名（这些不能进包） */
-export function findSecretVars(spec: LoginSpec): string[] {
-  return (spec.vars ?? [])
+export function findSecretVars(spec: unknown): string[] {
+  return declaredVars(spec)
     .filter((variable) => variable.secret === true)
-    .map((variable) => variable.name);
+    .map((variable) => variable.name)
+    .filter((name): name is string => typeof name === "string");
 }
 
 /**
@@ -100,9 +110,13 @@ export function findSecretVars(spec: LoginSpec): string[] {
  */
 export function checkRequiredVars(
   requiredNames: string[],
-  spec: LoginSpec,
+  spec: unknown,
 ): PackageIssue[] {
-  const declared = new Set((spec.vars ?? []).map((v) => v.name));
+  const declared = new Set(
+    declaredVars(spec)
+      .map((variable) => variable.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
   return requiredNames
     .filter((name) => !declared.has(name))
     .map((name) => ({
@@ -129,11 +143,14 @@ export function buildConfigPackage(
   strategies?: Record<string, StrategyEntry | undefined>,
 ): { package?: ConfigPackage; issues: PackageIssue[] } {
   // 与 `readSpecFromConfig` 同一条读取链：私有声明优先，其次镜像库条目
-  const spec =
-    environment.strategyConfig?.spec ??
-    (environment.strategyId
-      ? strategies?.[environment.strategyId]?.spec
-      : undefined);
+  const mirroredEntry = environment.strategyId
+    ? strategies?.[environment.strategyId]
+    : undefined;
+  const privateSpec = environment.strategyConfig?.spec;
+  const spec = privateSpec ?? mirroredEntry?.spec;
+  const declaredSpecVersion = privateSpec !== undefined
+    ? environment.strategyConfig?.declaredSpecVersion
+    : mirroredEntry?.declaredSpecVersion;
   if (!spec) {
     return {
       issues: [{ message: "该环境没有可导出的登录声明（spec）" }],
@@ -153,9 +170,16 @@ export function buildConfigPackage(
   );
 
   // —— 环境自身的变量声明剔除 secret，留 name/title ——
-  const packageVars: ConfigPackageVar[] = (spec.vars ?? [])
+  const packageVars: ConfigPackageVar[] = declaredVars(spec)
     .filter((variable) => variable.secret !== true)
-    .map((variable) => ({ name: variable.name, title: variable.title }));
+    .flatMap((variable) =>
+      typeof variable.name === "string"
+        ? [{
+            name: variable.name,
+            title: typeof variable.title === "string" ? variable.title : undefined,
+          }]
+        : [],
+    );
 
   // requiredVars 去重后，仍须是 spec.vars 子集（且不得命中 secret 变量）
   const uniqueRequired = Array.from(new Set(requiredVars));
@@ -182,7 +206,9 @@ export function buildConfigPackage(
 
   const packageObj: ConfigPackage = {
     format: CONFIG_PACKAGE_FORMAT,
-    specVersion: LOGIN_SPEC_VERSION,
+    specVersion:
+      declaredSpecVersion ??
+      (typeof spec.version === "number" ? spec.version : LOGIN_SPEC_VERSION),
     requiredVars: requiredVarDefs,
     environments: [
       {
@@ -190,6 +216,7 @@ export function buildConfigPackage(
         url: origin,
         loginMethod: environment.loginMethod,
         spec,
+        ...(environment.vars ? { vars: { ...environment.vars } } : {}),
         requiredVars: requiredVarDefs,
       },
     ],
@@ -208,8 +235,8 @@ export function buildConfigPackage(
  * - 非 `dt-login-config/v1` 格式 / 未知格式 → 结构错误
  * - 包内任一环境 spec 含 `script` → `CONFIG_INVALID`（指出第几步）
  * - 任一变量 `secret: true` → `CONFIG_INVALID`（v1 直接拒绝）
- * - `specVersion > LOGIN_SPEC_VERSION` → 版本过高，请先升级扩展
  * - 包 `requiredVars` 或环境 `requiredVars` 里的名字不在对应 spec.vars
+ * - 高 `specVersion` / `spec.version` 不在这里拒绝，由调用方逐环境计算支持状态
  *
  * 返回空数组 = 可导入。不修改任何输入（纯函数）。
  */
@@ -224,21 +251,6 @@ export function validateConfigPackage(raw: unknown): PackageIssue[] {
         code: "CONFIG_INVALID",
         message:
           `配置包格式 ${raw.format} 不被支持（需要 ${CONFIG_PACKAGE_FORMAT}）`,
-      },
-    ];
-  }
-
-  // 版本过高拒绝（导入成功但行为诡异 < 明确拒绝并告知原因）
-  if (
-    typeof raw.specVersion === "number" &&
-    raw.specVersion > LOGIN_SPEC_VERSION
-  ) {
-    return [
-      {
-        code: "CONFIG_INVALID",
-        message:
-          `配置包 spec 版本 ${raw.specVersion} 高于当前扩展支持的 ` +
-          `${LOGIN_SPEC_VERSION}，请先升级扩展后再导入`,
       },
     ];
   }
@@ -276,17 +288,26 @@ export function validateConfigPackage(raw: unknown): PackageIssue[] {
       });
       return;
     }
-    if ((spec as { version?: unknown }).version !== LOGIN_SPEC_VERSION) {
+    if (
+      typeof spec.version !== "number" ||
+      !Number.isInteger(spec.version) ||
+      spec.version < 1
+    ) {
       issues.push({
         code: "CONFIG_INVALID",
-        message:
-          `第 ${envIndex + 1} 个环境的 spec 版本不支持` +
-          `（需要 ${LOGIN_SPEC_VERSION}）`,
+        message: `第 ${envIndex + 1} 个环境的 spec 缺少有效版本号`,
+      });
+      return;
+    }
+    if (!Array.isArray(spec.ops)) {
+      issues.push({
+        code: "CONFIG_INVALID",
+        message: `第 ${envIndex + 1} 个环境的 spec 缺少算子列表（ops）`,
       });
       return;
     }
 
-    const loginSpec = spec as unknown as LoginSpec;
+    const loginSpec = spec;
 
     // 逐算子检查 script
     const scriptOps = findScriptOps(loginSpec);

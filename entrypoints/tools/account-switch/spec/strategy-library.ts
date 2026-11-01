@@ -21,6 +21,7 @@
 
 import type { DomainConfig, StrategyEntry } from "../types";
 import { defaultLoginSpec } from "./editor";
+import type { SpecDocument } from "./document";
 import type { LoginSpec } from "./types";
 
 /** 策略 id：`custom:` 前缀保持与旧动态预设 key 的视觉连续性 */
@@ -50,15 +51,18 @@ function slugify(raw: string): string {
 }
 
 /** 策略的展示名：`spec.template` 优先，其次传入的兜底名，最后「自定义登录」 */
-export function strategyTitle(spec: LoginSpec, fallbackName?: string): string {
-  const template = spec.template?.trim();
+export function strategyTitle(
+  spec: SpecDocument | LoginSpec,
+  fallbackName?: string,
+): string {
+  const template = typeof spec.template === "string" ? spec.template.trim() : "";
   if (template && template !== "generic") return template;
   const name = fallbackName?.trim();
   return name || "自定义登录";
 }
 
 /** 语义相等的策略内容（用于「同名同内容合并」判断） */
-function sameSpec(a: LoginSpec, b: LoginSpec): boolean {
+function sameSpec(a: SpecDocument, b: SpecDocument): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -88,13 +92,18 @@ export interface UpsertResult {
  */
 export function upsertStrategy(
   strategies: Record<string, StrategyEntry> | undefined,
-  spec: LoginSpec,
+  spec: SpecDocument | LoginSpec,
   title: string,
   now: number = Date.now(),
+  declaredSpecVersion?: number,
 ): UpsertResult {
   const current = strategies ?? {};
+  const document = spec as SpecDocument;
   for (const [id, entry] of Object.entries(current)) {
-    if (sameSpec(entry.spec, spec)) {
+    if (
+      sameSpec(entry.spec, document) &&
+      entry.declaredSpecVersion === declaredSpecVersion
+    ) {
       return { id, strategies: current, created: false };
     }
   }
@@ -104,7 +113,13 @@ export function upsertStrategy(
     created: true,
     strategies: {
       ...current,
-      [id]: { name: title, spec, createdAt: now, updatedAt: now },
+      [id]: {
+        name: title,
+        spec: document,
+        ...(declaredSpecVersion === undefined ? {} : { declaredSpecVersion }),
+        createdAt: now,
+        updatedAt: now,
+      },
     },
   };
 }
@@ -113,17 +128,20 @@ export function upsertStrategy(
 export function updateStrategy(
   strategies: Record<string, StrategyEntry> | undefined,
   id: string,
-  spec: LoginSpec,
+  spec: SpecDocument | LoginSpec,
   now: number = Date.now(),
+  declaredSpecVersion?: number,
 ): Record<string, StrategyEntry> {
   const current = strategies ?? {};
   const existing = current[id];
   if (!existing) return current;
+  const provenance = declaredSpecVersion ?? existing.declaredSpecVersion;
   return {
     ...current,
     [id]: {
       name: strategyTitle(spec, existing.name),
-      spec,
+      spec: spec as SpecDocument,
+      ...(provenance === undefined ? {} : { declaredSpecVersion: provenance }),
       createdAt: existing.createdAt,
       updatedAt: now,
     },
@@ -158,7 +176,7 @@ export function unbindEnvironment(
   const next: DomainConfig = { ...env };
   delete next.strategyId;
   if (mode === "revert-generic") {
-    next.strategyConfig = { spec: genericSpec() };
+    next.strategyConfig = { spec: { ...genericSpec() } };
     next.loginMethod = "generic";
   }
   return next;

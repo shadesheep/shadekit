@@ -1,0 +1,93 @@
+{
+  "format": "shadekit-login-golden/v1",
+  "cases": [
+    {
+      "id": "http-success-deterministic-request",
+      "input": {
+        "spec": {
+          "version": 2,
+          "ops": [
+            {
+              "op": "http.execute",
+              "url": "{origin}/login",
+              "method": "POST",
+              "headers": { "Content-Type": "application/json" },
+              "body": { "json": { "username": "{username}", "password": "{password}" } },
+              "as": "response"
+            }
+          ],
+          "success": [{ "token": { "from": "response", "path": "token" } }],
+          "auth": { "mode": "page" }
+        },
+        "inputs": {
+          "username": "alice",
+          "password": "GOLDEN-PASSWORD-55",
+          "origin": "https://app.test"
+        }
+      },
+      "response": { "status": 200, "text": "{\"token\":\"GOLDEN-TOKEN-66\"}" },
+      "expected": {
+        "success": true,
+        "request": {
+          "url": "https://app.test/login",
+          "method": "POST",
+          "headers": { "Content-Type": "application/json" },
+          "body": "{\"username\":\"alice\",\"password\":\"GOLDEN-PASSWORD-55\"}",
+          "timeoutMs": 15000
+        },
+        "bindings": { "response": { "token": "GOLDEN-TOKEN-66" } },
+        "trace": [{ "index": 0, "op": "http.execute", "target": "POST {origin}/login", "status": "success" }]
+      }
+    },
+    {
+      "id": "http-business-rejection",
+      "input": {
+        "spec": {
+          "version": 2,
+          "ops": [{ "op": "http.execute", "url": "{origin}/login", "as": "response" }],
+          "success": [{ "response": { "from": "response", "path": "ok", "equals": true } }],
+          "auth": { "mode": "page" }
+        },
+        "inputs": { "username": "alice", "password": "GOLDEN-PASSWORD-55", "origin": "https://app.test" }
+      },
+      "response": { "status": 200, "text": "{\"ok\":false}" },
+      "expected": {
+        "success": false,
+        "errorCode": "SUCCESS_CONDITION_UNMET",
+        "bindings": { "response": { "ok": false } },
+        "trace": [{ "index": 0, "op": "http.execute", "target": "GET {origin}/login", "status": "success" }]
+      }
+    },
+    {
+      "id": "trial-skips-navigation-and-session-write",
+      "trial": true,
+      "input": {
+        "spec": {
+          "version": 2,
+          "ops": [
+            { "op": "goto", "url": "https://unused.test" },
+            { "op": "http.execute", "url": "{origin}/login", "as": "response" },
+            { "op": "auth.write" }
+          ],
+          "success": [],
+          "auth": {
+            "mode": "engine",
+            "cookiesWrite": [{ "name": "sid", "value": "GOLDEN-TOKEN-66" }]
+          }
+        },
+        "inputs": { "username": "alice", "password": "GOLDEN-PASSWORD-55", "origin": "https://app.test" }
+      },
+      "response": { "status": 200, "text": "{\"token\":\"GOLDEN-TOKEN-66\"}" },
+      "expected": {
+        "success": true,
+        "bindings": { "response": { "token": "GOLDEN-TOKEN-66" } },
+        "trace": [
+          { "index": 0, "op": "goto", "target": "https://unused.test", "status": "skipped" },
+          { "index": 1, "op": "http.execute", "target": "GET {origin}/login", "status": "success" },
+          { "index": 2, "op": "auth.write", "status": "skipped" }
+        ],
+        "sessionWrites": 0
+      }
+    }
+  ]
+}

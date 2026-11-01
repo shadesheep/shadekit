@@ -6,7 +6,8 @@ import { defaultLoginSpec } from "../entrypoints/tools/account-switch/spec/edito
 import { dismissToast, useToast } from "../entrypoints/shared/use-toast";
 
 const sendMessage = vi.fn();
-vi.stubGlobal("chrome", { runtime: { sendMessage } });
+vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true }, runtime: { sendMessage } });
 
 beforeEach(() => {
   sendMessage.mockReset();

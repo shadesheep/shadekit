@@ -22,6 +22,10 @@
 
 import type { AuthContext } from "../types";
 import { ErrorCodes } from "../utils/error-codes";
+import {
+  inspectLoginSpecSupport,
+  type SpecSupportIssue,
+} from "./capabilities";
 import { runSpec, trialAllowedOps, type TrialSignalState } from "./run";
 import type { LoginSpec } from "./types";
 
@@ -53,11 +57,28 @@ export interface TrialResult {
  *
  * 返回 `TrialResult`；与 `runSpec` 不同，这里不抛异常。
  */
+function supportFailure(issue: SpecSupportIssue): TrialResult {
+  return {
+    ok: false,
+    requestSent: false,
+    signalUnmet: false,
+    signals: [],
+    sessionWritten: false,
+    errorCode: issue.code,
+    error: issue.message,
+    bindings: {},
+  };
+}
+
 export async function runTrialLogin(
   spec: LoginSpec,
   ctx: AuthContext,
   opts: { writeSession?: boolean } = {},
 ): Promise<TrialResult> {
+  // 试登录同样先过能力门：不支持的声明在构造请求、解析秘密之前直接拒绝。
+  const support = inspectLoginSpecSupport(spec);
+  if (!support.supported) return supportFailure(support.issues[0]);
+
   const writeSession = opts.writeSession === true;
   const result = await runSpec(spec, ctx, { trial: { writeSession } });
 

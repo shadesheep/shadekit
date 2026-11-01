@@ -26,7 +26,7 @@ describe('README 虚构演示配置', () => {
   });
 
   it('用真实通用登录声明填充两个虚构凭据并进入登录页', () => {
-    const spec: LoginSpec | undefined = config.environment.strategyConfig?.spec;
+    const spec = config.environment.strategyConfig?.spec as LoginSpec | undefined;
     expect(spec).toBeDefined();
     if (!spec) throw new Error('Demo config must include a LoginSpec');
     expect(validateLoginSpec(spec)).toEqual([]);

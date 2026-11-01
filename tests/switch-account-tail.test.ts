@@ -24,6 +24,7 @@ const tabsMock = {
 };
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   storage: {
     local: {
       get: (...args: unknown[]) => storageGetMock(...args),
@@ -50,8 +51,16 @@ const account = {
   username: "user1",
   password: "pass1",
   roles: [],
-  domains: ["example.com"],
+  domains: ["http://example.com"],
 } as Account;
+
+const sender = {
+  id: "shadekit-test-extension",
+  url: "http://example.com/dashboard",
+  origin: "http://example.com",
+  frameId: 0,
+  tab: { id: 1, url: "http://example.com/dashboard" },
+} as chrome.runtime.MessageSender;
 
 /** 环境声明：执行器已 mock，这里只需要能通过 prelude 读取 */
 function seedConfig() {
@@ -59,6 +68,7 @@ function seedConfig() {
     if (keys.includes("devtools-account-switch")) {
       return {
         "devtools-account-switch": {
+          accounts: [account],
           domains: {
             "http://example.com": {
               name: "测试环境",
@@ -106,9 +116,7 @@ afterEach(() => {
 
 describe("handleSwitchAccount — 登录成功后的尾部刷新", () => {
   it("成功后刷新执行 tab（旧 afterLogin 的 reload 兜底）", async () => {
-    const result = await handleSwitchAccount(account, "http://example.com", {
-      tab: { id: 1 },
-    } as chrome.runtime.MessageSender);
+    const result = await handleSwitchAccount(account.id, "http://example.com", sender);
 
     expect(result.success).toBe(true);
     expect(tabsMock.reload).toHaveBeenCalledWith(1);
@@ -121,9 +129,7 @@ describe("handleSwitchAccount — 登录成功后的尾部刷新", () => {
       status: "complete",
     });
 
-    const result = await handleSwitchAccount(account, "http://example.com", {
-      tab: { id: 1 },
-    } as chrome.runtime.MessageSender);
+    const result = await handleSwitchAccount(account.id, "http://example.com", sender);
 
     expect(result.success).toBe(true);
     expect(tabsMock.update).toHaveBeenCalledWith(1, {
@@ -135,10 +141,65 @@ describe("handleSwitchAccount — 登录成功后的尾部刷新", () => {
   it("刷新失败不把已成功的登录判成失败", async () => {
     tabsMock.reload.mockRejectedValueOnce(new Error("No tab with id: 1"));
 
-    const result = await handleSwitchAccount(account, "http://example.com", {
-      tab: { id: 1 },
-    } as chrome.runtime.MessageSender);
+    const result = await handleSwitchAccount(account.id, "http://example.com", sender);
 
     expect(result.success).toBe(true);
+  });
+
+  it("通配符环境按当前页面的具体 origin 执行，而不是 %2A 编码的环境 key", async () => {
+    const wildcardAccount = {
+      ...account,
+      domains: ["https://*.example.com"],
+    } as Account;
+    storageGetMock.mockImplementation(async (keys: string[]) => {
+      if (!keys.includes("devtools-account-switch")) return {};
+      return {
+        "devtools-account-switch": {
+          accounts: [wildcardAccount],
+          domains: {
+            "https://*.example.com": {
+              name: "示例环境",
+              loginMethod: "generic",
+              strategyConfig: {
+                spec: {
+                  version: 2,
+                  template: "generic",
+                  ops: [
+                    { op: "http.execute", url: "{origin}/login", as: "resp" },
+                    { op: "auth.write" },
+                  ],
+                  success: [
+                    { response: { from: "resp", path: "success", equals: true } },
+                  ],
+                  auth: { mode: "engine" },
+                },
+              },
+            },
+          },
+        },
+      };
+    });
+    tabsMock.get.mockResolvedValue({
+      id: 1,
+      url: "https://app.example.com/dashboard",
+      status: "complete",
+    });
+    const wildcardSender = {
+      ...sender,
+      url: "https://app.example.com/dashboard",
+      origin: "https://app.example.com",
+      tab: { id: 1, url: "https://app.example.com/dashboard" },
+    } as chrome.runtime.MessageSender;
+
+    const result = await handleSwitchAccount(
+      wildcardAccount.id,
+      "https://*.example.com",
+      wildcardSender,
+    );
+
+    expect(result.success).toBe(true);
+    expect(runLoginSpecMock).toHaveBeenCalledOnce();
+    const ctx = runLoginSpecMock.mock.calls[0][1] as { origin: string };
+    expect(ctx.origin).toBe("https://app.example.com");
   });
 });

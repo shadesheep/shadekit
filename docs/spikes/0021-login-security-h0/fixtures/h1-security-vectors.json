@@ -1,0 +1,76 @@
+{
+  "format": "shadekit-security-vectors/v1",
+  "vault": {
+    "credentialId": "account:acc-fixed",
+    "aad": "shadekit/vault/v1/account-switch/account:acc-fixed",
+    "plaintext": "H1-密码-7f91",
+    "dek": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+    "iv": "oKGio6Slpqeoqaqr",
+    "record": {
+      "format": "shadekit-vault/v1",
+      "credentialId": "account:acc-fixed",
+      "iv": "oKGio6Slpqeoqaqr",
+      "ciphertext": "8eAQg1IzvaT+I5UNyLQgNC7DItgMLK0dgLUCwiHD"
+    }
+  },
+  "backup": {
+    "password": "H1-backup-password",
+    "payload": {
+      "__version": 3,
+      "account-switch": {
+        "accounts": [],
+        "domains": {}
+      },
+      "theme": "dark"
+    },
+    "envelope": {
+      "format": "shadekit-backup/v1",
+      "backupId": "00000000-0000-4000-8000-000000000001",
+      "kdf": {
+        "name": "PBKDF2-SHA-256",
+        "iterations": 600000,
+        "salt": "EBESExQVFhcYGRobHB0eHw=="
+      },
+      "dekWrap": "AES-KW",
+      "wrappedDek": "WVL4+NMTGx4fn1Ovq0mXh/GQilQRiiC6dBTZvh6pr2P7t6mdBYSbHQ==",
+      "iv": "ICEiIyQlJicoKSor",
+      "ciphertext": "DNHlPIM+o7RxzWm7fSr1njD2uMigqBaW97dXBuFZ/jXurjbXio0ZfhMj/gUjlsI4jTyMPzcln0Tg0ltHzIL0p0c4FnRXbN6bE+TCdvYC63it0Az7PkE7U8RyNTA="
+    }
+  },
+  "migration": {
+    "source": {
+      "accounts": [
+        {
+          "id": "acc-fixed",
+          "name": "固定账号",
+          "username": "alice",
+          "password": "H1-MIGRATION-SECRET",
+          "roles": [],
+          "domains": ["https://fixed.example.com"]
+        }
+      ],
+      "domains": {
+        "https://fixed.example.com": {
+          "name": "固定环境",
+          "tags": [],
+          "defaultPassword": "H1-ENV-SECRET"
+        }
+      },
+      "globalDefaultPassword": "H1-GLOBAL-SECRET"
+    },
+    "expectedRefs": {
+      "account": "account:acc-fixed",
+      "environment": "environment:https%3A%2F%2Ffixed.example.com:default",
+      "global": "global:default"
+    },
+    "journalStages": ["started", "prepared", "committed"],
+    "recoveryAadId": "migration-recovery"
+  },
+  "importRecovery": {
+    "journalFormat": "shadekit-import-journal/v1",
+    "stage": "prepared",
+    "recoveryAadId": "import-recovery",
+    "crashInjection": "throw on devtools-account-switch after journal and secret writes",
+    "requiredInvariant": "two recoveries restore the exact pre-import storage snapshot"
+  }
+}

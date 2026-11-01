@@ -19,6 +19,7 @@ import {
   preloadShadowStyles,
 } from "./shadow-style-injector";
 import { getFloatPanelPosition } from "./float-panel-position";
+import { panelComponentLoaders } from "./panel-components";
 // 样式经标准 Vite 管线打包为 content-scripts/content.css
 // （cssInjectionMode: 'ui' → 不注入页面，由 shadow-style-injector 运行时
 // fetch 后注入各 Shadow Root）。导入顺序即最终 CSS 级联顺序。
@@ -269,7 +270,9 @@ async function openAccountSwitcherAtMouse() {
 
   // 动态加载组件并渲染
   try {
-    const mod = await tool.contentScript.panel.component();
+    const loader = panelComponentLoaders[tool.id];
+    if (!loader) throw new Error(`未注册面板组件: ${tool.id}`);
+    const mod = await loader();
     const comp = mod.default || mod.__default;
     if (activePanel?.el !== panelHost) return;
     if (!comp || (typeof comp !== "function" && typeof comp !== "object")) {

@@ -154,7 +154,7 @@ npm run zip:firefox   # Package the Firefox build (includes a sources zip)
 
 ## Tech Stack
 
-**WXT** + **Vue 3** + **TypeScript** (strict) + **UnoCSS**; CodeMirror 6 (JSON editor), fast-json-patch (RFC 6902 comparison), js-beautify (code beautification), and Pinia (state management).
+**WXT** + **Vue 3** + **TypeScript** (strict) + **UnoCSS**; CodeMirror 6 (JSON editor), fast-json-patch (RFC 6902 comparison), and js-beautify (code beautification).
 
 ## Development
 

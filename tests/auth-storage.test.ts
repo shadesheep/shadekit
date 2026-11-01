@@ -105,7 +105,8 @@ describe("scanAuthStorage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal("chrome", { scripting: { executeScript } });
+    vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true }, scripting: { executeScript } });
   });
 
   afterEach(() => {

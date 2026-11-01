@@ -36,6 +36,7 @@ vi.mock("../entrypoints/tools/account-switch/utils/env", async (importOriginal) 
 
 let app: VueApp<Element> | null = null;
 let root: HTMLDivElement;
+const renderErrors: unknown[] = [];
 
 const config = {
   accounts: [],
@@ -54,6 +55,24 @@ const config = {
   globalDefaultPassword: "global-secret",
 };
 
+const panelData = {
+  origin: "https://current.example.com",
+  matchedEnvKey: "",
+  accounts: [],
+  domains: {
+    "https://target.example.com": {
+      name: "目标环境",
+      tags: [],
+      debugRedirect: "http://localhost:3000/bugs",
+      debugRedirectEnabled: true,
+      hasDefaultPassword: true,
+    },
+  },
+  tabOrder: ["quicklogin", "users"],
+  quickLoginDefaultDomain: "",
+  hasGlobalDefaultPassword: true,
+};
+
 async function flush() {
   await Promise.resolve();
   await nextTick();
@@ -65,6 +84,9 @@ async function mountPanel() {
   root = document.createElement("div");
   document.body.appendChild(root);
   app = createApp(SwitcherPanel);
+  app.config.errorHandler = (error) => {
+    renderErrors.push(error);
+  };
   app.mount(root);
   await flush();
   await flush();
@@ -82,15 +104,43 @@ function keydown(target: Element, key: string, init: KeyboardEventInit = {}) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  renderErrors.length = 0;
   mocks.getCurrentOrigin.mockResolvedValue("https://current.example.com");
   mocks.getConfig.mockResolvedValue(config);
-  mocks.sendBgMessage.mockImplementation(() => Promise.withResolvers<unknown>().promise);
+  mocks.sendBgMessage.mockImplementation((type: string) =>
+    type === "GET_ACCOUNT_PANEL"
+      ? Promise.resolve(structuredClone(panelData))
+      : Promise.withResolvers<unknown>().promise,
+  );
 });
 
 afterEach(() => {
   app?.unmount();
   app = null;
   document.body.innerHTML = "";
+});
+
+describe("SwitcherPanel 配置读取失败", () => {
+  it("结构化拒绝信封渲染错误态，不让 undefined 状态进入渲染", async () => {
+    mocks.sendBgMessage.mockImplementation((type: string) =>
+      type === "GET_ACCOUNT_PANEL"
+        ? Promise.resolve({
+            success: false,
+            error: "缺少目标环境访问权限",
+            errorCode: "HOST_PERMISSION_REQUIRED",
+          })
+        : Promise.withResolvers<unknown>().promise,
+    );
+
+    await mountPanel();
+
+    expect(renderErrors).toEqual([]);
+    expect(root.querySelector('[role="alert"]')?.textContent)
+      .toContain("账号配置加载失败");
+    expect(root.querySelector(".as-tab-env-label")?.textContent)
+      .toContain("配置加载失败");
+    expect(root.querySelector(".as-account-card")).toBeNull();
+  });
 });
 
 describe("SwitcherPanel 键盘行为", () => {
@@ -140,10 +190,12 @@ describe("SwitcherPanel 零账号快捷登录", () => {
     expect(mocks.sendBgMessage).toHaveBeenCalledWith("QUICK_LOGIN", {
       url: "https://target.example.com/login",
       username: "admin",
-      password: "env-secret",
       hasUrl: true,
       debugRedirect: "http://localhost:3000/bugs",
     });
+    expect(mocks.getConfig).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.sendBgMessage.mock.calls)).not.toContain("env-secret");
+    expect(JSON.stringify(mocks.sendBgMessage.mock.calls)).not.toContain("global-secret");
   });
 });
 
@@ -167,6 +219,74 @@ describe("SwitcherPanel 零配置快捷登录", () => {
   });
 });
 
+describe("SwitcherPanel 不支持的环境", () => {
+  it("展示版本/算子原因，但登录仍交给 Background 能力门（不做事先禁用）", async () => {
+    mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    const unsupportedPanel = {
+      ...structuredClone(panelData),
+      origin: "https://target.example.com",
+      matchedEnvKey: "https://target.example.com",
+      accounts: [{
+        id: "acc-unsupported",
+        name: "未来账号",
+        username: "alice",
+        roles: [],
+        hasSavedPassword: true,
+      }],
+      domains: {
+        "https://target.example.com": {
+          name: "目标环境",
+          tags: [],
+          debugRedirectEnabled: false,
+          hasDefaultPassword: true,
+          support: {
+            supported: false,
+            issues: [
+              {
+                code: "SPEC_VERSION_UNSUPPORTED",
+                message: "当前客户端不支持 LoginSpec 版本 3",
+              },
+              {
+                code: "OP_UNSUPPORTED",
+                message: "当前客户端不支持算子 future.op",
+                opIndex: 0,
+              },
+            ],
+          },
+        },
+      },
+    };
+    mocks.sendBgMessage.mockImplementation((type: string) =>
+      type === "GET_ACCOUNT_PANEL"
+        ? Promise.resolve(unsupportedPanel)
+        : Promise.resolve({ success: false, errorCode: "OP_UNSUPPORTED" }),
+    );
+
+    await mountPanel();
+
+    const note = root.querySelector(".as-support-note");
+    expect(note?.textContent).toContain("当前客户端不支持 LoginSpec 版本 3");
+    expect(note?.textContent).toContain("当前客户端不支持算子 future.op");
+
+    root.querySelector<HTMLButtonElement>(".as-ql-btn")?.remove();
+    Array.from(root.querySelectorAll<HTMLButtonElement>(".as-tab-btn"))
+      .find((button) => button.textContent?.includes("选择账号"))
+      ?.click();
+    await flush();
+    const card = root.querySelector<HTMLButtonElement>(".as-account-card")!;
+    expect(card.disabled).toBe(false);
+    card.click();
+    await flush();
+
+    // 客户端不禁用登录入口：由 Background 的 assertEnvironmentLoginSupported
+    // 在任何副作用前拒绝，并使用结构化的 OP_UNSUPPORTED 错误码。
+    expect(mocks.sendBgMessage).toHaveBeenCalledWith("SWITCH_ACCOUNT", {
+      accountId: "acc-unsupported",
+      environmentId: "https://target.example.com",
+    });
+  });
+});
+
 describe("SwitcherPanel 已配置环境", () => {
   it("保留快捷登录和选择账号 Tab", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
@@ -176,5 +296,73 @@ describe("SwitcherPanel 已配置环境", () => {
       (button) => button.textContent?.trim(),
     );
     expect(labels).toEqual(["快捷登录", "选择账号"]);
+  });
+
+  it("账号切换只发送 accountId/environmentId，不读取或传播保存密码", async () => {
+    mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.sendBgMessage.mockImplementation((type: string) =>
+      type === "GET_ACCOUNT_PANEL"
+        ? Promise.resolve({
+            ...structuredClone(panelData),
+            origin: "https://target.example.com",
+            matchedEnvKey: "https://target.example.com",
+            accounts: [{
+              id: "acc-current",
+              name: "当前账号",
+              username: "alice",
+              roles: ["管理员"],
+            }],
+          })
+        : Promise.withResolvers<unknown>().promise,
+    );
+    await mountPanel();
+    root.querySelector<HTMLButtonElement>(".as-ql-btn")?.remove();
+    const usersTab = Array.from(root.querySelectorAll<HTMLButtonElement>(".as-tab-btn"))
+      .find((button) => button.textContent?.includes("选择账号"));
+    usersTab?.click();
+    await flush();
+    root.querySelector<HTMLButtonElement>(".as-account-card")!.click();
+    await flush();
+
+    expect(mocks.sendBgMessage).toHaveBeenCalledWith("SWITCH_ACCOUNT", {
+      accountId: "acc-current",
+      environmentId: "https://target.example.com",
+    });
+    expect(mocks.getConfig).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.sendBgMessage.mock.calls)).not.toContain("password");
+  });
+
+  it("无保存密码账号使用当次临时密码且不重新保存", async () => {
+    mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.sendBgMessage.mockImplementation((type: string) => {
+      if (type === "GET_ACCOUNT_PANEL") return Promise.resolve({
+        ...structuredClone(panelData),
+        origin: "https://target.example.com",
+        matchedEnvKey: "https://target.example.com",
+        accounts: [{ id: "acc-temp", name: "临时账号", username: "temp", roles: [], hasSavedPassword: false }],
+      });
+      return Promise.resolve({ success: true });
+    });
+    await mountPanel();
+    root.querySelector<HTMLButtonElement>(".as-ql-btn")?.remove();
+    Array.from(root.querySelectorAll<HTMLButtonElement>(".as-tab-btn")).find((button) => button.textContent?.includes("选择账号"))?.click();
+    await flush();
+    root.querySelector<HTMLButtonElement>(".as-account-card")!.click();
+    await flush();
+    const input = root.querySelector<HTMLInputElement>("[data-temporary-password]");
+    expect(input).toBeTruthy();
+    input!.value = "one-shot-password";
+    input!.dispatchEvent(new Event("input"));
+    await flush();
+    root.querySelector<HTMLButtonElement>("[data-temporary-submit]")!.click();
+    await flush();
+    expect(mocks.sendBgMessage).toHaveBeenCalledWith("QUICK_LOGIN", {
+      url: "https://target.example.com",
+      username: "temp",
+      password: "one-shot-password",
+      hasUrl: false,
+    });
+    expect(mocks.sendBgMessage).not.toHaveBeenCalledWith("SWITCH_ACCOUNT", expect.anything());
+    expect(mocks.sendBgMessage).not.toHaveBeenCalledWith("VAULT_PUT_SECRET", expect.anything());
   });
 });

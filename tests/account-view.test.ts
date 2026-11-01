@@ -12,6 +12,9 @@ import { describe, it, expect } from 'vitest';
  */
 
 import {
+  assertEnvironmentLoginSupported,
+  buildAccountPanel,
+  environmentLoginSupport,
   normalizeAccount,
   filterAccounts,
   collectRoles,
@@ -23,6 +26,7 @@ import {
 } from '../entrypoints/tools/account-switch/account-view';
 import { ACCOUNT_COLORS, ACCOUNT_FALLBACK_COLOR, accountColorIndex } from '../entrypoints/tools/account-switch/account-palette';
 import type { Account } from '../entrypoints/tools/account-switch/types';
+import * as accountView from '../entrypoints/tools/account-switch/account-view';
 
 function acc(partial: Partial<Account> & { id: string }): Account {
   return {
@@ -50,9 +54,9 @@ describe('normalizeAccount', () => {
     expect(a.roles).toEqual([]);
   });
 
-  it('password 缺失时归一化为空字符串', () => {
+  it('password 缺失时不凭空写入空明文字段', () => {
     const a = normalizeAccount({ id: 'a1', name: 'n', username: 'u', domains: [] });
-    expect(a.password).toBe('');
+    expect(a).not.toHaveProperty('password');
   });
 
   it('roles 非数组（脏数据）时归一化为空数组', () => {
@@ -233,5 +237,157 @@ describe('roleColor / roleColorStyle — 预设走 pin 表，自定义按名哈�
     for (const role of [...ROLE_NAMES, '自定义']) {
       expect(roleColor(role)).toBe(roleColorStyle(role)['--role-light-fg']);
     }
+  });
+});
+
+describe('buildAccountPanel — Content Script 公共 DTO', () => {
+  it('只公开当前环境账号和布尔密码提示，不泄露秘密、变量或策略库', () => {
+    const build = (accountView as unknown as {
+      buildAccountPanel?: (
+        config: import('../entrypoints/tools/account-switch/types').AccountSwitchConfig,
+        origin: string,
+      ) => Record<string, unknown>;
+    }).buildAccountPanel;
+    expect(build).toBeTypeOf('function');
+
+    const password = 'panel-account-password-91c7';
+    const envPassword = 'panel-env-password-63b2';
+    const globalPassword = 'panel-global-password-28d4';
+    const secretVar = 'panel-secret-var-77e1';
+    const panel = build!({
+      accounts: [
+        acc({ id: 'current', name: '当前账号', username: 'alice', password, roles: ['管理员'], domains: ['https://current.example.com'] }),
+        acc({ id: 'other', name: '无关账号', username: 'bob', password: 'other-password', domains: ['https://other.example.com'] }),
+      ],
+      domains: {
+        'https://current.example.com': {
+          name: '当前环境', tags: ['test'], loginMethod: 'generic',
+          defaultPassword: envPassword,
+          debugRedirect: 'http://localhost:3000/bugs', debugRedirectEnabled: true,
+          vars: { clientSecret: secretVar },
+          strategyConfig: { spec: { version: 2, ops: [], success: [], auth: { mode: 'page' } } },
+        },
+        'https://other.example.com': { name: '其他环境', tags: [], defaultPassword: 'other-env-password' },
+      },
+      strategies: {
+        private: { name: '私有策略', spec: { version: 2, ops: [], success: [], auth: { mode: 'page' } }, createdAt: 1, updatedAt: 1 },
+      },
+      globalDefaultPassword: globalPassword,
+      quickLoginDefaultDomain: 'https://current.example.com',
+      tabOrder: ['quicklogin', 'users'],
+    }, 'https://current.example.com');
+
+    expect(panel.accounts).toEqual([
+      { id: 'current', name: '当前账号', username: 'alice', roles: ['管理员'], hasSavedPassword: true },
+    ]);
+    expect(panel.matchedEnvKey).toBe('https://current.example.com');
+    expect(panel.tabOrder).toEqual(['quicklogin', 'users']);
+    expect(panel.hasGlobalDefaultPassword).toBe(true);
+    expect(panel.domains).toMatchObject({
+      'https://current.example.com': {
+        name: '当前环境', hasDefaultPassword: true,
+        debugRedirect: 'http://localhost:3000/bugs', debugRedirectEnabled: true,
+      },
+    });
+    const serialized = JSON.stringify(panel);
+    for (const secret of [password, envPassword, globalPassword, secretVar, 'other-password', 'other-env-password']) {
+      expect(serialized).not.toContain(secret);
+    }
+    expect(serialized).not.toContain('私有策略');
+    expect(serialized).not.toContain('strategyConfig');
+    expect(serialized).not.toContain('vars');
+  });
+
+  it('每次读取都从私有或镜像原始声明派生支持度，且只暴露不支持项', () => {
+    const futureSpec = {
+      version: 2,
+      ops: [{ op: 'future.op', keep: true }],
+      success: [{ page: { type: 'formGone' } }],
+      auth: { mode: 'page' },
+    };
+    const supportedSpec = {
+      version: 2,
+      ops: [{ op: 'http.execute', url: '{origin}/login', as: 'resp' }],
+      success: [{ response: { from: 'resp', path: 'ok' } }],
+      auth: { mode: 'page' },
+    };
+    const config = {
+      accounts: [],
+      domains: {
+        'https://supported.example.com': {
+          name: '可用环境', tags: [],
+          strategyConfig: { spec: supportedSpec },
+        },
+        'https://private-future.example.com': {
+          name: '私有未来环境', tags: [],
+          strategyConfig: { spec: futureSpec, declaredSpecVersion: 3 },
+        },
+        'https://mirror-future.example.com': {
+          name: '镜像未来环境', tags: [], strategyId: 'future',
+        },
+      },
+      strategies: {
+        future: {
+          name: '未来策略', spec: futureSpec,
+          declaredSpecVersion: 3, createdAt: 1, updatedAt: 1,
+        },
+      },
+    };
+
+    const first = buildAccountPanel(config as never, '');
+    expect(first.domains['https://supported.example.com']).not.toHaveProperty('support');
+    expect(first.domains['https://private-future.example.com'].support).toMatchObject({
+      supported: false,
+    });
+    expect(first.domains['https://private-future.example.com'].support?.issues[0]).toMatchObject({
+      code: 'SPEC_VERSION_UNSUPPORTED',
+    });
+    expect(first.domains['https://mirror-future.example.com'].support).toMatchObject({
+      supported: false,
+    });
+    expect(first.domains['https://mirror-future.example.com'].support?.issues[0]).toMatchObject({
+      code: 'SPEC_VERSION_UNSUPPORTED',
+    });
+    expect(JSON.stringify(first)).not.toContain('"futureTop"');
+    expect(JSON.stringify(first)).not.toContain('"ops"');
+
+    // 支持度不落盘：持有人保持原样，升级策略后可立即重新派生。
+    expect(config.domains['https://mirror-future.example.com']).not.toHaveProperty('support');
+    expect(config.strategies.future).not.toHaveProperty('support');
+    config.strategies.future.spec = supportedSpec as unknown as typeof futureSpec;
+    delete (config.strategies.future as { declaredSpecVersion?: number }).declaredSpecVersion;
+    expect(buildAccountPanel(config as never, '').domains['https://mirror-future.example.com'])
+      .not.toHaveProperty('support');
+  });
+});
+
+describe('assertEnvironmentLoginSupported — 旧版本迁移输入', () => {
+  const legacySpec = {
+    version: 1,
+    template: 'legacy',
+    steps: [
+      { op: 'goto', url: '{origin}/login' },
+      { op: 'fill', target: '#u', value: '{username}' },
+      { op: 'fill', target: '#p', value: '{password}' },
+      { op: 'click', target: '#go' },
+    ],
+    settle: { type: 'any', of: [{ type: 'formGone' }] },
+    auth: { mode: 'page' },
+  };
+
+  it('可迁移的 v1 不标记为不支持，且不写回原始声明', () => {
+    const environment = {
+      name: '旧版环境',
+      tags: [],
+      strategyConfig: { spec: legacySpec },
+    };
+
+    expect(environmentLoginSupport(environment)).toEqual({
+      supported: true,
+      issues: [],
+    });
+    const executable = assertEnvironmentLoginSupported(environment);
+    expect(executable.version).toBe(2);
+    expect(environment.strategyConfig.spec).toEqual(legacySpec);
   });
 });

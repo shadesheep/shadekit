@@ -1,7 +1,239 @@
 import type { ToolDefinition, ToolBackgroundHandlers } from "./types";
 import type { BackgroundMessages, ToolMessageType } from "./messages";
+import { errorCodeOf } from "../tools/account-switch/utils/error-codes";
 
 type MessageHandler = NonNullable<ToolBackgroundHandlers[ToolMessageType]>;
+
+type LoginMessageType =
+  | "SWITCH_ACCOUNT"
+  | "QUICK_LOGIN"
+  | "TRIAL_LOGIN"
+  | "TRIAL_SAVED_ACCOUNT"
+  | "GET_ACCOUNT_PANEL"
+  | "REQUEST_ENVIRONMENT_PERMISSIONS";
+
+const loginMessageTypes = new Set<LoginMessageType>([
+  "SWITCH_ACCOUNT",
+  "QUICK_LOGIN",
+  "TRIAL_LOGIN",
+  "TRIAL_SAVED_ACCOUNT",
+  "GET_ACCOUNT_PANEL",
+  "REQUEST_ENVIRONMENT_PERMISSIONS",
+]);
+
+type VaultMessageType =
+  | "VAULT_GET_CONFIG"
+  | "VAULT_SAVE_CONFIG"
+  | "VAULT_PUT_SECRET"
+  | "VAULT_DELETE_SECRET"
+  | "VAULT_HAS_SECRET"
+  | "VAULT_EXPORT_BACKUP"
+  | "VAULT_PREPARE_BACKUP"
+  | "VAULT_CONFIRM_BACKUP";
+
+const vaultMessageTypes = new Set<VaultMessageType>([
+  "VAULT_GET_CONFIG",
+  "VAULT_SAVE_CONFIG",
+  "VAULT_PUT_SECRET",
+  "VAULT_DELETE_SECRET",
+  "VAULT_HAS_SECRET",
+  "VAULT_EXPORT_BACKUP",
+  "VAULT_PREPARE_BACKUP",
+  "VAULT_CONFIRM_BACKUP",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  message: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set(["type", ...required, ...optional]);
+  if (Object.keys(message).some((key) => !allowed.has(key))) return false;
+  return required.every((key) => Object.hasOwn(message, key));
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function validLoginPayload(type: LoginMessageType, message: Record<string, unknown>): boolean {
+  switch (type) {
+    case "SWITCH_ACCOUNT":
+      return (
+        hasExactKeys(message, ["accountId", "environmentId"]) &&
+        isString(message.accountId) && message.accountId.length > 0 &&
+        isString(message.environmentId) && message.environmentId.length > 0
+      );
+    case "REQUEST_ENVIRONMENT_PERMISSIONS":
+      return hasExactKeys(message, ["environmentId"]) &&
+        isString(message.environmentId) && message.environmentId.length > 0;
+    case "QUICK_LOGIN":
+      return (
+        hasExactKeys(
+          message,
+          ["url", "username"],
+          ["password", "hasUrl", "debugRedirect"],
+        ) &&
+        isString(message.url) && message.url.length > 0 &&
+        isString(message.username) && message.username.length > 0 &&
+        (message.password === undefined || isString(message.password)) &&
+        (message.hasUrl === undefined || typeof message.hasUrl === "boolean") &&
+        (message.debugRedirect === undefined || isString(message.debugRedirect))
+      );
+    case "TRIAL_LOGIN":
+      return (
+        hasExactKeys(
+          message,
+          ["spec", "origin", "username", "password"],
+          ["writeSession"],
+        ) &&
+        isRecord(message.spec) && Array.isArray(message.spec.ops) &&
+        isString(message.origin) && message.origin.length > 0 &&
+        isString(message.username) &&
+        isString(message.password) &&
+        (message.writeSession === undefined || typeof message.writeSession === "boolean")
+      );
+    case "TRIAL_SAVED_ACCOUNT":
+      return hasExactKeys(message, ["accountId", "environmentId"])
+        && isString(message.accountId) && message.accountId.length > 0
+        && isString(message.environmentId) && message.environmentId.length > 0;
+    case "GET_ACCOUNT_PANEL":
+      return hasExactKeys(message, []);
+  }
+}
+
+function validVaultPayload(type: VaultMessageType, message: Record<string, unknown>): boolean {
+  switch (type) {
+    case "VAULT_SAVE_CONFIG": {
+      const allowedPatchKeys = new Set([
+        "accounts", "domains", "strategies", "quickLoginDefaultDomain",
+        "tabOrder", "envBadge", "globalDefaultPassword",
+      ]);
+      return hasExactKeys(message, ["patch"], ["clearCredentialRefs"]) && isRecord(message.patch)
+        && Object.keys(message.patch).every((key) => allowedPatchKeys.has(key))
+        && (message.clearCredentialRefs === undefined
+          || (Array.isArray(message.clearCredentialRefs)
+            && message.clearCredentialRefs.every(
+              (ref) => isString(ref) && ref.length > 0,
+            )));
+    }
+    case "VAULT_PUT_SECRET":
+      return hasExactKeys(message, ["credentialId", "plaintext"])
+        && isString(message.credentialId) && message.credentialId.length > 0
+        && isString(message.plaintext);
+    case "VAULT_DELETE_SECRET":
+    case "VAULT_HAS_SECRET":
+      return hasExactKeys(message, ["credentialId"])
+        && isString(message.credentialId) && message.credentialId.length > 0;
+    case "VAULT_PREPARE_BACKUP":
+      return hasExactKeys(message, ["text"]) && isString(message.text);
+    case "VAULT_CONFIRM_BACKUP":
+      return hasExactKeys(message, ["acceptPlaintextWarning"])
+        && typeof message.acceptPlaintextWarning === "boolean";
+    case "VAULT_EXPORT_BACKUP":
+    case "VAULT_GET_CONFIG":
+      return hasExactKeys(message, []);
+  }
+}
+
+function urlOrigin(value: unknown): string {
+  if (!isString(value)) return "";
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
+}
+
+function isOwnExtensionPage(sender: chrome.runtime.MessageSender, id: string): boolean {
+  if (!isString(sender.url)) return false;
+  try {
+    const url = new URL(sender.url);
+    return (
+      (url.protocol === "chrome-extension:" || url.protocol === "moz-extension:") &&
+      url.host === id
+    );
+  } catch {
+    return false;
+  }
+}
+
+function authorizeLoginMessage(
+  type: LoginMessageType,
+  sender: chrome.runtime.MessageSender,
+): boolean {
+  const extensionId = chrome.runtime.id;
+  if (!extensionId || sender.id !== extensionId) return false;
+  if (sender.frameId !== undefined && sender.frameId !== 0) return false;
+  if (isOwnExtensionPage(sender, extensionId)) return true;
+
+  if (type === "TRIAL_LOGIN" || type === "TRIAL_SAVED_ACCOUNT" || sender.frameId !== 0 || !sender.tab) return false;
+  if (!Number.isInteger(sender.tab.id) || (sender.tab.id ?? 0) <= 0) return false;
+  const senderOrigin = urlOrigin(sender.url);
+  return (
+    senderOrigin !== "" &&
+    senderOrigin === urlOrigin(sender.tab.url) &&
+    (sender.origin === undefined || sender.origin === senderOrigin)
+  );
+}
+
+function loginMessageError(
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+): { success: false; error: string; errorCode: string } | null {
+  if (!isRecord(message) || !isString(message.type)) {
+    return { success: false, error: "消息格式无效", errorCode: "CONFIG_INVALID" };
+  }
+  if (!loginMessageTypes.has(message.type as LoginMessageType)) return null;
+  const type = message.type as LoginMessageType;
+  if (!validLoginPayload(type, message)) {
+    return { success: false, error: "登录消息字段无效", errorCode: "CONFIG_INVALID" };
+  }
+  if (!authorizeLoginMessage(type, sender)) {
+    return { success: false, error: "登录消息来源未获授权", errorCode: "LOGIN_REJECTED" };
+  }
+  return null;
+}
+
+function vaultMessageError(
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+): { success: false; error: string; errorCode: string } | null {
+  if (!isRecord(message) || !isString(message.type)) return null;
+  if (!vaultMessageTypes.has(message.type as VaultMessageType)) return null;
+  const type = message.type as VaultMessageType;
+  if (!validVaultPayload(type, message)) {
+    return { success: false, error: "保险库消息字段无效", errorCode: "CONFIG_INVALID" };
+  }
+  const extensionId = chrome.runtime.id;
+  // 配置页本身也可能以真实标签页打开（options.html），因此 tab 的存在与否
+  // 不构成安全边界：只认发送方扩展 ID + 自带扩展页 URL。
+  const ownPage =
+    Boolean(extensionId) &&
+    sender.id === extensionId &&
+    isOwnExtensionPage(sender, extensionId);
+  if (!ownPage) {
+    return { success: false, error: "保险库消息来源未获授权", errorCode: "LOGIN_REJECTED" };
+  }
+  return null;
+}
+
+
+function handlerFailure(error: unknown): {
+  success: false;
+  error: string;
+  errorCode: ReturnType<typeof errorCodeOf>;
+} {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : "后台处理失败",
+    errorCode: errorCodeOf(error),
+  };
+}
 
 /**
  * 按消息 type 构建全局路由表（ADR-0003 D1）。
@@ -67,10 +299,23 @@ export function createBackgroundMessageListener(
   sendResponse: (response: unknown) => void,
 ) => boolean {
   return (message, sender, sendResponse) => {
-    const { type } = message as { type?: string };
+    const type = isRecord(message) && isString(message.type) ? message.type : undefined;
     const handler = type ? routeTable.get(type) : undefined;
     if (handler) {
-      handler(message as never, sender).then(sendResponse);
+      const rejected = loginMessageError(message, sender) ?? vaultMessageError(message, sender);
+      if (rejected) {
+        sendResponse(rejected);
+        return true;
+      }
+      // handler 拒绝（如权限校验失败）也必须回包，否则发送方永远收不到响应。
+      handler(message as never, sender).then(
+        sendResponse,
+        (error: unknown) => sendResponse(handlerFailure(error)),
+      );
+      return true;
+    }
+    if (!type && (message === null || typeof message !== "string")) {
+      sendResponse({ success: false, error: "消息格式无效", errorCode: "CONFIG_INVALID" });
       return true;
     }
     // background 核心消息：打开工具标签页（popup 调用，走统一复用逻辑）

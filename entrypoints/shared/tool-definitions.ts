@@ -18,22 +18,36 @@ export const allTools: ToolDefinition[] = [
       inject: true,
       panel: {
         title: "账号切换",
-        component: () => import("../tools/account-switch/SwitcherPanel.vue"),
       },
     },
     configSection: {
       id: "account-switch",
       label: "环境与账号",
       icon: "i-lucide-user-cog",
-      component: () => import("../tools/account-switch/Config.vue"),
     },
     backgroundHandlers: {
+      GET_ACCOUNT_PANEL: async (_msg, sender) => {
+        const { handleGetAccountPanel } = await import(
+          "../tools/account-switch/background-handler"
+        );
+        return handleGetAccountPanel(sender);
+      },
       SWITCH_ACCOUNT: async (msg, sender) => {
         // 委托给 background.ts 的主逻辑处理
         const { handleSwitchAccount } = await import(
           "../tools/account-switch/background-handler"
         );
-        return handleSwitchAccount(msg.account, msg.domain, sender);
+        return handleSwitchAccount(msg.accountId, msg.environmentId, sender);
+      },
+      REQUEST_ENVIRONMENT_PERMISSIONS: async (msg) => {
+        const { requestEnvironmentPermissions } = await import("../tools/account-switch/permissions/permission-gateway");
+        try {
+          await requestEnvironmentPermissions(msg.environmentId);
+          return { success: true };
+        } catch (error) {
+          const { errorCodeOf } = await import("../tools/account-switch/utils/error-codes");
+          return { success: false, error: error instanceof Error ? error.message : "权限申请失败", errorCode: errorCodeOf(error) };
+        }
       },
       QUICK_LOGIN: async (msg, sender) => {
         const { handleQuickLogin } = await import(
@@ -47,6 +61,38 @@ export const allTools: ToolDefinition[] = [
           sender,
           msg.debugRedirect,
         );
+      },
+      VAULT_GET_CONFIG: async () => {
+        const { handleVaultGetConfig } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultGetConfig();
+      },
+      VAULT_SAVE_CONFIG: async (msg) => {
+        const { handleVaultSaveConfig } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultSaveConfig(msg.patch, msg.clearCredentialRefs);
+      },
+      VAULT_PUT_SECRET: async (msg) => {
+        const { handleVaultPutSecret } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultPutSecret(msg.credentialId, msg.plaintext);
+      },
+      VAULT_DELETE_SECRET: async (msg) => {
+        const { handleVaultDeleteSecret } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultDeleteSecret(msg.credentialId);
+      },
+      VAULT_HAS_SECRET: async (msg) => {
+        const { handleVaultHasSecret } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultHasSecret(msg.credentialId);
+      },
+      VAULT_EXPORT_BACKUP: async () => {
+        const { handleVaultExportBackup } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultExportBackup();
+      },
+      VAULT_PREPARE_BACKUP: async (msg) => {
+        const { handleVaultPrepareBackup } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultPrepareBackup(msg.text);
+      },
+      VAULT_CONFIRM_BACKUP: async (msg) => {
+        const { handleVaultConfirmBackup } = await import("../tools/account-switch/vault-background-handler");
+        return handleVaultConfirmBackup(msg.acceptPlaintextWarning);
       },
       TEST_RECIPE: async (msg, sender) => {
         const { handleTestRecipe } = await import(
@@ -92,6 +138,12 @@ export const allTools: ToolDefinition[] = [
         );
         return handleOpenAccountEnvironment(msg.envKey);
       },
+      TRIAL_SAVED_ACCOUNT: async (msg) => {
+        const { handleTrialSavedAccount } = await import(
+          "../tools/account-switch/background-handler"
+        );
+        return handleTrialSavedAccount(msg.accountId, msg.environmentId);
+      },
       TRIAL_LOGIN: async (msg) => {
         const { handleTrialLogin } = await import(
           "../tools/account-switch/background-handler"
@@ -124,7 +176,6 @@ export const allTools: ToolDefinition[] = [
       id: "json-formatter",
       label: "JSON 格式化",
       icon: "i-lucide-braces",
-      component: () => import("../tools/json-formatter/Config.vue"),
     },
     defaultConfig: {
       indent: 2,
@@ -146,7 +197,6 @@ export const allTools: ToolDefinition[] = [
       id: "json-diff",
       label: "JSON 对比",
       icon: "i-lucide-git-compare",
-      component: () => import("../tools/json-diff/Config.vue"),
     },
     defaultConfig: {
       autoCompare: true,
@@ -165,7 +215,6 @@ export const allTools: ToolDefinition[] = [
       id: "image-base64",
       label: "图片 Base64",
       icon: "i-lucide-image",
-      component: () => import("../tools/image-base64/Config.vue"),
     },
     defaultConfig: {
       imageFormat: "jpeg",
@@ -184,7 +233,6 @@ export const allTools: ToolDefinition[] = [
       id: "code-beautify",
       label: "代码美化",
       icon: "i-lucide-code",
-      component: () => import("../tools/code-beautify/Config.vue"),
     },
     defaultConfig: {
       indentSize: 4,
@@ -204,7 +252,6 @@ export const allTools: ToolDefinition[] = [
       id: "mock-data",
       label: "模拟数据",
       icon: "i-lucide-dices",
-      component: () => import("../tools/mock-data/Config.vue"),
     },
     defaultConfig: {
       count: 10,

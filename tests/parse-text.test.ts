@@ -179,6 +179,30 @@ describe('parseLoginText — 边界与误判防护', () => {
     expect(parseLoginText('   ')).toBeNull();
   });
 
+  it('保留带端口/query/hash 的完整 URL，并解析下一行凭证（真实快捷登录输入）', () => {
+    const url =
+      'http://app.dev.example.com:16800/app/#/dashboard/index?packageId=1&qualMode=20&type=1&reviewStep=';
+    const result = parseLoginText(`${url}\ndemo-user/demo-password`);
+    expect(result).toMatchObject({
+      hasUrl: true,
+      url,
+      username: 'demo-user',
+      password: 'demo-password',
+    });
+  });
+
+  it('URL 与凭证在同一行时，query 中的 = & / 不会被误拆', () => {
+    const url =
+      'http://app.dev.example.com:16800/app/#/index?packageId=1&isRepeatReview=0';
+    const result = parseLoginText(`${url} demo-user/demo-password`);
+    expect(result).toMatchObject({
+      hasUrl: true,
+      url,
+      username: 'demo-user',
+      password: 'demo-password',
+    });
+  });
+
   it('纯域名（无凭证）不识别为 URL → 走凭证解析', () => {
     // example.com 单行无其他内容：tryExtractUrl 要求 rest 非空，
     // 末尾提取同样要求 rest 非空 → 整体作为凭证（仅用户名）

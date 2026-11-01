@@ -97,6 +97,142 @@ export const LOG_TRIM_LIMITS: LogTrimLimits = {
 
 /** 超大负载被丢弃时的占位符 */
 const TRUNCATED_PLACEHOLDER = "[内容过大，已截断]";
+const REDACTED = "***";
+const sensitiveKeys = new Set([
+  "password",
+  "passwd",
+  "pwd",
+  "token",
+  "refreshtoken",
+  "accesstoken",
+  "authorization",
+  "cookie",
+  "setcookie",
+  "secret",
+  "clientsecret",
+]);
+const activeSecrets = new Map<string, number>();
+
+function isSensitiveLogKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  const normalized = lower.replace(/[-_]/g, "");
+  return (
+    sensitiveKeys.has(normalized) ||
+    (lower.startsWith("x-") && lower.endsWith("-token") && lower.length > 8)
+  );
+}
+
+/** 仅登记当前受控运行持有的秘密；引用计数避免并发登录提前解除脱敏。 */
+export function registerLogSecrets(values: readonly string[]): () => void {
+  const registered = [...new Set(values.filter((value) => value.length > 0))];
+  for (const value of registered) {
+    activeSecrets.set(value, (activeSecrets.get(value) ?? 0) + 1);
+  }
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    for (const value of registered) {
+      const count = activeSecrets.get(value) ?? 0;
+      if (count <= 1) activeSecrets.delete(value);
+      else activeSecrets.set(value, count - 1);
+    }
+  };
+}
+
+function parseJsonContainer(value: string): unknown | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function collectSensitiveStrings(
+  value: unknown,
+  output: Set<string>,
+  seen = new WeakSet<object>(),
+): void {
+  if (typeof value === "string") {
+    if (value) output.add(value);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  for (const child of Object.values(value)) {
+    collectSensitiveStrings(child, output, seen);
+  }
+}
+
+function findSensitiveValues(
+  value: unknown,
+  output: Set<string>,
+  seen = new WeakSet<object>(),
+): void {
+  if (typeof value === "string") {
+    const parsed = parseJsonContainer(value);
+    if (parsed !== undefined) findSensitiveValues(parsed, output, seen);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveLogKey(key)) collectSensitiveStrings(child, output, seen);
+    else findSensitiveValues(child, output, seen);
+  }
+}
+
+function redactString(value: string, secrets: ReadonlySet<string>): string {
+  let result = value;
+  for (const secret of secrets) {
+    if (!secret || (secret.length < 4 && result !== secret)) continue;
+    result = result.split(secret).join(REDACTED);
+  }
+  return result;
+}
+
+function sanitizeLogValue(
+  value: unknown,
+  secrets: ReadonlySet<string>,
+  seen = new WeakMap<object, unknown>(),
+): unknown {
+  if (typeof value === "string") {
+    const parsed = parseJsonContainer(value);
+    if (parsed !== undefined) {
+      return redactString(
+        JSON.stringify(sanitizeLogValue(parsed, secrets, seen)),
+        secrets,
+      );
+    }
+    return redactString(value, secrets);
+  }
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    seen.set(value, result);
+    for (const child of value) result.push(sanitizeLogValue(child, secrets, seen));
+    return result;
+  }
+  const result: Record<string, unknown> = {};
+  seen.set(value, result);
+  for (const [key, child] of Object.entries(value)) {
+    result[key] = isSensitiveLogKey(key)
+      ? REDACTED
+      : sanitizeLogValue(child, secrets, seen);
+  }
+  return result;
+}
+
+function sanitizeLogEntry(entry: LogEntry): LogEntry {
+  const secrets = new Set(activeSecrets.keys());
+  findSensitiveValues(entry, secrets);
+  return sanitizeLogValue(entry, secrets) as LogEntry;
+}
 
 // ---------------------------------------------------------------------------
 // 三维清理（纯函数，便于测试）
@@ -212,19 +348,21 @@ async function writeLog(
   message: string,
   ctx?: LogContext,
 ): Promise<void> {
-  const entry = truncateLogEntry({
-    id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    category: ctx?.category ?? "system",
-    level,
-    message,
-    timestamp: Date.now(),
-    extId: ctx?.extId,
-    account: ctx?.account,
-    request: ctx?.request,
-    response: ctx?.response,
-    error: ctx?.error,
-    extra: ctx?.extra,
-  });
+  const entry = truncateLogEntry(
+    sanitizeLogEntry({
+      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      category: ctx?.category ?? "system",
+      level,
+      message,
+      timestamp: Date.now(),
+      extId: ctx?.extId,
+      account: ctx?.account,
+      request: ctx?.request,
+      response: ctx?.response,
+      error: ctx?.error,
+      extra: ctx?.extra,
+    }),
+  );
 
   try {
     const entries = await readLogs();

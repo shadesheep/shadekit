@@ -39,6 +39,7 @@ vi.mock(
 );
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   cookies: { getAll: vi.fn(async () => []) },
   scripting: { executeScript: vi.fn(async () => []) },
   tabs: { get: vi.fn(async () => ({ url: "https://example.com/dashboard" })) },
@@ -535,7 +536,7 @@ describe("纯 cookie 登录（无 token）", () => {
 // ---------------------------------------------------------------------------
 
 describe("http.execute — 日志脱敏（ADR-0015 D8）", () => {
-  it("result.log 的 request/response 已按黑名单脱敏，sign 保留", async () => {
+  it("result.log 的 request/response 已脱敏，认证派生 sign 不泄露", async () => {
     stubFetch(() => jsonResponse({ ok: true, token: "abc", sign: "s1" }));
     const result = await runSpec(
       spec([
@@ -565,11 +566,11 @@ describe("http.execute — 日志脱敏（ADR-0015 D8）", () => {
     expect(reqBody.password).toBe("***");
     expect(reqBody.username).toBe("alice");
     expect(reqBody.xstr).toBe("xyz");
-    // 响应体：token 命中黑名单，ok/sign 保留
+    // 响应体：token 与认证请求的派生值均脱敏，ok 保留
     const resBody = JSON.parse(view.response.body) as Record<string, unknown>;
     expect(resBody.token).toBe("***");
     expect(resBody.ok).toBe(true);
-    expect(resBody.sign).toBe("s1");
+    expect(resBody.sign).toBe("***");
   });
 
   it("log.reveal 白名单：命中绑定原样出现在 revealed，黑名单字段仍压制", async () => {

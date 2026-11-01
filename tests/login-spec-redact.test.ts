@@ -15,7 +15,7 @@ import {
   isSensitiveKey,
   redactHeaders,
   redactTextBody,
-} from "../entrypoints/tools/account-switch/spec/redact";
+} from "../entrypoints/tools/account-switch/runtime/redact";
 
 // ---------------------------------------------------------------------------
 // 黑名单判定

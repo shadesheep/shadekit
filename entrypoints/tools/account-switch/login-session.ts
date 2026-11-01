@@ -30,7 +30,7 @@ import {
   type DebugBuffer,
 } from "./utils/debug-log";
 import type { DebugLogEntry } from "./types";
-import { matchDomain } from "./utils/env";
+import { matchDomain, normalizedOrigin, originMatches } from "./utils/env";
 import {
   ErrorCodes,
   errorCodeOf,
@@ -39,6 +39,10 @@ import {
 } from "./utils/error-codes";
 import { RESTRICTED_PAGE_SCHEME, waitForTabLoaded } from "./utils/tab-load";
 import { getConfig } from "../../shared/tool-config";
+import { registerLogSecrets } from "../../shared/logger";
+import { resolveSpecSecrets } from "./secret-resolver";
+import { planLoginPermissions } from "./permissions/permission-planner";
+import { assertLoginPermissions, registerEnvironmentPlan } from "./permissions/permission-gateway";
 
 // ---------------------------------------------------------------------------
 // 登录并发互斥锁（内化自 login-lock.ts）
@@ -77,6 +81,7 @@ export class AuthSession {
   private readonly origin: string;
   private readonly startTime: number;
   private readonly debugBuffer: DebugBuffer;
+  private readonly pendingLogs = new Set<Promise<void>>();
   private domainConfig: DomainConfig | null = null;
   private targetUrl: string;
   private debugRedirect?: string;
@@ -106,6 +111,16 @@ export class AuthSession {
     return this.debugBuffer;
   }
 
+  private trackLog(log: Promise<void>): Promise<void> {
+    const tracked = log.finally(() => this.pendingLogs.delete(tracked));
+    this.pendingLogs.add(tracked);
+    return tracked;
+  }
+
+  async whenLogsSettled(): Promise<void> {
+    await Promise.allSettled([...this.pendingLogs]);
+  }
+
   fail(
     error: string,
     options?: { domainConfig?: DomainConfig | null; code?: ErrorCode },
@@ -127,7 +142,7 @@ export class AuthSession {
       this.debugRedirect,
       this.debugBuffer.ops,
     );
-    void logEntry(entry);
+    void this.trackLog(logEntry(entry));
     return { success: false, error, errorCode: options?.code };
   }
 
@@ -157,7 +172,7 @@ export class AuthSession {
       this.debugRedirect,
       result.ops ?? buffer.ops,
     );
-    await logEntry(entry);
+    await this.trackLog(logEntry(entry));
   }
 }
 
@@ -231,9 +246,26 @@ export async function prepareLogin(
     input.target,
     input.debugRedirect,
   );
+  const restoreLogSecrets = registerLogSecrets([
+    input.credentials.password,
+    input.credentials.token ?? "",
+    input.credentials.clientSecret ?? "",
+    ...Object.values(input.credentials.extra ?? {}),
+  ]);
+  const secretRestorers: (() => void)[] = [restoreLogSecrets];
+  let secretsRestored = false;
+  const releaseSecretsAfterLogs = () => {
+    if (secretsRestored) return;
+    secretsRestored = true;
+    void session.whenLogsSettled().finally(() => {
+      for (const restore of secretRestorers) restore();
+    });
+  };
 
   let lockedTabId: number | undefined;
   let createdTabId: number | undefined;
+  /** 本次登录的执行页面 URL（existing 读当前 tab，new 为待打开 URL）。 */
+  let executionUrl = "";
 
   const releaseLock = () => {
     if (lockedTabId !== undefined) releaseLoginLock(lockedTabId);
@@ -254,6 +286,7 @@ export async function prepareLogin(
     releaseLock();
     closeCreatedTab();
     const r = session.fail(error, options);
+    releaseSecretsAfterLogs();
     return { ok: false, error: r.error, errorCode: r.errorCode };
   };
 
@@ -271,6 +304,7 @@ export async function prepareLogin(
     try {
       const execTab = await chrome.tabs.get(tabId);
       execTabUrl = execTab.url || execTab.pendingUrl || "";
+      executionUrl = execTabUrl;
     } catch {
       // tab 已关闭或 chrome.tabs.get 不可用（测试 stub）：留给后续步骤处理
     }
@@ -282,6 +316,7 @@ export async function prepareLogin(
       );
     }
     if (!tryAcquireLoginLock(tabId)) {
+      releaseSecretsAfterLogs();
       return {
         ok: false,
         error: LOGIN_BUSY_ERROR,
@@ -293,6 +328,7 @@ export async function prepareLogin(
     try {
       // eslint-disable-next-line no-new
       new URL(input.execTarget.url);
+      executionUrl = input.execTarget.url;
     } catch {
       return fail("目标 URL 格式无效", { code: ErrorCodes.INVALID_URL });
     }
@@ -311,6 +347,18 @@ export async function prepareLogin(
       origin = urlObj.origin;
     }
 
+    // 通配符环境（如 https://*.example.com）不能作为运行期的具体 origin：
+    // 解析成本次执行页面的 origin，后续 cookie/storage 写入与异步 origin 防线
+    // 都必须使用它。页面不匹配时在副作用前明确拒绝。
+    if (input.targetKind === "origin" && origin.includes("*")) {
+      if (!executionUrl || !originMatches(origin, executionUrl)) {
+        return fail(`执行页面不在环境「${origin}」内，无法确定登录站点`, {
+          code: ErrorCodes.ENV_NOT_MATCHED,
+        });
+      }
+      origin = normalizedOrigin(executionUrl);
+    }
+
     // 解析 debugRedirect（ADR-0003 D4：URL 推导规则收口至 login-tab-flow）
     let redirect: DebugRedirectParts | null = null;
     if (input.targetKind === "url" && input.debugRedirect && urlObj) {
@@ -322,31 +370,6 @@ export async function prepareLogin(
       }
     }
 
-    // 新 tab 路径：登录在 redirect origin（若有）完成；先建 tab 再构建 ctx
-    if (input.execTarget.kind === "new") {
-      const createUrl = redirect?.origin || input.execTarget.url;
-      let newTabId: number | undefined;
-      try {
-        const created = await chrome.tabs.create({
-          url: createUrl,
-          active: false,
-        });
-        newTabId = created.id;
-      } catch {
-        newTabId = undefined;
-      }
-      if (!newTabId) {
-        return fail("无法打开登录页面：新建标签页失败", {
-          code: ErrorCodes.TAB_CLOSED,
-        });
-      }
-      createdTabId = newTabId;
-      await waitForTabLoaded(newTabId);
-      if (!tryAcquireLoginLock(newTabId)) {
-        return fail(LOGIN_BUSY_ERROR, { code: ErrorCodes.LOGIN_BUSY });
-      }
-      lockedTabId = newTabId;
-    }
 
     const config = await getConfig<AccountSwitchConfig>(
       "account-switch",
@@ -382,9 +405,47 @@ export async function prepareLogin(
       );
     }
 
-    session.withDomain(domainConfig);
-
     const effectiveOrigin = redirect?.origin || origin;
+    const permissionPlan = planLoginPermissions(domainConfig, spec, {
+      username: input.credentials.username,
+      password: "",
+      origin: effectiveOrigin,
+      debugRedirect: input.debugRedirect,
+      vars: domainConfig.vars,
+    });
+    registerEnvironmentPlan(effectiveOrigin, permissionPlan);
+    await assertLoginPermissions(permissionPlan);
+    // 新 tab 路径：登录在 redirect origin（若有）完成；先建 tab 再构建 ctx
+    if (input.execTarget.kind === "new") {
+      const createUrl = redirect?.origin || input.execTarget.url;
+      let newTabId: number | undefined;
+      try {
+        const created = await chrome.tabs.create({
+          url: createUrl,
+          active: false,
+        });
+        newTabId = created.id;
+      } catch {
+        newTabId = undefined;
+      }
+      if (!newTabId) {
+        return fail("无法打开登录页面：新建标签页失败", {
+          code: ErrorCodes.TAB_CLOSED,
+        });
+      }
+      createdTabId = newTabId;
+      await waitForTabLoaded(newTabId);
+      if (!tryAcquireLoginLock(newTabId)) {
+        return fail(LOGIN_BUSY_ERROR, { code: ErrorCodes.LOGIN_BUSY });
+      }
+      lockedTabId = newTabId;
+    }
+    const resolvedSecrets = await resolveSpecSecrets(domainConfig, spec, config.strategies);
+    const effectiveDomainConfig = resolvedSecrets.domainConfig;
+    secretRestorers.push(registerLogSecrets(resolvedSecrets.secrets));
+
+    session.withDomain(effectiveDomainConfig);
+
     const execTabId = lockedTabId!;
     // ADR-0015 D4 的 `targetUrl` / `debugRedirect` 输入暂不在 prelude 填充：
     // 迁移出的快照 spec 以 `goto {targetUrl}` 结尾，03a 期间 capture / restore
@@ -393,7 +454,7 @@ export async function prepareLogin(
     const ctx: DebugAuthContext = {
       tabId: execTabId,
       origin: effectiveOrigin,
-      domainConfig,
+      domainConfig: effectiveDomainConfig,
       credentials: input.credentials,
       tokenData: null,
       debugBuffer: session.buffer,
@@ -407,7 +468,7 @@ export async function prepareLogin(
         session,
         spec,
         ctx,
-        domainConfig,
+        domainConfig: effectiveDomainConfig,
         redirect,
         origin: effectiveOrigin,
         execTabId,
@@ -416,6 +477,7 @@ export async function prepareLogin(
           if (released) return;
           released = true;
           releaseLock();
+          releaseSecretsAfterLogs();
           if (options?.closeExecTab) closeCreatedTab();
         },
       },

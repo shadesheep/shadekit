@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import DtButton from '../../shared/components/DtButton.vue';
-import DtConfigActions from '../../shared/config/DtConfigActions.vue';
-import DtConfigHeader from '../../shared/config/DtConfigHeader.vue';
-import DtConfigItem from '../../shared/config/DtConfigItem.vue';
-import DtNumberField from '../../shared/config/DtNumberField.vue';
-import DtSegmented from '../../shared/config/DtSegmented.vue';
-import DtToggle from '../../shared/config/DtToggle.vue';
-import { useToolConfig } from '../../shared/config/use-tool-config';
-import type { OutputFormat } from './lib/types';
+import DtButton from "../../shared/components/DtButton.vue";
+import DtConfigActions from "../../shared/config/DtConfigActions.vue";
+import DtConfigHeader from "../../shared/config/DtConfigHeader.vue";
+import DtConfigItem from "../../shared/config/DtConfigItem.vue";
+import DtNumberField from "../../shared/config/DtNumberField.vue";
+import DtSegmented from "../../shared/config/DtSegmented.vue";
+import DtToggle from "../../shared/config/DtToggle.vue";
+import { useToolConfig } from "../../shared/config/use-tool-config";
+import type { OutputFormat } from "./lib/types";
 
 /** 本页编辑的设置项(MockDataConfig 的子集,全部必填;fields/tableName 由工具页维护) */
 interface MockDataPageConfig {
   count: number;
   format: OutputFormat;
-  viewMode: 'card' | 'table' | 'code';
+  viewMode: "card" | "table" | "code";
   quickCount: number;
   tablePreviewLimit: number;
   autoGenerate: boolean;
@@ -22,8 +22,8 @@ interface MockDataPageConfig {
 
 const DEFAULTS: MockDataPageConfig = {
   count: 10,
-  format: 'json',
-  viewMode: 'card',
+  format: "json",
+  viewMode: "card",
   quickCount: 6,
   tablePreviewLimit: 200,
   autoGenerate: true,
@@ -33,48 +33,48 @@ const DEFAULTS: MockDataPageConfig = {
 // fields 由工具页自己维护,omit 剔除后本页的增量保存永不触碰它;
 // tableName 不剔除——随 ref 加载并在 replace(清空字段)时保留,与旧行为一致
 const { config, saveState, replace } = useToolConfig<MockDataPageConfig>(
-  'mock-data',
+  "mock-data",
   DEFAULTS,
   {
-    omit: ['fields'],
+    omit: ["fields"],
     normalize: (c) => {
-      c.count = Math.min(Math.max(Math.trunc(c.count) || 10, 1), 1000);
+      c.count = Math.min(Math.max(Math.trunc(c.count) || 10, 1), 100000);
     },
   },
 );
 
 const FORMAT_OPTIONS: Array<{ value: OutputFormat; label: string }> = [
-  { value: 'json', label: 'JSON' },
-  { value: 'jsonl', label: 'JSONL' },
-  { value: 'csv', label: 'CSV' },
-  { value: 'sql', label: 'SQL' },
-  { value: 'xml', label: 'XML' },
+  { value: "json", label: "JSON" },
+  { value: "jsonl", label: "JSONL" },
+  { value: "csv", label: "CSV" },
+  { value: "sql", label: "SQL" },
+  { value: "xml", label: "XML" },
 ];
 
 const VIEW_OPTIONS: Array<{
-  value: 'card' | 'table' | 'code';
+  value: "card" | "table" | "code";
   label: string;
 }> = [
-  { value: 'card', label: '卡片' },
-  { value: 'table', label: '表格' },
-  { value: 'code', label: '源码' },
+  { value: "card", label: "卡片" },
+  { value: "table", label: "表格" },
+  { value: "code", label: "源码" },
 ];
 
 const QUICK_COUNT_OPTIONS = [
-  { value: 3, label: '3 条' },
-  { value: 6, label: '6 条' },
-  { value: 10, label: '10 条' },
+  { value: 3, label: "3 条" },
+  { value: 6, label: "6 条" },
+  { value: 10, label: "10 条" },
 ];
 
 const PREVIEW_LIMIT_OPTIONS = [
-  { value: 100, label: '100 条' },
-  { value: 200, label: '200 条' },
-  { value: 500, label: '500 条' },
+  { value: 100, label: "100 条" },
+  { value: 200, label: "200 条" },
+  { value: 500, label: "500 条" },
 ];
 
-/** 清空工具页持久化的字段列表(整体覆盖写,下次打开恢复初始示例模板) */
+/** 清空工具页持久化的字段列表（下次打开恢复为「用户信息」场景的默认字段） */
 async function resetFields() {
-  await replace('已清空字段列表,下次打开工具页生效');
+  await replace("已清空字段列表,下次打开恢复为「用户信息」场景的默认字段");
 }
 </script>
 
@@ -82,8 +82,8 @@ async function resetFields() {
   <div class="mock-data-config">
     <DtConfigHeader title="模拟数据设置" :save-state="saveState" />
 
-    <DtConfigItem label="默认生成条数" hint="工具页每次生成的记录条数(1-1000)">
-      <DtNumberField v-model="config.count" :min="1" :max="1000" />
+    <DtConfigItem label="默认生成条数" hint="工具页生成的记录条数；大数据量仅保留少量预览，完整结果通过分批下载输出">
+      <DtNumberField v-model="config.count" :min="1" :max="100000" />
     </DtConfigItem>
 
     <DtConfigItem
@@ -133,7 +133,7 @@ async function resetFields() {
 
     <DtConfigItem
       label="工作状态"
-      hint="字段列表、条数、格式等会在工具页内自动保存;清空字段后下次打开恢复为初始示例模板"
+      hint="字段列表、条数、格式等会在工具页内自动保存;如果字段列表被视为已清空，下次打开工具页会恢复为「用户信息」场景的默认字段"
     >
       <DtConfigActions>
         <DtButton @click="resetFields">清空已保存的字段列表</DtButton>

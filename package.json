@@ -1,6 +1,6 @@
 {
   "name": "shadekit",
-  "description": "面向开发/测试的浏览器工具箱：任意系统账号一键切换、环境指示、JSON 格式化与对比、代码美化、中文模拟数据生成",
+  "description": "面向开发/测试的浏览器工具箱：任意系统账号一键切换、环境指示、JSON 格式化与对比、代码美化、可复现 Schema 模拟数据生成",
   "author": "ShadeSheep",
   "license": "MIT",
   "repository": {
@@ -10,7 +10,7 @@
   "homepage": "https://github.com/shadesheep/shadekit",
   "bugs": "https://github.com/shadesheep/shadekit/issues",
   "private": true,
-  "version": "1.1.7",
+  "version": "1.1.8",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -34,8 +34,10 @@
     "chrome:login": "node scripts/chrome-login.mjs"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/language": "^6.13.1",
+    "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "codemirror": "^6.0.2",
@@ -43,7 +45,6 @@
     "js-beautify": "^1.15.4",
     "jsencrypt": "^3.3.2",
     "json-source-map": "^0.6.1",
-    "pinia": "^2.2.6",
     "sql-formatter": "^15.9.0",
     "vue": "^3.5.44"
   },

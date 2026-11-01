@@ -9,6 +9,7 @@
  */
 
 import { authLog } from "../../shared/logger";
+import { getConfig } from "../../shared/tool-config";
 import { runLoginSpec } from "./spec/login-run";
 import type { FormScanFrame } from "./strategies/login-form-scan";
 import type { AuthStorageSelection } from "./strategies/auth-storage";
@@ -23,14 +24,26 @@ import { prepareLogin } from "./login-session";
 import type { DryRunStepResult } from "./strategies/generic-dry-run";
 import { normalizeRecipe } from "./strategies/generic-recipe";
 import type { RecipeStepTrace } from "./strategies/generic-runner";
-import type { Account, AuthContext } from "./types";
+import type { Account, AccountSwitchConfig, AuthContext } from "./types";
+import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
+import {
+  assertEnvironmentLoginSupported,
+  buildAccountPanel,
+  resolveEnvironment,
+  type AccountPanelData,
+} from "./account-view";
+import { resolveAccountPassword, resolveDefaultPassword, resolveLoginPassword, resolveSpecSecrets } from "./secret-resolver";
+import { matchDomain, normalizedOrigin } from "./utils/env";
 import type { ErrorCode } from "./utils/error-codes";
 import { ErrorCodes, errorCodeOf } from "./utils/error-codes";
 import { runTrialLogin } from "./spec/trial";
 import type { TrialSignalState } from "./spec/run";
 import type { LoginSpec } from "./spec/types";
+import { inspectLoginSpecSupport } from "./spec/capabilities";
 import type { PreparedLoginFormLock } from "./login-form-lock";
 import { accountEnvironmentOptionsQuery } from "../../options/options-route";
+import { planLoginPermissions } from "./permissions/permission-planner";
+import { assertLoginPermissions, assertRuntimeTarget, registerEnvironmentPlan } from "./permissions/permission-gateway";
 
 type LoginResponse = {
   success: boolean;
@@ -38,6 +51,132 @@ type LoginResponse = {
   errorCode?: ErrorCode;
   recipeSteps?: RecipeStepTrace[];
 };
+
+function rejectedLogin(message: string): LoginResponse {
+  return { success: false, error: message, errorCode: ErrorCodes.LOGIN_REJECTED };
+}
+
+async function readAccountSwitchConfig(): Promise<AccountSwitchConfig | undefined> {
+  return getConfig<AccountSwitchConfig>(
+    "account-switch",
+    ACCOUNT_SWITCH_CONFIG_DEFAULTS,
+  );
+}
+
+/** Content Script 只能取得公共投影；origin 由 Chrome sender 决定，不接受消息伪造。 */
+export async function handleGetAccountPanel(
+  sender: chrome.runtime.MessageSender,
+): Promise<AccountPanelData> {
+  let origin = "";
+  try {
+    origin = new URL(sender.url || sender.tab?.url || "").origin;
+  } catch {
+    origin = "";
+  }
+  if (origin && sender.tab && /^https?:/i.test(sender.url ?? "")) await assertRuntimeTarget(origin);
+  const config = await readAccountSwitchConfig();
+  return buildAccountPanel(
+    config ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS },
+    origin,
+  );
+}
+
+/** 只在 Background 内按一次运行解析账号；调用方不能读取其他账号的明文。 */
+async function resolveSavedAccount(
+  accountId: string,
+  environmentId: string,
+  sender: chrome.runtime.MessageSender,
+): Promise<{ account: Account; password: string; origin: string } | { error: LoginResponse }> {
+  const config = await readAccountSwitchConfig();
+  const account = config?.accounts.find((candidate) => candidate.id === accountId);
+  const environment = config?.domains[environmentId];
+  if (!account || !environment) {
+    return { error: rejectedLogin("账号或环境不存在") };
+  }
+  const bound = account.domains.some(
+    (domain) => domain === environmentId || matchDomain(domain, environmentId),
+  );
+  if (!bound) return { error: rejectedLogin("账号未绑定到当前环境") };
+
+  // 通配符环境（如 https://*.example.com）本身不是可执行 origin；
+  // 用当前页面解析出的具体 origin 做权限规划与后续登录。
+  let effectiveOrigin = environmentId;
+  if (sender.tab) {
+    const tabOrigin = (() => {
+      try {
+        return new URL(sender.tab?.url || sender.url || "").origin;
+      } catch {
+        return "";
+      }
+    })();
+    if (!tabOrigin || !matchDomain(environmentId, tabOrigin)) {
+      return { error: rejectedLogin("当前页面已离开账号绑定环境") };
+    }
+    if (environmentId.includes("*")) effectiveOrigin = tabOrigin;
+  }
+  // 能力门必须在权限规划、tab/导航/HTTP、会话写入与密码/秘密解析之前。
+  // 抛出的结构化错误会由 handleSwitchAccount 转成 { success:false, errorCode }。
+  const spec = assertEnvironmentLoginSupported(environment, config?.strategies);
+  const plan = planLoginPermissions(environment, spec, {
+    username: account.username,
+    password: "",
+    origin: effectiveOrigin,
+    debugRedirect: environment.debugRedirect,
+    vars: environment.vars,
+  });
+  registerEnvironmentPlan(effectiveOrigin, plan);
+  await assertLoginPermissions(plan);
+  return {
+    account,
+    password: await resolveAccountPassword(account),
+    origin: effectiveOrigin,
+  };
+}
+async function resolveQuickLoginPassword(
+  targetUrl: string,
+  input: string | undefined,
+): Promise<{ password: string } | { error: LoginResponse }> {
+  let targetOrigin = "";
+  try {
+    targetOrigin = new URL(targetUrl).origin;
+  } catch {
+    return {
+      error: { success: false, error: "目标 URL 格式无效", errorCode: ErrorCodes.INVALID_URL },
+    };
+  }
+  try {
+    // 能力门先于权限请求与默认密码/秘密解析；即使调用方已带入一次性密码，
+    // 不支持的声明也不能创建 tab 或发起请求。
+    const config =
+      (await readAccountSwitchConfig()) ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS };
+    const environment = resolveEnvironment(targetOrigin, config.domains);
+    if (environment) {
+      assertEnvironmentLoginSupported(environment.env, config.strategies);
+    }
+    if (input) return { password: input };
+    // 权限拒绝也要走结构化返回；放在 try 外会以未处理拒绝结束，调用方收不到响应。
+    await assertRuntimeTarget(targetUrl);
+    const password = await resolveDefaultPassword(config, targetOrigin);
+    if (!password) {
+      return {
+        error: {
+          success: false,
+          error: "未找到可用密码：请输入完整的账号/密码信息",
+          errorCode: ErrorCodes.CONFIG_INVALID,
+        },
+      };
+    }
+    return { password };
+  } catch (error) {
+    return {
+      error: {
+        success: false,
+        error: error instanceof Error ? error.message : "保险库不可用",
+        errorCode: errorCodeOf(error),
+      },
+    };
+  }
+}
 
 /** 获取当前 tabId，优先使用 sender.tab（content script 来源），否则回退到查询当前活动 tab。 */
 async function getTabId(
@@ -98,10 +237,22 @@ function createLegacyTokenInjector(): (
  * 解析出具体 URL，改走「新建 tab + 登录」路径；否则返回明确提示（而非底层报错）。
  */
 export async function handleSwitchAccount(
-  account: Account,
-  origin: string,
+  accountId: string,
+  environmentId: string,
   sender: chrome.runtime.MessageSender,
 ): Promise<LoginResponse> {
+  let resolved: Awaited<ReturnType<typeof resolveSavedAccount>>;
+  try {
+    resolved = await resolveSavedAccount(accountId, environmentId, sender);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "保险库不可用",
+      errorCode: errorCodeOf(error),
+    };
+  }
+  if ("error" in resolved) return resolved.error;
+  const { account, password, origin } = resolved;
   // options/popup 环境：sender.tab 缺省（非 content script 来源）
   if (!sender.tab) {
     const openableUrl = await resolveOpenableUrl(origin);
@@ -109,7 +260,7 @@ export async function handleSwitchAccount(
       return handleQuickLoginInNewTab(
         openableUrl,
         account.username,
-        account.password,
+        password,
         true,
       );
     }
@@ -126,7 +277,7 @@ export async function handleSwitchAccount(
   const outcome = await prepareLogin({
     action: "SWITCH_ACCOUNT",
     account: { name: account.name, username: account.username },
-    credentials: { username: account.username, password: account.password },
+    credentials: { username: account.username, password },
     target: origin,
     targetKind: "origin",
     execTarget: { kind: "existing", tabId: tabId ?? 0 },
@@ -204,6 +355,19 @@ export async function handleTrialLogin(input: {
   sessionWritten: boolean;
 }> {
   const { spec, origin, username, password } = input;
+  // 能力门先于请求构造：不支持的版本/算子/算法绝不发出凭据。
+  const support = inspectLoginSpecSupport(spec);
+  if (!support.supported) {
+    const issue = support.issues[0];
+    return {
+      ok: false,
+      error: issue.message,
+      errorCode: issue.code,
+      signals: [],
+      requestSent: false,
+      sessionWritten: false,
+    };
+  }
   if (!spec || !Array.isArray(spec.ops)) {
     return {
       ok: false,
@@ -249,6 +413,70 @@ export async function handleTrialLogin(input: {
     };
   }
 }
+export async function handleTrialSavedAccount(
+  accountId: string,
+  environmentId: string,
+): Promise<{
+  ok: boolean;
+  error?: string;
+  errorCode?: ErrorCode;
+  signals: TrialSignalState[];
+  requestSent: boolean;
+  sessionWritten: boolean;
+}> {
+  try {
+    const config = await readAccountSwitchConfig();
+    const account = config?.accounts.find((candidate) => candidate.id === accountId);
+    const domainConfig = config?.domains[environmentId];
+    if (!config || !account || !domainConfig || !account.domains.some((domain) =>
+      domain === environmentId || matchDomain(domain, environmentId)
+    )) {
+      throw new Error("账号未绑定到目标环境");
+    }
+    // 能力门先于秘密解析与默认密码解析。
+    const spec = assertEnvironmentLoginSupported(domainConfig, config.strategies);
+    const resolved = await resolveSpecSecrets(domainConfig, spec, config.strategies);
+    // 密码回退与 account-view.resolvePassword 同一语义（空值视为未设置）。
+    const password = await resolveLoginPassword(account, config, environmentId);
+    if (!password) {
+      return {
+        ok: false,
+        error: "未配置密码：请使用一次性密码或设置默认密码",
+        errorCode: ErrorCodes.CONFIG_INVALID,
+        signals: [],
+        requestSent: false,
+        sessionWritten: false,
+      };
+    }
+    const result = await runTrialLogin(spec, {
+      tabId: -1,
+      origin: environmentId,
+      domainConfig: resolved.domainConfig,
+      credentials: { username: account.username, password },
+      tokenData: null,
+      targetUrl: "",
+      debugRedirect: "",
+    });
+    return {
+      ok: result.ok,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.errorCode ? { errorCode: result.errorCode as ErrorCode } : {}),
+      signals: result.signals,
+      requestSent: result.requestSent,
+      sessionWritten: result.sessionWritten,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "保险库不可用",
+      errorCode: errorCodeOf(error),
+      signals: [],
+      requestSent: false,
+      sessionWritten: false,
+    };
+  }
+}
+
 export async function handleTestRecipe(
   recipeInput: unknown,
   origin: string,
@@ -416,11 +644,32 @@ export async function handleOpenAccountEnvironment(
 export async function handleQuickLogin(
   targetUrl: string,
   username: string,
-  password: string,
+  password: string | undefined,
   hasUrl: boolean,
   sender: chrome.runtime.MessageSender,
   debugRedirect?: string,
 ): Promise<LoginResponse> {
+  const resolved = await resolveQuickLoginPassword(targetUrl, password);
+  if ("error" in resolved) return resolved.error;
+  password = resolved.password;
+
+  // 面板允许直接粘贴任意目标 URL。目标与当前页面不同源时，登录不能在本 tab
+  // 执行：origin 防线会拒绝，且 cookie/localStorage 属于页面所在 origin，
+  // 继续执行只会把别的站点的会话写进当前页。与快捷键/右键菜单语义一致，
+  // 改为在目标 URL 的新标签页中登录。
+  const targetOrigin = normalizedOrigin(targetUrl);
+  const currentOrigin = normalizedOrigin(sender.tab?.url || sender.url || "");
+  if (targetOrigin && currentOrigin && targetOrigin !== currentOrigin) {
+    return handleQuickLoginInNewTab(
+      targetUrl,
+      username,
+      password,
+      hasUrl,
+      debugRedirect,
+      sender.tab?.id,
+    );
+  }
+
   const tabId = await getTabId(sender);
   const outcome = await prepareLogin({
     action: "QUICK_LOGIN",
@@ -507,11 +756,14 @@ export async function handleQuickLogin(
 export async function handleQuickLoginInNewTab(
   targetUrl: string,
   username: string,
-  password: string,
+  password: string | undefined,
   hasUrl: boolean,
   debugRedirect?: string,
   _sourceTabId?: number,
 ): Promise<LoginResponse> {
+  const resolved = await resolveQuickLoginPassword(targetUrl, password);
+  if ("error" in resolved) return resolved.error;
+  password = resolved.password;
   // 新标签页路径：execTarget.kind = "new"，由 prelude 先建 tab 再构建 ctx（ADR-0012 D9）。
   // 登录发生在新 tab 上；debugRedirect 存在时 prelude 会直接在 redirect origin 建 tab。
   const outcome = await prepareLogin({

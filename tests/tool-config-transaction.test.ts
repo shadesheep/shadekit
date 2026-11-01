@@ -16,6 +16,7 @@ beforeEach(() => {
     Object.assign(store, items);
   });
   vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
     storage: {
       local: {
         get: vi.fn(async (keys: string[]) => Object.fromEntries(keys.map((key) => [key, store[key]]))),

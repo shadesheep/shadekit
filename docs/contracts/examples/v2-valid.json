@@ -1,0 +1,164 @@
+[
+  {
+    "name": "clear-cookies",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "clear.cookies", "range": "all", "includeParent": true }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "clear-storage",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "clear.storage", "area": "local", "range": "all" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "goto",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "goto", "url": "{origin}/login", "waitForLoad": true, "waitForTarget": "#login", "timeoutMs": 10000, "when": "{username}" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "http-execute",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "http.execute", "url": "{origin}/api/login", "method": "POST", "headers": { "Content-Type": "application/json" }, "body": { "json": { "username": "{username}", "password": "{password}" } }, "parse": "json", "expectStatus": "2xx", "as": "response" }],
+      "success": [{ "token": { "from": "response", "path": "data.token" } }],
+      "auth": { "mode": "engine" }
+    }
+  },
+  {
+    "name": "digest",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "digest", "algorithm": "sha256", "input": "{password}", "inputEncoding": "utf8", "outputEncoding": "hex", "upperCase": false, "as": "passwordHash" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "crypto-encrypt",
+    "spec": {
+      "version": 2,
+      "vars": [{ "name": "publicKey", "title": "RSA public key" }],
+      "ops": [{ "op": "crypto.encrypt", "algorithm": "rsa-oaep", "publicKey": "{publicKey}", "input": "{password}", "as": "encryptedPassword" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "payload-build",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "payload.build", "parts": [{ "key": "username", "value": "{username}", "normalize": ["trim"] }, { "key": "password", "value": "{password}" }], "as": "credentials" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "map",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "map", "input": "{username}", "cases": [{ "equals": "admin", "value": "administrator" }], "default": "user", "as": "role" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "apply-set",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "apply.set", "target": "header", "key": "X-Client", "value": "shadekit" },
+        { "op": "http.execute", "url": "{origin}/api/login", "as": "response" }
+      ],
+      "success": [{ "token": { "from": "response", "path": "token" } }],
+      "auth": { "mode": "engine" }
+    }
+  },
+  {
+    "name": "auth-write",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "auth.write" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "engine", "localStorageWrite": [{ "key": "token", "value": "literal-token" }] }
+    }
+  },
+  {
+    "name": "auth-capture",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "auth.capture", "cookies": "all", "localStorage": ["token"], "sessionStorage": "none", "as": "snapshot" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "engine" }
+    }
+  },
+  {
+    "name": "auth-restore",
+    "spec": {
+      "version": 2,
+      "ops": [
+        { "op": "http.execute", "url": "{origin}/api/login", "as": "response" },
+        { "op": "auth.capture", "cookies": "all", "as": "snapshot" },
+        { "op": "goto", "url": "{targetUrl}/home" },
+        { "op": "auth.restore", "snapshot": "snapshot" }
+      ],
+      "success": [{ "response": { "from": "response", "path": "ok", "equals": true } }],
+      "auth": { "mode": "engine" }
+    }
+  },
+  {
+    "name": "fill",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "fill", "target": "#username", "value": "{username}", "clearFirst": true, "frameId": 0 }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "click",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "click", "target": { "text": "登录" }, "onNotFound": "fail", "frameUrl": "https://example.test/login" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "wait-for",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "waitFor", "when": { "type": "fixed", "ms": 100 }, "timeoutMs": 1000 }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "extract",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "extract", "source": "url", "parse": "raw", "default": "", "as": "currentUrl" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  },
+  {
+    "name": "script",
+    "spec": {
+      "version": 2,
+      "ops": [{ "op": "script", "code": "(bindings) => ({ ok: true })", "world": "ISOLATED", "as": "scriptResult" }],
+      "success": [{ "page": { "type": "formGone" } }],
+      "auth": { "mode": "page" }
+    }
+  }
+]

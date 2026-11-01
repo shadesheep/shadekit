@@ -59,6 +59,7 @@ let root: HTMLDivElement;
 
 function stubChrome(): void {
   vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
     tabs: {
       getCurrent: vi.fn(async () => ({ id: 99, windowId: 1 })),
       query: vi.fn(async () => [

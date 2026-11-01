@@ -37,6 +37,7 @@ const settleMocks = vi.hoisted(() => ({
 }));
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   tabs: { get: tabsGet },
   scripting: { executeScript },
   cookies: {
@@ -85,7 +86,7 @@ function spec(ov: Partial<LoginSpec> = {}): LoginSpec {
     version: 2,
     ops: [],
     vars: [{ name: "token", default: "abc123" }],
-    success: [{ page: { type: "formGone" } }],
+    success: [],
     auth: { mode: "engine" },
     ...ov,
   };
@@ -158,6 +159,7 @@ describe("clear.cookies — 三态范围与 includeParent", () => {
   });
 
   it("string[] 白名单 + includeParent：父域同名 cookie 一并清除", async () => {
+    tabsGet.mockResolvedValue({ url: "https://www.example.com/home" });
     cookiesGetAll.mockResolvedValue([
       { name: "auth", domain: "www.example.com", path: "/", secure: false, hostOnly: true },
       { name: "auth", domain: "example.com", path: "/", secure: false, hostOnly: false },
@@ -189,10 +191,10 @@ describe("clear.storage — local / session 与范围", () => {
       { settle: { pollingIntervalMs: 1 } },
     );
     expect(result.success).toBe(true);
-    const injection = executeScript.mock.calls[0][0] as { args: [string, unknown] };
+    const injection = executeScript.mock.calls.at(-1)![0] as { args: [string, string | null] };
     expect(injection.args[0]).toBe("local");
-    expect(injection.args[1]).toBe("all");
-    expect(executeScript).toHaveBeenCalledTimes(1);
+    expect(injection.args[1]).toBeNull();
+    expect(executeScript).toHaveBeenCalledTimes(2);
   });
 
   it("string[] 白名单只删声明键", async () => {
@@ -201,7 +203,7 @@ describe("clear.storage — local / session 与范围", () => {
       buildCtx(),
       { settle: { pollingIntervalMs: 1 } },
     );
-    const call = executeScript.mock.calls[0][0] as unknown as { args: [string, unknown] };
+    const call = executeScript.mock.calls.at(-1)![0] as { args: [string, unknown] };
     expect(call.args[1]).toEqual(["auth", "token"]);
   });
 });
@@ -418,7 +420,7 @@ describe("auth.write — storage 写入 origin 校验", () => {
     if (!result.success) {
       expect(result.errorCode).toBe(ErrorCodes.INJECT_AUTH_FAILED);
     }
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 
   it("tab 在目标 origin：storage 写入在文档内执行", async () => {
@@ -431,7 +433,7 @@ describe("auth.write — storage 写入 origin 校验", () => {
       { settle: { pollingIntervalMs: 1 } },
     );
     expect(result.success).toBe(true);
-    const call = executeScript.mock.calls[0][0] as unknown as { args: [string, Record<string, string>] };
+    const call = executeScript.mock.calls.at(-1)![0] as { args: [string, Record<string, string>] };
     expect(call.args[0]).toBe("local");
     expect(call.args[1]).toEqual({ auth: "abc123" });
   });
@@ -451,6 +453,6 @@ describe("auth.write — storage 写入 origin 校验", () => {
     );
     expect(result.success).toBe(true);
     expect(cookiesSet).not.toHaveBeenCalled();
-    expect(executeScript).not.toHaveBeenCalled();
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 });

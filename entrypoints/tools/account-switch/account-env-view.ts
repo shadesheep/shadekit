@@ -9,7 +9,14 @@
  */
 import { ACCOUNT_COLORS, accountColorIndex } from "./account-palette";
 // 直引纯函数子模块而非 spec 桶式入口：保持本模块「零浏览器 API」的投影层约束
-import type { LoginSpec } from "./spec/types";
+import {
+  inspectLoginSpecSupport,
+  type SpecSupportReport,
+} from "./spec/capabilities";
+import {
+  requireSupportedLoginSpec,
+  type SpecDocument,
+} from "./spec/document";
 import {
   configPackageVersion,
   validateConfigPackage,
@@ -253,6 +260,8 @@ export interface ImportEnvItem {
   domain: DomainConfig;
   /** 与现有环境地址冲突（覆盖会替换正在用的配置） */
   conflict: boolean;
+  /** 当前客户端对实际声明的执行能力；不支持的条目仍可保留和导入。 */
+  support: SpecSupportReport;
   /** 默认勾选：非冲突 true；冲突 false（避免误覆盖，可手动勾） */
   checked: boolean;
 }
@@ -309,16 +318,25 @@ function toEnvItem(
   name: string,
   domain: DomainConfig,
   existing: Record<string, DomainConfig>,
+  support: SpecSupportReport,
 ): ImportEnvItem {
   const conflict = Object.hasOwn(existing, url);
-  return { url, name, domain, conflict, checked: !conflict };
+  return { url, name, domain, conflict, checked: !conflict, support };
+}
+
+function storedDomainSupport(domain: DomainConfig): SpecSupportReport {
+  return inspectLoginSpecSupport(
+    domain.strategyConfig?.spec,
+    domain.strategyConfig?.declaredSpecVersion,
+  );
 }
 
 /**
  * 导入预览计划（纯函数，零浏览器 API / storage；落盘由 UI 调既有
  * `updateConfig` 完成）。识别 → 校验 → 内容清单 + 冲突 + 落地方式：
- * - `strategy`：`validateConfigPackage` 复用既有拒绝逻辑（格式 / 版本过高 /
+ * - `strategy`：`validateConfigPackage` 复用既有拒绝逻辑（外壳格式 /
  *   `script` 算子（含 opIndex）/ `secret` 变量 / requiredVars 越界），
+ *   高声明版本与未知能力只禁用对应环境，不再拒绝整包；
  *   通过后再补 R1–R7 结构校验（导出侧拦一次，导入侧防手工构造再拦一次）；
  * - `accounts` / `full`：账号备份直接取顶层切片；全部工具设置只取
  *   `account-switch` 子键（其余工具设置不在本工具落地）；
@@ -346,15 +364,24 @@ export function planImport(
     issues.push(...validateConfigPackage(raw));
     if (issues.length === 0) {
       const pkg = raw as ConfigPackage;
-      // 导入容错：把「cookie value 为字面 JSON 对象」这类手写包的结构花括号自动
-      // 转义（{{/}}），再校验与落地，保证存盘的是合法模板（escapeLiteralBraces）
-      const normalizedEnvs = pkg.environments.map((env) => ({
-        ...env,
-        spec: normalizeAuthWriteTemplates(env.spec) as LoginSpec,
-      }));
-      // R1–R7 结构校验（SpecIssue → ImportIssue：保留 rule + opIndex）
-      normalizedEnvs.forEach((env, envIndex) => {
-        for (const si of validateLoginSpec(env.spec)) {
+      const declaredSpecVersion = pkg.specVersion;
+      // 先检查能力，再决定是否规范化/深度校验。未来声明保持原始 JSON，
+      // 不被当前版本的迁移、模板转义或字段过滤改写。
+      const candidates = pkg.environments.map((env) => {
+        const support = inspectLoginSpecSupport(env.spec, declaredSpecVersion);
+        let spec: SpecDocument = env.spec;
+        let specIssues: ReturnType<typeof validateLoginSpec> = [];
+        if (support.supported) {
+          spec = normalizeAuthWriteTemplates(spec) as SpecDocument;
+          specIssues = validateLoginSpec(spec);
+          if (specIssues.length === 0) {
+            spec = requireSupportedLoginSpec(spec, declaredSpecVersion);
+          }
+        }
+        return { env, spec, support, specIssues };
+      });
+      candidates.forEach(({ specIssues }, envIndex) => {
+        for (const si of specIssues) {
           issues.push({
             code: si.code,
             message: `第 ${envIndex + 1} 个环境：${si.message}`,
@@ -363,8 +390,15 @@ export function planImport(
           });
         }
       });
-      envs = normalizedEnvs.map((env) => {
+      envs = candidates.map(({ env, spec, support }) => {
         const url = env.url.trim();
+        const vars = isRecord(env.vars)
+          ? Object.fromEntries(
+              Object.entries(env.vars).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+              ),
+            )
+          : undefined;
         return toEnvItem(
           url,
           env.name,
@@ -373,10 +407,19 @@ export function planImport(
             tags: [],
             // loginMethod 仅作显示名：用声明自己的名称，让导入的策略在日志与
             // 下拉里可辨认；执行始终认 strategyConfig.spec。
-            loginMethod: env.spec.template?.trim() || "generic",
-            strategyConfig: { spec: env.spec },
+            loginMethod:
+              (typeof spec.template === "string" && spec.template.trim()) ||
+              "generic",
+            strategyConfig: {
+              spec,
+              ...(typeof declaredSpecVersion === "number"
+                ? { declaredSpecVersion }
+                : {}),
+            },
+            ...(vars ? { vars } : {}),
           },
           existing,
+          support,
         );
       });
       axes.strategy = {
@@ -451,6 +494,7 @@ export function planImport(
               typeof domain.name === "string" && domain.name ? domain.name : url,
               domain,
               existing,
+              storedDomainSupport(domain),
             );
           });
           axes.strategy = {

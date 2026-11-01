@@ -125,7 +125,8 @@ export interface DomainConfig {
   loginMethod?: string;
   debugRedirect?: string; // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
   debugRedirectEnabled?: boolean; // 「登录后打开复现页面」开关默认值
-  defaultPassword?: string; // 快进登录默认密码
+  defaultPassword?: string; // 旧版快捷登录默认密码；迁移后由 defaultCredentialRef 取代
+  defaultCredentialRef?: string;
   /** 「清除本域 Cookie」是否包含父域（默认 false，仅精确 host；ADR-0012 D8） */
   cookieClearIncludeParent?: boolean;
 
@@ -141,8 +142,12 @@ export interface DomainConfig {
    * generic 登录的配方存放于此；`strategyParams` 对 generic 仅保留只读兼容。
    */
   strategyConfig?: {
-    /** LoginSpec（ADR-0015 D2）；通用登录读取时优先于 `recipe` */
-    spec?: import("./spec/types").LoginSpec;
+    /** 原始登录声明；仅在执行/受支持编辑边界窄化为 LoginSpec。 */
+    spec?: import("./spec/document").SpecDocument;
+    /** 策略包顶层 specVersion 的本地来源信息，不写回原始声明。 */
+    declaredSpecVersion?: number;
+    /** 私有声明的敏感默认值引用，与环境覆盖 secretVarRefs 分离。 */
+    secretVarRefs?: Record<string, string>;
     /** 旧配方（v1）；读取时经迁移链升到当前 spec 版本 */
     recipe?: import("./strategies/generic-recipe").Recipe;
   };
@@ -162,6 +167,8 @@ export interface DomainConfig {
    * 不改进共享的声明本身。
    */
   vars?: Record<string, string>;
+  /** 敏感变量覆盖只保存保险库引用；明文不进入普通配置。 */
+  secretVarRefs?: Record<string, string>;
 }
 
 /** 账号配置 */
@@ -169,7 +176,9 @@ export interface Account {
   id: string;
   name: string;
   username: string;
-  password: string;
+  /** 旧版明文密码；迁移完成后不再写入。 */
+  password?: string;
+  credentialRef?: string;
   roles: string[];
   domains: string[];
 }
@@ -203,7 +212,11 @@ export interface EnvBadgeConfig {
 export interface StrategyEntry {
   /** 展示名：`spec.template` 优先，其次导入包里的 environment.name */
   name: string;
-  spec: import("./spec/types").LoginSpec;
+  spec: import("./spec/document").SpecDocument;
+  /** 策略包顶层 specVersion 的本地来源信息，随镜像/脱镜一起保留。 */
+  declaredSpecVersion?: number;
+  /** 策略级敏感变量默认值只保存保险库引用，不写回共享 LoginSpec。 */
+  secretVarRefs?: Record<string, string>;
   /** 创建 / 最近一次更新时间（毫秒），列表排序用 */
   createdAt: number;
   updatedAt: number;
@@ -223,6 +236,7 @@ export interface AccountSwitchConfig {
   quickLoginDefaultDomain?: string;
   /** 全局默认密码：环境未配置默认密码时的最后回退 */
   globalDefaultPassword?: string;
+  globalDefaultCredentialRef?: string;
   tabOrder?: ("users" | "quicklogin")[];
   /** 环境指示器（合并自原 env-indicator 工具）；缺省视为关闭 */
   envBadge?: EnvBadgeConfig;

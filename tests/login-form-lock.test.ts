@@ -27,6 +27,7 @@ const storageSet = vi.fn();
 const sendMessage = vi.fn();
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   storage: {
     local: {
       get: vi.fn(async (keys: string[]) =>
@@ -248,7 +249,7 @@ describe("lockPreparedLoginForm", () => {
 
     expect(result).toEqual({ status: "locked" });
     const current = readConfig().domains[ENV_KEY];
-    const ops = current.strategyConfig!.spec!.ops;
+    const ops = (current.strategyConfig!.spec as LoginSpec).ops;
     expect(ops[0]).toEqual(spec.ops[0]);
     expect(ops.slice(1, 3)).toEqual([
       {
@@ -320,7 +321,7 @@ describe("lockPreparedLoginForm", () => {
     expect(result.status).toBe("locked");
     const current = readConfig().domains[ENV_KEY];
     expect(current.strategyId).toBe("shared");
-    expect(current.strategyConfig?.spec?.ops[4]).toMatchObject({
+    expect((current.strategyConfig?.spec as LoginSpec | undefined)?.ops[4]).toMatchObject({
       target: "#u",
     });
     expect(readConfig().strategies).toEqual(libraryBefore);
@@ -374,7 +375,7 @@ describe("lockPreparedLoginForm", () => {
     setFailure = new Error("quota");
     expect((await lockPreparedLoginForm(prepared())).status).toBe("failed");
     expect(
-      readConfig().domains[ENV_KEY].strategyConfig?.spec?.ops[1],
+      (readConfig().domains[ENV_KEY].strategyConfig?.spec as LoginSpec | undefined)?.ops[1],
     ).toMatchObject({ target: { auto: "login" } });
   });
 });

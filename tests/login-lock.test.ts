@@ -14,6 +14,7 @@ const storageGetMock = vi.fn().mockResolvedValue({});
 const storageSetMock = vi.fn().mockResolvedValue(undefined);
 
 vi.stubGlobal('chrome', {
+  permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
   storage: {
     local: {
       get: (...args: unknown[]) => storageGetMock(...args),
@@ -99,16 +100,18 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
     username: 'user1',
     password: 'pass1',
     roles: [],
-    domains: ['example.com'],
+    domains: ['http://example.com'],
   } as Account;
 
-  /** 最小 v2 spec：prelude 只读取、不校验内容 */
+  /** 最小合法 v2 spec（执行器被替换，prelude 仍需通过结构与能力校验） */
   function stubSpec(): LoginSpec {
     return {
       version: LOGIN_SPEC_VERSION,
       template: 'lock-test',
-      ops: [],
-      success: [],
+      ops: [
+        { op: 'digest', algorithm: 'sha256', input: '{username}', as: 'sessionToken' },
+      ],
+      success: [{ page: { type: 'fixed', ms: 0 } }],
       auth: DEFAULT_AUTH,
     };
   }
@@ -124,6 +127,7 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
       if (keys.includes('devtools-account-switch')) {
         return {
           'devtools-account-switch': {
+            accounts: [account],
             domains: {
               'http://example.com': {
                 name: '测试环境',
@@ -144,14 +148,20 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
   });
 
   const senderOf = (tabId: number) =>
-    ({ tab: { id: tabId } }) as chrome.runtime.MessageSender;
+    ({
+      id: 'shadekit-test-extension',
+      url: 'http://example.com/page',
+      origin: 'http://example.com',
+      frameId: 0,
+      tab: { id: tabId, url: 'http://example.com/page' },
+    }) as chrome.runtime.MessageSender;
 
   it('同 tab 登录进行中再次触发 → 拒绝且提示正在登录中，不重复发登录请求', async () => {
-    const first = handleSwitchAccount(account, 'http://example.com', senderOf(1));
+    const first = handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
     // 等第一次流程进入登录执行
     await vi.waitFor(() => expect(loginRunMock.contexts).toHaveLength(1));
 
-    const second = await handleSwitchAccount(account, 'http://example.com', senderOf(1));
+    const second = await handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
     expect(second.success).toBe(false);
     expect(second.error).toBe(LOGIN_BUSY_ERROR);
     // 第二次未触发新的登录执行
@@ -163,8 +173,8 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
   });
 
   it('不同 tab 的登录可并行，且各自持有独立 debugBuffer', async () => {
-    const first = handleSwitchAccount(account, 'http://example.com', senderOf(1));
-    const second = handleSwitchAccount(account, 'http://example.com', senderOf(2));
+    const first = handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
+    const second = handleSwitchAccount(account.id, 'http://example.com', senderOf(2));
     await vi.waitFor(() => expect(loginRunMock.contexts).toHaveLength(2));
 
     // 两个流程的调试缓冲不是同一个对象
@@ -180,7 +190,7 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
   });
 
   it('登录结束后锁释放，同 tab 可再次登录', async () => {
-    const first = handleSwitchAccount(account, 'http://example.com', senderOf(1));
+    const first = handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
     await vi.waitFor(() => expect(loginRunMock.contexts).toHaveLength(1));
     expect(isLoginLocked(1)).toBe(true);
 
@@ -192,7 +202,7 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
     loginRunMock.gate = new Promise<void>((resolve) => {
       loginRunMock.resolveGate = resolve;
     });
-    const second = handleSwitchAccount(account, 'http://example.com', senderOf(1));
+    const second = handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
     await vi.waitFor(() => expect(loginRunMock.contexts).toHaveLength(2));
     loginRunMock.resolveGate();
     expect((await second).success).toBe(true);
@@ -200,7 +210,7 @@ describe('handleSwitchAccount — 同 tab 登录并发互斥', () => {
 
   it('登录失败后锁同样释放', async () => {
     loginRunMock.result = { success: false, error: '密码错误' };
-    const first = handleSwitchAccount(account, 'http://example.com', senderOf(1));
+    const first = handleSwitchAccount(account.id, 'http://example.com', senderOf(1));
     await vi.waitFor(() => expect(loginRunMock.contexts).toHaveLength(1));
 
     loginRunMock.resolveGate();

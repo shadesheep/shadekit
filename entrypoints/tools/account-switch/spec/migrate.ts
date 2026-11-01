@@ -17,6 +17,8 @@ import {
   normalizeRecipe,
   type RecipeStep,
 } from "../strategies/generic-recipe";
+import { inspectLoginSpecSupport } from "./capabilities";
+import { requireSupportedLoginSpec } from "./document";
 import { LOGIN_SPEC_VERSION, type LoginSpec } from "./types";
 
 export type MigrateSpecResult =
@@ -31,6 +33,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface MigrateSpecOptions {
   /** `strategyParams.cookieClear`：非快照配方的清理三态 */
   cookieClear?: "all" | "none" | string[];
+}
+
+/** 原始声明先过能力门，再迁移；最终只经统一边界窄化为可执行 LoginSpec。 */
+function migrateExecutableSpec(
+  raw: unknown,
+  declaredSpecVersion?: number,
+  options: MigrateSpecOptions = {},
+): MigrateSpecResult {
+  const version = isRecord(raw) ? raw.version : undefined;
+  // v1 是已知迁移输入，不能因当前只执行 v2 而在迁移前拒绝。
+  const isLegacy =
+    typeof version === "number" &&
+    version < LOGIN_SPEC_VERSION &&
+    declaredSpecVersion === undefined;
+  if (!isLegacy) {
+    const support = inspectLoginSpecSupport(raw, declaredSpecVersion);
+    if (!support.supported) {
+      return {
+        ok: false,
+        error: support.issues[0]?.message ?? "当前客户端不支持该登录声明",
+      };
+    }
+  }
+
+  const result = migrateSpec(raw, options);
+  if (!result.ok) return result;
+  try {
+    return {
+      ...result,
+      spec: requireSupportedLoginSpec(result.spec, declaredSpecVersion),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "登录声明无效",
+    };
+  }
 }
 
 /**
@@ -346,15 +385,25 @@ export interface ReadSpecResult {
 export function readSpecFromConfig(
   domainConfig: {
     loginMethod?: string;
-    strategyConfig?: { spec?: unknown; recipe?: unknown };
+    strategyConfig?: {
+      spec?: unknown;
+      declaredSpecVersion?: number;
+      recipe?: unknown;
+    };
     strategyParams?: Record<string, unknown>;
     strategyId?: string;
   },
-  strategies?: Record<string, { spec?: unknown } | undefined>,
+  strategies?: Record<
+    string,
+    { spec?: unknown; declaredSpecVersion?: number } | undefined
+  >,
 ): ReadSpecResult {
   const storedSpec = domainConfig.strategyConfig?.spec;
   if (storedSpec !== undefined && storedSpec !== null) {
-    const result = migrateSpec(storedSpec);
+    const result = migrateExecutableSpec(
+      storedSpec,
+      domainConfig.strategyConfig?.declaredSpecVersion,
+    );
     if (!result.ok) {
       return {
         spec: null,
@@ -373,7 +422,10 @@ export function readSpecFromConfig(
   if (mirrorId) {
     const mirrorSpec = strategies?.[mirrorId]?.spec;
     if (mirrorSpec !== undefined && mirrorSpec !== null) {
-      const result = migrateSpec(mirrorSpec);
+      const result = migrateExecutableSpec(
+        mirrorSpec,
+        strategies?.[mirrorId]?.declaredSpecVersion,
+      );
       if (result.ok) {
         return { spec: result.spec, warnings: result.warnings, migrated: false };
       }

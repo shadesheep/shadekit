@@ -20,6 +20,7 @@
 
 import type { DomainConfig, StrategyEntry } from "../types";
 import { defaultLoginSpec } from "./editor";
+import { requireSupportedLoginSpec, type SpecDocument } from "./document";
 import { strategyTitle } from "./strategy-library";
 import type { LoginSpec } from "./types";
 
@@ -65,6 +66,17 @@ export function presetTitleOf(spec: LoginSpec, envName?: string): string {
   return name || "自定义登录";
 }
 
+function supportedSpec(
+  raw: SpecDocument,
+  declaredSpecVersion?: number,
+): LoginSpec | null {
+  try {
+    return requireSupportedLoginSpec(raw, declaredSpecVersion);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 归纳动态预设：策略库条目优先，其次才是环境自带的内联声明。
  * 同名 / 同内容声明只保留第一个（后导入的重复策略不刷屏）。
@@ -87,7 +99,9 @@ export function collectStrategyPresets(
   // 库是策略的正式住处；预设 key 直接用库 id（形如 `custom:<slug>`），
   // 使「下拉里选中的 key」与「环境绑定的 strategyId」是同一个值。
   for (const [id, entry] of Object.entries(strategies ?? {})) {
-    const spec = entry?.spec;
+    const document = entry?.spec;
+    if (!document) continue;
+    const spec = supportedSpec(document, entry.declaredSpecVersion);
     if (!spec) continue;
     if (JSON.stringify(spec) === genericSpecJson) continue;
     if (spec.template === BUILTIN_GENERIC) continue;
@@ -104,7 +118,12 @@ export function collectStrategyPresets(
   for (const [url, env] of Object.entries(domains ?? {})) {
     // 已绑定策略库的环境由库条目代表，不重复收录
     if (env?.strategyId && strategies?.[env.strategyId]) continue;
-    const spec = env?.strategyConfig?.spec;
+    const document = env?.strategyConfig?.spec;
+    if (!document) continue;
+    const spec = supportedSpec(
+      document,
+      env.strategyConfig?.declaredSpecVersion,
+    );
     if (!spec) continue;
     // 内置模板不重复收录：与 generic 默认模板完全一致
     if (JSON.stringify(spec) === genericSpecJson) continue;

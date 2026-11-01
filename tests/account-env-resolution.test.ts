@@ -40,4 +40,37 @@ describe('resolveEnvironment', () => {
   it('origin 为空返回 undefined', () => {
     expect(resolveEnvironment('', domains)).toBeUndefined();
   });
+
+  it('通配符 + 非默认端口命中具体子域', () => {
+    const devDomains: Record<string, DomainConfig> = {
+      'http://*.dev.example.com:16800': env({
+        name: '开发',
+        defaultPassword: 'dev-password',
+      }),
+    };
+    const r = resolveEnvironment(
+      'http://app.dev.example.com:16800',
+      devDomains,
+    );
+    expect(r?.domain).toBe('http://*.dev.example.com:16800');
+    expect(r?.env.defaultPassword).toBe('dev-password');
+  });
+
+  it('通配符 + 端口不一致不命中', () => {
+    const devDomains: Record<string, DomainConfig> = {
+      'http://*.dev.example.com:16800': env({ name: '开发' }),
+    };
+    expect(
+      resolveEnvironment('http://app.dev.example.com:16801', devDomains),
+    ).toBeUndefined();
+  });
+
+  it('通配符 + 协议不一致不命中', () => {
+    const devDomains: Record<string, DomainConfig> = {
+      'https://*.dev.example.com:16800': env({ name: '开发' }),
+    };
+    expect(
+      resolveEnvironment('http://app.dev.example.com:16800', devDomains),
+    ).toBeUndefined();
+  });
 });

@@ -17,13 +17,17 @@ import type { AuthStorageSelection } from "../tools/account-switch/strategies/au
 import type { DryRunStepResult } from "../tools/account-switch/strategies/generic-dry-run";
 import type { Recipe } from "../tools/account-switch/strategies/generic-recipe";
 import type { RecipeStepTrace } from "../tools/account-switch/spec/types";
-import type { Account } from "../tools/account-switch/types";
+import type {
+  AccountPanelData,
+} from "../tools/account-switch/account-view";
 import type {
   LoginFormLockResult,
   PreparedLoginFormLock,
 } from "../tools/account-switch/login-form-lock";
 import type { ErrorCode } from "../tools/account-switch/utils/error-codes";
+import type { AccountSwitchConfig } from "../tools/account-switch/types";
 import type { TrialSignalState } from "../tools/account-switch/spec/run";
+import type { BackupImportSummary } from "./security/backup-service";
 
 // ---------------------------------------------------------------------------
 // 响应形状
@@ -54,19 +58,76 @@ export interface BackgroundMessageMap {
   };
 
   // --- 账号切换 ---
+  GET_ACCOUNT_PANEL: {
+    payload: Record<string, never>;
+    response: AccountPanelData;
+  };
   SWITCH_ACCOUNT: {
-    payload: { account: Account; domain: string };
+    payload: { accountId: string; environmentId: string };
+    response: LoginResponse;
+  };
+  REQUEST_ENVIRONMENT_PERMISSIONS: {
+    payload: { environmentId: string };
     response: LoginResponse;
   };
   QUICK_LOGIN: {
     payload: {
       url: string;
       username: string;
-      password: string;
+      /** 仅用户本次显式输入时携带；已保存默认密码由 Background 解析。 */
+      password?: string;
       hasUrl?: boolean;
       debugRedirect?: string;
     };
     response: LoginResponse;
+  };
+  /** 仅扩展配置页：先完成迁移，再读取不含明文的引用配置。 */
+  VAULT_GET_CONFIG: {
+    payload: Record<string, never>;
+    response: {
+      success: boolean;
+      config?: AccountSwitchConfig;
+      error?: string;
+      errorCode?: ErrorCode;
+    };
+  };
+  /** 仅扩展配置页：一次性秘密随补丁进入 Background，普通存储只提交引用。 */
+  VAULT_SAVE_CONFIG: {
+    payload: {
+      patch: Partial<AccountSwitchConfig>;
+      /** 用户显式点名的凭据引用：只清除这些，未提及的引用保持不变。 */
+      clearCredentialRefs?: string[];
+    };
+    response: {
+      success: boolean;
+      config?: AccountSwitchConfig;
+      error?: string;
+      errorCode?: ErrorCode;
+    };
+  };
+  VAULT_PUT_SECRET: {
+    payload: { credentialId: string; plaintext: string };
+    response: LoginResponse;
+  };
+  VAULT_DELETE_SECRET: {
+    payload: { credentialId: string };
+    response: LoginResponse;
+  };
+  VAULT_HAS_SECRET: {
+    payload: { credentialId: string };
+    response: { success: boolean; hasSecret?: boolean; error?: string; errorCode?: ErrorCode };
+  };
+  VAULT_EXPORT_BACKUP: {
+    payload: Record<string, never>;
+    response: LoginResponse & { backup?: Record<string, unknown> };
+  };
+  VAULT_PREPARE_BACKUP: {
+    payload: { text: string };
+    response: LoginResponse & { summary?: BackupImportSummary };
+  };
+  VAULT_CONFIRM_BACKUP: {
+    payload: { acceptPlaintextWarning: boolean };
+    response: LoginResponse & { importedSecretCount?: number };
   };
   /**
    * 配方试跑：在当前 tab 验证定位，不提交登录。
@@ -123,6 +184,18 @@ export interface BackgroundMessageMap {
   OPEN_ACCOUNT_ENVIRONMENT: {
     payload: { envKey: string };
     response: { success: boolean; error?: string };
+  };
+
+  TRIAL_SAVED_ACCOUNT: {
+    payload: { accountId: string; environmentId: string };
+    response: {
+      ok: boolean;
+      error?: string;
+      errorCode?: ErrorCode;
+      signals: TrialSignalState[];
+      requestSent: boolean;
+      sessionWritten: boolean;
+    };
   };
 
   /**

@@ -199,6 +199,23 @@ describe("planImport — 登录策略包", () => {
     );
   });
 
+  it("已知 v2 的结构损坏仍是导入问题，而不是不支持环境", () => {
+    const plan = planImport(
+      strategyPackage({
+        environments: [
+          {
+            name: "broken",
+            url: "https://broken.example.com",
+            spec: spec({ success: [] }),
+            requiredVars: [],
+          },
+        ],
+      }),
+      EMPTY_CONFIG,
+    );
+    expect(plan.issues.some((issue) => issue.code === "CONFIG_INVALID")).toBe(true);
+  });
+
   it("script 算子：问题定位到算子下标（opIndex，0 基）", () => {
     const pkg = strategyPackage({
       environments: [
@@ -223,15 +240,66 @@ describe("planImport — 登录策略包", () => {
     expect(hit!.message).toContain("第 2 步");
   });
 
-  it("specVersion 高于当前扩展 → 拒绝并告知升级", () => {
+  it("导入受支持的相邻环境，同时逐字段保留不支持的未来声明", () => {
+    const future = {
+      ...spec(),
+      version: LOGIN_SPEC_VERSION + 1,
+      futureTop: { keep: [1, 2] },
+      vars: [{ name: "futureVar", futureFlag: "keep-me" }],
+      ops: [{ op: "future.op", unknownField: "keep-me" }],
+    };
+    const originalFutureVars = { futureSetting: "keep" };
     const plan = planImport(
+      strategyPackage({
+        environments: [
+          {
+            name: "dev",
+            url: "https://dev.example.com",
+            spec: spec(),
+            requiredVars: [],
+          },
+          {
+            name: "future",
+            url: "https://future.example.com",
+            spec: future,
+            vars: originalFutureVars,
+            requiredVars: [],
+          },
+        ],
+      }),
+      EMPTY_CONFIG,
+    );
+
+    expect(plan.issues).toEqual([]);
+    expect(plan.envs.map((env) => env.support.supported)).toEqual([true, false]);
+    expect(plan.envs[1].support.issues.map((issue) => issue.code)).toContain(
+      "SPEC_VERSION_UNSUPPORTED",
+    );
+    expect(plan.envs[1].domain.strategyConfig?.spec).toEqual(future);
+    expect(plan.envs[1].domain.vars).toEqual(originalFutureVars);
+    expect(plan.envs[1].domain.strategyConfig?.spec).not.toHaveProperty(
+      "declaredSpecVersion",
+    );
+  });
+
+  it("高 specVersion 只禁用环境；未知外壳和包级 script 仍拒绝整个文件", () => {
+    const high = planImport(
       strategyPackage({ specVersion: LOGIN_SPEC_VERSION + 1 }),
       EMPTY_CONFIG,
     );
-    expect(plan.issues.length).toBeGreaterThan(0);
-    expect(plan.issues[0].message).toContain("升级扩展");
-    // 版本过高时无可落地的轴（确认按钮必须禁用的事实源）
-    expect(plan.axes.strategy.available).toBe(false);
+    expect(high.issues).toEqual([]);
+    expect(high.envs[0].checked).toBe(true);
+    expect(high.envs[0].support.issues[0]?.code).toBe(
+      "SPEC_VERSION_UNSUPPORTED",
+    );
+    expect(high.envs[0].domain.strategyConfig?.declaredSpecVersion).toBe(
+      LOGIN_SPEC_VERSION + 1,
+    );
+    expect(high.axes.strategy.available).toBe(true);
+
+    expect(
+      planImport({ format: "dt-login-config/v2" }, EMPTY_CONFIG).issues,
+    ).not.toEqual([]);
   });
 
   it("secret 变量 → 拒绝并指出变量名", () => {

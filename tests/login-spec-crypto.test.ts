@@ -47,6 +47,7 @@ vi.mock(
 );
 
 vi.stubGlobal("chrome", {
+  permissions: { contains: async () => true, request: async () => true },
   cookies: { getAll: vi.fn(async () => []) },
   scripting: { executeScript: vi.fn(async () => []) },
   tabs: { get: vi.fn(async () => ({ url: "https://example.com/dashboard" })) },

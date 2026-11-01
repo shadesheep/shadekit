@@ -17,16 +17,22 @@ export interface ToolConfigSection {
   component: () => Promise<any>;
 }
 
+// 注册表只保存元数据；组件加载器按入口拆分（options/config-components.ts、
+// content/panel-components.ts），避免 background/content 构建把 UI 组件内联。
+export type ToolConfigSectionMeta = Omit<ToolConfigSection, "component">;
+
 // Content Script 面板配置
 export interface ToolContentPanel {
   title: string;
   component: () => Promise<any>;
 }
 
+export type ToolContentPanelMeta = Omit<ToolContentPanel, "component">;
+
 // Content Script 能力声明
 export interface ToolContentScript {
   inject: boolean;
-  panel?: ToolContentPanel;
+  panel?: ToolContentPanelMeta;
   matches?: string[]; // 默认覆盖 manifest matches
 }
 
@@ -64,7 +70,7 @@ export interface ToolDefinition {
 
   contentScript?: ToolContentScript;
 
-  configSection?: ToolConfigSection;
+  configSection?: ToolConfigSectionMeta;
 
   backgroundHandlers?: ToolBackgroundHandlers;
 

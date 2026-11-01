@@ -1,0 +1,166 @@
+{
+  "schema": "shadekit-h0-browser-evidence/v1",
+  "browser": "edge",
+  "version": "Edg/156.0.4314.50",
+  "platform": "darwin",
+  "arch": "arm64",
+  "executedAt": "2026-10-30T05:14:41.414Z",
+  "profile": "disposable-isolated-profile",
+  "checks": [
+    {
+      "id": "indexeddb-non-extractable-key",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "instanceId": "066a8ac4-2e44-4ff5-8555-c1157599ae42",
+        "keyType": "secret",
+        "algorithm": "AES-KW",
+        "extractable": false,
+        "exportBlocked": true,
+        "dekExtractable": false,
+        "wrappedBytes": 40,
+        "wrappedDigest": "2b71d244e04bd55bf9c93066d2f1676ca14a65a8dbca2b5db52a441ce41f914d",
+        "challengeRoundTrip": true,
+        "plaintextFallback": false
+      }
+    },
+    {
+      "id": "mv3-background-restart",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "instanceId": "0f4bddcf-a19d-4055-bdf7-b5d3ce7f58da",
+        "keyType": "secret",
+        "algorithm": "AES-KW",
+        "extractable": false,
+        "exportBlocked": true,
+        "dekExtractable": false,
+        "wrappedBytes": 40,
+        "wrappedDigest": "2b71d244e04bd55bf9c93066d2f1676ca14a65a8dbca2b5db52a441ce41f914d",
+        "challengeRoundTrip": true,
+        "plaintextFallback": false
+      }
+    },
+    {
+      "id": "browser-restart-same-profile",
+      "ok": true,
+      "detail": {
+        "ok": true,
+        "instanceId": "c040f248-c10e-4fba-95f5-95a65ef9f071",
+        "keyType": "secret",
+        "algorithm": "AES-KW",
+        "extractable": false,
+        "exportBlocked": true,
+        "dekExtractable": false,
+        "wrappedBytes": 40,
+        "wrappedDigest": "2b71d244e04bd55bf9c93066d2f1676ca14a65a8dbca2b5db52a441ce41f914d",
+        "challengeRoundTrip": true,
+        "plaintextFallback": false
+      }
+    },
+    {
+      "id": "http-redirect-final-url",
+      "ok": true,
+      "detail": {
+        "kind": "response",
+        "status": 200,
+        "finalUrl": "http://127.0.0.1:63711/final?from=redirect",
+        "redirected": true,
+        "text": "final",
+        "bodyBase64": "ZmluYWw=",
+        "exposedSetCookieCount": 0
+      }
+    },
+    {
+      "id": "http-response-utf8-decoding",
+      "ok": true,
+      "detail": {
+        "kind": "response",
+        "status": 200,
+        "finalUrl": "http://127.0.0.1:63711/decode",
+        "redirected": false,
+        "text": "����",
+        "bodyBase64": "1tDOxA==",
+        "exposedSetCookieCount": 0
+      }
+    },
+    {
+      "id": "http-timeout",
+      "ok": true,
+      "detail": {
+        "kind": "error",
+        "code": "HTTP_TIMEOUT",
+        "cause": "timeout"
+      }
+    },
+    {
+      "id": "http-network-error",
+      "ok": true,
+      "detail": {
+        "kind": "error",
+        "code": "HTTP_TRANSPORT_ERROR",
+        "cause": "unknown"
+      }
+    },
+    {
+      "id": "http-tls-error",
+      "ok": true,
+      "detail": {
+        "kind": "error",
+        "code": "HTTP_TRANSPORT_ERROR",
+        "cause": "unknown"
+      }
+    },
+    {
+      "id": "http-set-cookie-replay",
+      "ok": true,
+      "detail": {
+        "kind": "response",
+        "status": 200,
+        "finalUrl": "http://127.0.0.1:63711/set-cookie",
+        "redirected": false,
+        "text": "cookies-set",
+        "bodyBase64": "Y29va2llcy1zZXQ=",
+        "exposedSetCookieCount": 0
+      }
+    },
+    {
+      "id": "http-set-cookie-browser-context",
+      "ok": true,
+      "detail": {
+        "cookies": [
+          {
+            "name": "h0_session",
+            "domain": "127.0.0.1",
+            "path": "/",
+            "secure": false,
+            "httpOnly": true,
+            "sameSite": "lax",
+            "session": true,
+            "hostOnly": true
+          },
+          {
+            "name": "h0 Preference",
+            "domain": "127.0.0.1",
+            "path": "/",
+            "secure": false,
+            "httpOnly": false,
+            "sameSite": "lax",
+            "session": false,
+            "hostOnly": true,
+            "expirationDate": 1793337341.293167
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-key-no-plaintext-fallback",
+      "ok": true,
+      "detail": {
+        "ok": false,
+        "code": "VAULT_UNAVAILABLE",
+        "plaintextFallback": false
+      }
+    }
+  ]
+}

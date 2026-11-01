@@ -24,6 +24,10 @@ import {
   type ErrorCode,
 } from "./utils/error-codes";
 import { reloadTabAndWait, waitForTabLoaded } from "./utils/tab-load";
+import {
+  assertTabOnExactOrigin,
+  normalizedOrigin,
+} from "./spec/origin-guard";
 
 /**
  * 复用 tab 路径上「刷新后等待可见」的上限。
@@ -139,6 +143,9 @@ export async function setupAuthTab(
     await waitForTabLoaded(tabId);
   }
 
+  // 导航/加载完成后、任何会话写入前重新确认真实 origin。
+  await assertTabOnExactOrigin(tabId, origin);
+
   // D7：目标 origin 文档内恢复登录态。顺序在导航/reload 之前，避免被整页
   // 加载冲掉；storage 写入必须在目标 origin 文档内（origin 不符报错）。
   if (options?.capturedAuth) {
@@ -237,6 +244,14 @@ export async function injectAndNavigate(
   const injectTabId = newTabId ?? (tokenData ? currentTabId : undefined);
   if (injectTabId && tokenData) {
     try {
+      const expectedOrigin =
+        redirect?.origin ??
+        opts.capturedAuthOrigin ??
+        normalizedOrigin(targetUrl);
+      await assertTabOnExactOrigin(
+        injectTabId,
+        expectedOrigin || normalizedOrigin((await currentTabUrl(injectTabId)) ?? ""),
+      );
       await injectAuth?.(injectTabId, tokenData);
       // 快照恢复：与 injectAuth 同属「注入登录态」，失败走同一回滚路径。
       // 与 injectAuth 同属「注入登录态」，失败走同一回滚路径。
@@ -315,6 +330,7 @@ export async function refreshAfterSwitch(
   tabId: number,
   origin: string,
 ): Promise<void> {
+  await assertTabOnExactOrigin(tabId, origin);
   let redirectUrl: string | null = null;
   try {
     const tab = await chrome.tabs.get(tabId);

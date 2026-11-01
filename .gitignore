@@ -55,6 +55,10 @@ docs/images/raw/
 *.pfx
 keys/
 
+# Local AMO validation scratch scripts (hardcoded local proxy / .env paths)
+scripts/.amo-validate.tmp.mjs
+scripts/.amo-validate2.tmp.mjs
+
 # Service account key JSON (referenced by CHROME_SERVICE_ACCOUNT_JSON)
 *-service-account*.json
 service-account*.json

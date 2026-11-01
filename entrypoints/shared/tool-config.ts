@@ -9,8 +9,9 @@ const STORAGE_PREFIX = 'devtools-';
  * 对应迁移步骤。
  *
  * v2：env-indicator 并入 account-switch.envBadge（ADR-0017 D1）。
+ * v3：已保存秘密迁入保险库；完整备份只使用加密 envelope，v2 明文仅经警告导入。
  */
-export const CONFIG_VERSION = 2;
+export const CONFIG_VERSION = 3;
 
 /**
  * 每个工具的配置独立存储为顶层 key：
@@ -129,8 +130,9 @@ export async function updateConfigTransaction<T extends object>(
 /**
  * 配置迁移函数（导入路径）：按 `__version` 逐级执行迁移链。
  *
- * 当前 CONFIG_VERSION=2 是首发公开版本，尚无更早版本需要迁移；保留入口
- * 以便未来新增 v2 → v3 等步骤时只追加 `if (from === N)` 分支。
+ * 当前版本为 v3；v2 → v3 保留公共配置，秘密迁移与重新加密由
+ * security/backup-service 和 secret-migration 的受控事务完成。
+ * 后续版本只追加迁移分支，不能静默解释高于当前版本的配置。
  *
  * @param data - 导入的配置数据（key 无前缀，与 config-transfer 的导出格式一致）
  * @returns 迁移后的配置数据

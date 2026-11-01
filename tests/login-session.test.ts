@@ -11,6 +11,7 @@ const tabsGetMock = vi.fn();
 const tabsRemoveMock = vi.fn();
 
 vi.stubGlobal('chrome', {
+  permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
   storage: {
     local: {
       get: (...args: unknown[]) => storageGetMock(...args),
@@ -46,8 +47,10 @@ function stubSpec(): LoginSpec {
   return {
     version: LOGIN_SPEC_VERSION,
     template: 'test',
-    ops: [],
-    success: [],
+    ops: [
+      { op: 'http.execute', url: '{origin}/login', method: 'POST', as: 'resp' },
+    ],
+    success: [{ response: { from: 'resp', path: 'ok' } }],
     auth: DEFAULT_AUTH,
   };
 }
@@ -205,6 +208,151 @@ describe('prepareLogin — prelude 不变量', () => {
     expect(outcome.prepared.redirect).toBeNull();
     outcome.prepared.release();
   });
+
+  it('通配符环境按执行页面的具体 origin 构建 ctx', async () => {
+    storageWith({
+      domains: {
+        'https://*.example.com': {
+          name: '示例环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'https://app.example.com/home',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'https://*.example.com',
+        targetKind: 'origin',
+        execTarget: { kind: 'existing', tabId: 1 },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.origin).toBe('https://app.example.com');
+    expect(outcome.prepared.ctx.origin).toBe('https://app.example.com');
+    outcome.prepared.release();
+  });
+
+  it('通配符 + 非默认端口环境按执行页面的具体 origin（含端口）构建 ctx', async () => {
+    storageWith({
+      domains: {
+        'http://*.dev.example.com:16800': {
+          name: '开发环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://app.dev.example.com:16800/app/#/index?packageId=1',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://*.dev.example.com:16800',
+        targetKind: 'origin',
+        execTarget: { kind: 'existing', tabId: 1 },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.origin).toBe(
+      'http://app.dev.example.com:16800',
+    );
+    expect(outcome.prepared.ctx.origin).toBe(
+      'http://app.dev.example.com:16800',
+    );
+    outcome.prepared.release();
+  });
+
+  it('通配符 + 端口不一致的执行页面 → ENV_NOT_MATCHED，且锁已释放', async () => {
+    storageWith({
+      domains: {
+        'http://*.dev.example.com:16800': {
+          name: '开发环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://app.dev.example.com:16801/app/#/index',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://*.dev.example.com:16800',
+        targetKind: 'origin',
+        execTarget: { kind: 'existing', tabId: 1 },
+      }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.errorCode).toBe(ErrorCodes.ENV_NOT_MATCHED);
+    expect(isLoginLocked(1)).toBe(false);
+  });
+
+  it('targetKind=url：path/query/hash 不进入 origin，非默认端口保留', async () => {
+    storageWith({
+      domains: {
+        'http://example.com:16800': {
+          name: '端口环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://example.com:16800/login',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://example.com:16800/deep/path?x=1#section',
+        targetKind: 'url',
+        execTarget: { kind: 'existing', tabId: 1 },
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.origin).toBe('http://example.com:16800');
+    expect(outcome.prepared.ctx.origin).toBe('http://example.com:16800');
+    outcome.prepared.release();
+  });
+
+  it('通配符环境但当前页面不匹配 → ENV_NOT_MATCHED，且锁已释放', async () => {
+    storageWith({
+      domains: {
+        'https://*.example.com': {
+          name: '示例环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'https://evil.test/home',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'https://*.example.com',
+        targetKind: 'origin',
+        execTarget: { kind: 'existing', tabId: 1 },
+      }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.errorCode).toBe(ErrorCodes.ENV_NOT_MATCHED);
+    expect(isLoginLocked(1)).toBe(false);
+  });
 });
 
 describe('prepareLogin — execTarget（ADR-0012 D9）', () => {
@@ -315,7 +463,11 @@ describe('prepareLogin — execTarget（ADR-0012 D9）', () => {
       domains: {
         'http://example.com': {
           name: 'x',
-          loginMethod: 'missing-strategy',
+          loginMethod: 'generic',
+          strategyConfig: {
+            spec: { ...stubSpec(), vars: [{ name: 'token', secret: true }] },
+            secretVarRefs: { token: 'missing-secret' },
+          },
         },
       },
     });

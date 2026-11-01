@@ -5,11 +5,16 @@
  * 相比 FeHelper 的固定勾选组合，这里的模板产出的是可继续编辑的字段行，
  * 用户可以在模板基础上改名、调参、增删字段。
  */
+import type { FieldConstraints } from "./types";
 
 export interface TemplateRow {
   key: string;
   type: string;
+  /** 业务显示名；模板未提供时回退到类型名。 */
+  label?: string;
   params?: Record<string, unknown>;
+  constraints?: FieldConstraints;
+  children?: TemplateRow[];
 }
 
 export interface MockTemplate {
@@ -22,89 +27,100 @@ export interface MockTemplate {
 
 export const TEMPLATES: MockTemplate[] = [
   {
-    id: 'user',
-    name: '用户信息',
-    hint: '会员/账号系统测试',
+    id: "user",
+    name: "用户信息",
+    hint: "会员/账号系统测试",
     rows: [
-      { key: 'name', type: 'name' },
-      { key: 'gender', type: 'gender' },
-      { key: 'age', type: 'age' },
-      { key: 'phone', type: 'phone' },
-      { key: 'email', type: 'email' },
-      { key: 'address', type: 'address' },
+      { key: "name", type: "name" },
+      { key: "gender", type: "gender" },
+      { key: "age", type: "age" },
+      { key: "phone", type: "phone" },
+      { key: "email", type: "email" },
+      { key: "address", type: "address" },
     ],
   },
   {
-    id: 'employee',
-    name: '员工信息',
-    hint: '人事/组织架构测试',
+    id: "employee",
+    name: "员工信息",
+    hint: "人事/组织架构测试",
     rows: [
-      { key: 'name', type: 'name' },
-      { key: 'phone', type: 'phone' },
-      { key: 'email', type: 'email' },
-      { key: 'company', type: 'company' },
-      { key: 'department', type: 'department' },
-      { key: 'position', type: 'position' },
-      { key: 'salary', type: 'salary' },
+      { key: "name", type: "name" },
+      { key: "phone", type: "phone" },
+      { key: "email", type: "email" },
+      { key: "company", type: "company" },
+      { key: "department", type: "department" },
+      { key: "position", type: "position" },
+      { key: "salary", type: "salary" },
     ],
   },
   {
-    id: 'bidder',
-    name: '投标人信息',
-    hint: '供应商/投标单位库',
+    id: "bidder",
+    name: "投标人信息",
+    hint: "供应商/投标单位库",
     rows: [
-      { key: 'companyName', type: 'company' },
-      { key: 'uscc', type: 'uscc' },
-      { key: 'contactName', type: 'name' },
-      { key: 'contactPhone', type: 'phone' },
-      { key: 'email', type: 'email' },
-      { key: 'bankCard', type: 'bankCard' },
-      { key: 'address', type: 'address' },
+      { key: "companyName", type: "company", label: "企业名称" },
+      { key: "uscc", type: "uscc" },
+      { key: "contactName", type: "name", label: "联系人" },
+      { key: "contactPhone", type: "phone", label: "联系电话" },
+      { key: "email", type: "email" },
+      { key: "bankCard", type: "bankCard" },
+      { key: "address", type: "address" },
     ],
   },
   {
-    id: 'project',
-    name: '招标项目',
-    hint: '招标公告/项目列表',
+    id: "project",
+    name: "招标项目",
+    hint: "招标公告/项目列表",
     rows: [
-      { key: 'projectCode', type: 'projectCode' },
-      { key: 'projectName', type: 'projectName' },
-      { key: 'tenderMethod', type: 'tenderMethod' },
-      { key: 'evalMethod', type: 'evalMethod' },
-      { key: 'budget', type: 'budget' },
-      { key: 'budgetCn', type: 'moneyCn' },
-      { key: 'openBidTime', type: 'openBidTime' },
-      { key: 'region', type: 'address' },
-    ],
-  },
-  {
-    id: 'expert',
-    name: '评标专家',
-    hint: '专家库/抽取名单',
-    rows: [
-      { key: 'name', type: 'name' },
-      { key: 'gender', type: 'gender' },
-      { key: 'age', type: 'age', params: { min: 30, max: 65 } },
-      { key: 'idCard', type: 'idCard' },
-      { key: 'phone', type: 'phone' },
-      { key: 'company', type: 'company' },
-      { key: 'position', type: 'position' },
-    ],
-  },
-  {
-    id: 'api',
-    name: 'API 测试',
-    hint: '接口/日志数据',
-    rows: [
-      { key: 'uuid', type: 'uuid' },
-      { key: 'token', type: 'token' },
-      { key: 'ip', type: 'ip' },
-      { key: 'userAgent', type: 'userAgent' },
-      { key: 'success', type: 'boolean' },
+      { key: "projectCode", type: "projectCode" },
+      { key: "projectName", type: "projectName" },
+      { key: "tenderMethod", type: "tenderMethod" },
+      { key: "evalMethod", type: "evalMethod" },
+      { key: "budget", type: "budget" },
       {
-        key: 'createdAt',
-        type: 'date',
-        params: { format: 'timestamp' },
+        key: "budgetCn",
+        type: "derived",
+        label: "预算金额（大写）",
+        params: { sourceKey: "budget", transform: "chineseCapital" },
+      },
+      { key: "openBidTime", type: "openBidTime" },
+      { key: "region", type: "address", label: "地区" },
+    ],
+  },
+  {
+    id: "expert",
+    name: "评标专家",
+    hint: "专家库/抽取名单",
+    rows: [
+      { key: "name", type: "name" },
+      { key: "idCard", type: "idCard" },
+      {
+        key: "gender",
+        type: "derived",
+        label: "性别",
+        params: { sourceKey: "idCard", transform: "idCardGender" },
+      },
+      { key: "age", type: "age", params: { min: 30, max: 65 } },
+      { key: "phone", type: "phone" },
+      { key: "company", type: "company", label: "工作单位" },
+      { key: "position", type: "position", label: "职称" },
+    ],
+  },
+  {
+    id: "api",
+    name: "API 测试",
+    hint: "接口/日志数据",
+    rows: [
+      { key: "uuid", type: "uuid" },
+      { key: "token", type: "token" },
+      { key: "ip", type: "ip" },
+      { key: "userAgent", type: "userAgent" },
+      { key: "success", type: "boolean", label: "是否成功" },
+      {
+        key: "createdAt",
+        type: "date",
+        label: "创建时间",
+        params: { format: "timestamp" },
       },
     ],
   },

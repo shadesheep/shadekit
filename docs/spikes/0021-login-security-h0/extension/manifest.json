@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "ShadeKit H0 key and HTTP spike",
+  "version": "0.0.0",
+  "description": "Disposable integration fixture; not a production vault.",
+  "permissions": ["storage", "cookies"],
+  "host_permissions": ["http://127.0.0.1/*", "https://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "web_accessible_resources": []
+}

@@ -14,9 +14,9 @@
  */
 
 import { LoginError, ErrorCodes } from "../utils/error-codes";
-import { fetchWithTimeout, RequestTimeoutError } from "../utils/fetch-timeout";
-import { resolveTemplate, readBindingPath, TemplateError } from "./template";
-import type { HttpBody, SpecOp } from "./types";
+import { resolveTemplate, readBindingPath, TemplateError } from "../spec/template";
+import type { HttpBody, SpecOp } from "../spec/types";
+import type { HttpPort, HttpResponseDto } from "./host";
 
 // ============================================================
 // apply.set（暂存于 runSpec，此处仅定义请求改写类型）
@@ -194,6 +194,7 @@ export async function runHttpExecute(
   op: HttpExecuteOp,
   changes: ApplySetChange[],
   requestTimeoutMs: number,
+  http: HttpPort,
 ): Promise<RunHttpResult> {
   const url = resolveString(ctx, op.url);
 
@@ -230,7 +231,6 @@ export async function runHttpExecute(
   for (const [key, value] of headerChanges) headers[key] = value;
 
   const method = op.method ?? "GET";
-  const params: RequestInit = { method, headers };
 
   // body：先解析为「对象 + 原始串」两态，apply.set(body) 落到对象上再序列化
   const { object, raw } = resolveBodyObject(ctx, op.body);
@@ -247,25 +247,28 @@ export async function runHttpExecute(
   if (object !== null) body = JSON.stringify(object);
   else body = raw; // 无 body / raw 形态
   // GET / HEAD 不带请求体；其余方法才有 body
-  if (method !== "GET" && body !== "") {
-    params.body = body;
-  }
+  const requestBody = method !== "GET" && body !== "" ? body : undefined;
 
-  // 发起请求；fetchWithTimeout 超时抛 RequestTimeoutError → REQUEST_TIMEOUT
-  let response: Response;
+  let response: HttpResponseDto;
   try {
-    response = await fetchWithTimeout(finalUrl, params, requestTimeoutMs);
+    response = await http.execute({
+      url: finalUrl,
+      method,
+      headers,
+      ...(requestBody !== undefined ? { body: requestBody } : {}),
+      timeoutMs: requestTimeoutMs,
+    });
   } catch (e: unknown) {
-    if (e instanceof RequestTimeoutError) {
-      throw new LoginError(ErrorCodes.REQUEST_TIMEOUT, e.message);
-    }
     if (e instanceof LoginError) throw e;
-    const code =
-      e instanceof TypeError ? ErrorCodes.NETWORK_ERROR : ErrorCodes.UNKNOWN;
-    throw new LoginError(
-      code,
-      `请求失败: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    const hostCode = e instanceof Error && "code" in e
+      ? (e as Error & { code?: unknown }).code
+      : undefined;
+    const code = hostCode === "HTTP_TIMEOUT"
+      ? ErrorCodes.REQUEST_TIMEOUT
+      : hostCode === "HTTP_TRANSPORT_ERROR" || e instanceof TypeError
+        ? ErrorCodes.NETWORK_ERROR
+        : ErrorCodes.UNKNOWN;
+    throw new LoginError(code, `请求失败: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // expectStatus（缺省 2xx）
@@ -282,7 +285,7 @@ export async function runHttpExecute(
   }
 
   // 解析响应体：json（默认）| text
-  const text = await response.text().catch(() => "");
+  const text = response.text;
   let bodyValue: unknown = text;
   if ((op.parse ?? "json") === "json" && text.length > 0) {
     try {

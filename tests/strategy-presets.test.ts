@@ -48,7 +48,15 @@ function skillSpec(template = "共享后台登录"): LoginSpec {
   return {
     version: LOGIN_SPEC_VERSION,
     template,
-    ops: [],
+    ops: [
+      {
+        op: "http.execute",
+        url: "{origin}/login",
+        method: "POST",
+        body: { json: { username: "{username}", password: "{password}" } },
+        as: "resp",
+      },
+    ],
     success: [{ response: { from: "resp", path: "success", equals: true } }],
     auth: DEFAULT_AUTH,
   };

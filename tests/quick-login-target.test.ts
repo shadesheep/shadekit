@@ -5,14 +5,14 @@ import {
   parseQuickLoginSelection,
 } from '../entrypoints/tools/account-switch/utils/quick-login-target';
 
-const DEFAULT_DOMAIN = 'http://*.dev.ebidding.net.cn:16800';
-const CURRENT_URL = 'https://chn.zcjb.com.cn/ebidding/#/base/resetPasswords';
+const DEFAULT_DOMAIN = 'http://*.dev.example.com:16800';
+const CURRENT_URL = 'https://app.example.com/app/#/base/resetPasswords';
 const DOMAINS: Record<string, DomainConfig> = {
-  'https://*.zcjb.com.cn': { name: '生产', loginMethod: 'ebs-v6', tags: [] },
+  'https://*.example.com': { name: '生产', loginMethod: 'generic', tags: [] },
   [DEFAULT_DOMAIN]: {
     name: '开发',
-    loginMethod: 'ebs-v6',
-    debugRedirect: 'http://localhost:8888/ebidding/#/',
+    loginMethod: 'generic',
+    debugRedirect: 'http://localhost:8888/app/#/',
     debugRedirectEnabled: true,
     tags: [],
   },
@@ -21,7 +21,7 @@ const DOMAINS: Record<string, DomainConfig> = {
 describe('快捷登录目标选择', () => {
   it('纯账号文本优先使用命中环境的当前页面，而非默认环境', () => {
     const result = parseQuickLoginSelection(
-      'sxxmjl01',
+      'demo-user',
       CURRENT_URL,
       DEFAULT_DOMAIN,
       DOMAINS,
@@ -29,7 +29,7 @@ describe('快捷登录目标选择', () => {
 
     expect(result).toMatchObject({
       url: CURRENT_URL,
-      username: 'sxxmjl01',
+      username: 'demo-user',
       hasUrl: false,
       targetSource: 'current-page',
     });
@@ -38,7 +38,7 @@ describe('快捷登录目标选择', () => {
   it('当前页面未匹配环境时回退默认环境', () => {
     const result = parseQuickLoginSelection(
       'admin/secret',
-      'https://unconfigured.example.com/page',
+      'https://unconfigured.test/page',
       DEFAULT_DOMAIN,
       DOMAINS,
     );
@@ -51,7 +51,7 @@ describe('快捷登录目标选择', () => {
   });
 
   it('显式 URL 优先于当前页面和默认环境', () => {
-    const explicit = 'http://foo.dev.ebidding.net.cn:16800/login';
+    const explicit = 'http://foo.dev.example.com:16800/login';
     const result = parseQuickLoginSelection(
       `${explicit} admin/secret`,
       CURRENT_URL,
@@ -81,7 +81,7 @@ describe('快捷登录目标选择', () => {
     expect(
       parseQuickLoginSelection(
         'admin/secret',
-        'https://unconfigured.example.com/page',
+        'https://unconfigured.test/page',
         '',
         DOMAINS,
       ),
@@ -92,10 +92,10 @@ describe('快捷登录目标选择', () => {
 describe('快捷登录通配符目标防护', () => {
   it('识别主机名通配符及 Chromium 编码形式', () => {
     expect(hasWildcardHostname(DEFAULT_DOMAIN)).toBe(true);
-    expect(hasWildcardHostname('http://%2A.dev.ebidding.net.cn:16800')).toBe(true);
+    expect(hasWildcardHostname('http://%2A.dev.example.com:16800')).toBe(true);
   });
 
   it('具体主机和路径中的星号不误判', () => {
-    expect(hasWildcardHostname('https://chn.zcjb.com.cn/ebidding/*')).toBe(false);
+    expect(hasWildcardHostname('https://app.example.com/app/*')).toBe(false);
   });
 });

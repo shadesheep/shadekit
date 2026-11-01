@@ -2,7 +2,7 @@
  * 共享 CodeMirror 装配工厂（ADR-0003 D3,第 5 轮评审加深）。
  *
  * json-format / json-diff / code-beautify 三个标签页工具的编辑器装配收口：
- * - `createCodeEditor` 负责基础扩展（basicSetup + 折行）、主题同步
+ * - `createCodeEditor` 负责基础扩展（行号/历史/折叠/搜索 + 折行）、主题同步
  *   （theme-changed / storage 监听 + Compartment reconfigure + destroy 清理）、
  *   Mod-Enter 绑定与文本读写。
  * - 语言恒走内部 Compartment:`language` 为初始槽位,`setLanguage` 运行时切换。
@@ -11,17 +11,61 @@
  * - `view` 为逃生舱:仅在接口未覆盖的罕见场景派发自定义 StateEffect。
  *
  * 主题用 Compartment 局部 reconfigure（而不是 `StateEffect.reconfigure`
- * 整个替换），避免重建 EditorState / 冲掉 language、basicSetup 等扩展。
+ * 整个替换），避免重建 EditorState / 冲掉 language、基础扩展等。
  *
  * 拖拽载入为独立 helper `attachFileDrop`，与编辑器解耦（拖拽目标常非编辑器
  * 本身，通常是整个面板）；文本由调用方在 onText 中经 setText 进编辑器。
  * 双编辑器滚动同步为独立 helper `syncScroll`(见 codemirror-scroll-sync.ts)。
  */
+import { history, defaultKeymap, historyKeymap } from '@codemirror/commands';
+import {
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  syntaxHighlighting,
+} from '@codemirror/language';
+import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-import { basicSetup } from 'codemirror';
+import {
+  EditorView,
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+  rectangularSelection,
+} from '@codemirror/view';
 import { getCodemirrorTheme } from '../codemirror-theme';
 import { modEnterKeymap } from '../format-shortcut';
+
+/**
+ * 按需装配基础扩展，而不是 `basicSetup`（后者还会带入 autocomplete / lint /
+ * closeBrackets 整包，本项目三个工具均未使用，约多 80 KB）。
+ * 保留：行号、历史、折叠、搜索、括号匹配、多选、当前行高亮。
+ */
+const baseExtensions: Extension[] = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  bracketMatching(),
+  rectangularSelection(),
+  crosshairCursor(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap]),
+];
 
 export interface CodeEditorOptions {
   /** 编辑器挂载的父元素 */
@@ -59,7 +103,7 @@ export function createCodeEditor(options: CodeEditorOptions): CodeEditor {
   const languageCompartment = new Compartment();
 
   const extensions: Extension[] = [
-    basicSetup,
+    ...baseExtensions,
     EditorView.lineWrapping,
     themeCompartment.of(getCodemirrorTheme()),
     languageCompartment.of(options.language ?? []),

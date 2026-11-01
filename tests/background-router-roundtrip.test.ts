@@ -23,7 +23,6 @@ import {
   createBackgroundMessageListener,
 } from '../entrypoints/shared/message-router';
 import { allTools } from '../entrypoints/shared/tool-definitions';
-import type { Account } from '../entrypoints/tools/account-switch/types';
 import {
   handleSwitchAccount,
   handleQuickLogin,
@@ -49,10 +48,17 @@ type MessageListener = (
 ) => boolean;
 
 const messageListeners = new Set<MessageListener>();
-const fakeSender = { tab: { id: 42 } } as chrome.runtime.MessageSender;
+const fakeSender = {
+  id: 'shadekit-test-extension',
+  url: 'https://demo.example.com/page',
+  origin: 'https://demo.example.com',
+  frameId: 0,
+  tab: { id: 42, url: 'https://demo.example.com/page' },
+} as chrome.runtime.MessageSender;
 
 vi.stubGlobal('chrome', {
   runtime: {
+    id: 'shadekit-test-extension',
     onMessage: {
       addListener: (fn: MessageListener) => messageListeners.add(fn),
       removeListener: (fn: MessageListener) => messageListeners.delete(fn),
@@ -97,26 +103,17 @@ beforeEach(() => {
   openToolTab.mockResolvedValue(undefined);
 });
 
-const ACCOUNT: Account = {
-  id: 'acc_1',
-  name: '测试账号',
-  username: 'user01',
-  password: 'pw',
-  roles: ['管理员'],
-  domains: ['https://demo.example.com'],
-};
-
 describe('Background Router round-trip', () => {
   it('SWITCH_ACCOUNT 到达账号切换 handler，sender 透传，response 回传', async () => {
     mocked(handleSwitchAccount).mockResolvedValue({ success: true });
 
     const res = await sendBgMessage('SWITCH_ACCOUNT', {
-      account: ACCOUNT,
-      domain: 'https://demo.example.com',
+      accountId: 'acc_1',
+      environmentId: 'https://demo.example.com',
     });
 
     expect(handleSwitchAccount).toHaveBeenCalledWith(
-      ACCOUNT,
+      'acc_1',
       'https://demo.example.com',
       fakeSender,
     );
