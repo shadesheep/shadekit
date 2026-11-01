@@ -32,6 +32,6 @@ export function resolveRequestedEnv(
   domains: Record<string, DomainConfig>,
   editEnv?: string,
 ): string | null {
-  if (!editEnv || !Object.prototype.hasOwnProperty.call(domains, editEnv)) return null;
+  if (!editEnv || !Object.hasOwn(domains, editEnv)) return null;
   return domains[editEnv] ? editEnv : null;
 }

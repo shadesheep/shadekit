@@ -187,8 +187,9 @@ describe("mock-data 源码视图", () => {
     await mountApp();
 
     const firstItem = root.querySelector<HTMLElement>(".check-item");
+    expect(firstItem).toBeTruthy();
     // 字段默认折叠：.field-row 不可见，先展开第一行。
-    firstItem?.querySelector<HTMLElement>(".check-head")!.click();
+    firstItem!.querySelector<HTMLElement>(".check-head")!.click();
     await flush();
     const expandedRow = root.querySelector<HTMLElement>(".field-row");
     expect(expandedRow).toBeTruthy();
