@@ -982,6 +982,7 @@ onUnmounted(() => {
               ]"
               class="mode-switch"
             />
+            <!-- 搜索框统一夹在模式按钮右侧：批量搜字段、快捷搜类型，位置一致 -->
             <input
               v-if="leftMode === 'quick'"
               v-model="typeSearch"
@@ -989,6 +990,24 @@ onUnmounted(() => {
               type="text"
               placeholder="搜索类型，如：身份证"
             />
+            <input
+              v-else
+              v-model="shelfSearch"
+              class="type-search"
+              type="search"
+              placeholder="搜索字段，如身份证"
+              aria-label="搜索字段"
+            />
+            <button
+              v-if="leftMode === 'batch'"
+              type="button"
+              class="json-import-link"
+              title="从 JSON 导入字段"
+              @click="jsonDrawerOpen = true"
+            >
+              <div class="i-lucide-file-json-2 w-3.5 h-3.5" />
+              从 JSON 导入
+            </button>
           </div>
 
           <div v-if="leftMode === 'quick'" class="palette">
@@ -1035,7 +1054,6 @@ onUnmounted(() => {
             @update:fields="onFieldsUpdate"
             @request-scenario-load="applyScenario"
             @manage="scenarioDrawerOpen = true"
-            @import-json="jsonDrawerOpen = true"
           />
 
           <button
@@ -1437,6 +1455,34 @@ onUnmounted(() => {
   color: #374151;
   font-size: 12px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.json-import-link {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--primary-start, #6366f1);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s ease-out;
+}
+
+.json-import-link:hover {
+  color: var(--primary-hover-start, #4f46e5);
+}
+
+.json-import-link:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+}
+
+[data-dt-dark] .json-import-link {
+  color: #a5b4fc;
 }
 
 .palette {

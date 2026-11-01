@@ -5,6 +5,7 @@ import {
   CATEGORIES,
   FIELD_TYPES,
   createField,
+  getFieldType,
 } from "../../tools/mock-data/lib/generators";
 import type {
   MockTemplate,
@@ -13,6 +14,7 @@ import type { MockField } from "../../tools/mock-data/lib/types";
 import {
   countEnabled,
   fieldDisplayName,
+  fieldRangeSummary,
   genericEntries,
   removeShelfEntry,
   resolveFallbackScenarioId,
@@ -38,7 +40,6 @@ const emit = defineEmits<{
   "update:search": [value: string];
   "request-scenario-load": [id: string];
   manage: [];
-  "import-json": [];
 }>();
 
 const allTemplates = computed(() => [
@@ -54,6 +55,28 @@ const addOpen = ref(false);
 const addQuery = ref("");
 const addPanelRef = ref<HTMLElement | null>(null);
 
+/** 收缩/展开状态：键为字段 id，尽量保持已存在字段的展开状态，避免点击时跳动。 */
+const expandedIds = ref<Record<string, boolean>>({});
+
+function isExpanded(field: MockField): boolean {
+  return expandedIds.value[field.id] ?? false;
+}
+
+function toggleExpanded(id: string) {
+  expandedIds.value = { ...expandedIds.value, [id]: !isByIdExpanded(id) };
+}
+
+function isByIdExpanded(id: string): boolean {
+  return expandedIds.value[id] ?? false;
+}
+
+function rowClicked(field: MockField, event: MouseEvent) {
+  // 点击内部可交互元素（输入框/按钮/选择器）时不折叠，仅整行空白区点击切换。
+  const target = event.target as HTMLElement;
+  if (target.closest("input, button, select")) return;
+  toggleExpanded(field.id);
+}
+
 /** 展开「添加其他字段」时，把它滚进可视区（它位于字段清单底部）。 */
 function scrollAddIntoView() {
   requestAnimationFrame(() => {
@@ -61,9 +84,25 @@ function scrollAddIntoView() {
   });
 }
 
-const searchModel = computed({
-  get: () => props.search,
-  set: (value: string) => emit("update:search", value),
+/** 顶部搜索：按字段名 / 输出 key 过滤当前勾选清单（含子字段）。 */
+const searchableFields = computed(() => {
+  const query = props.search.trim().toLowerCase();
+  if (!query) return props.fields;
+  const matches = (list: MockField[]): MockField[] => {
+    const result: MockField[] = [];
+    for (const field of list) {
+      const own =
+        field.label?.toLowerCase().includes(query) ||
+        field.key.trim().toLowerCase().includes(query) ||
+        getFieldType(field.type)?.label.toLowerCase().includes(query);
+      const childrenMatch = field.children ? matches(field.children) : [];
+      if (own || childrenMatch.length) {
+        result.push({ ...field, children: childrenMatch.length ? childrenMatch : field.children });
+      }
+    }
+    return result;
+  };
+  return matches(props.fields);
 });
 
 /** 「＋ 添加其他字段」面板：按分类分组 + 搜索过滤。 */
@@ -131,43 +170,18 @@ function addGenericType(type: string) {
   );
   if (!field) return;
   emit("update:fields", [...props.fields, { ...field, enabled: true }]);
+  // 新加入的字段立即展开编辑，并滚到可视区。
+  expandedIds.value = { ...expandedIds.value, [field.id]: true };
+  requestAnimationFrame(() => {
+    document
+      .querySelector(`[data-row-id="${field.id}"]`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  });
 }
 </script>
 
 <template>
   <div class="field-shelf">
-    <div class="shelf-toolbar">
-      <div class="shelf-search-wrap">
-        <div class="i-lucide-search w-3.5 h-3.5" />
-        <input
-          v-model="searchModel"
-          type="search"
-          class="shelf-search"
-          placeholder="搜索字段，如身份证"
-        />
-      </div>
-      <button
-        type="button"
-        class="json-import-link"
-        @click="emit('import-json')"
-      >
-        <div class="i-lucide-file-json-2 w-3.5 h-3.5" />
-        从 JSON 导入
-      </button>
-      <button
-        type="button"
-        class="json-import-link add-shortcut"
-        :aria-expanded="addOpen"
-        @click="addOpen = !addOpen; if (addOpen) scrollAddIntoView()"
-      >
-        <div
-          :class="addOpen ? 'i-lucide-chevron-up' : 'i-lucide-plus'"
-          class="w-3.5 h-3.5"
-        />
-        添加其他字段
-      </button>
-    </div>
-
     <div class="scenario-tabs">
       <button
         v-for="template in allTemplates"
@@ -232,21 +246,39 @@ function addGenericType(type: string) {
       <div v-if="!fields.length" class="shelf-empty">
         还没有字段，点击上方场景标签可一键载入
       </div>
+      <div v-else-if="!searchableFields.length" class="shelf-empty">
+        没有匹配「{{ search }}」的字段
+      </div>
 
-      <!-- 勾选清单：每行一个勾选框 + 行内编辑 -->
-      <div v-if="fields.length" class="checklist">
-        <div v-for="(field, index) in fields" :key="field.id" class="check-item">
-          <label class="check-head">
+      <!-- 勾选清单：每行一个勾选框 + 行内编辑（默认收缩，点击展开编辑） -->
+      <div v-if="searchableFields.length" class="checklist">
+        <div v-for="(field, index) in searchableFields" :key="field.id" class="check-item" :data-row-id="field.id">
+          <div
+            class="check-head"
+            role="button"
+            tabindex="0"
+            :aria-expanded="isExpanded(field)"
+            aria-label="点击展开或收起字段编辑"
+            @click="rowClicked(field, $event)"
+            @keydown.enter.prevent="toggleExpanded(field.id)"
+            @keydown.space.prevent="toggleExpanded(field.id)"
+          >
             <input
               type="checkbox"
               class="field-checkbox"
               :checked="field.enabled !== false"
+              @click.stop
               @change="toggleEnabled(field)"
             />
             <span class="check-display">{{ fieldDisplayName(field) }}</span>
             <span class="check-key">{{ field.key }}</span>
-          </label>
+            <span class="check-range">{{ fieldRangeSummary(field) }}</span>
+            <span class="check-chevron">
+              <div :class="isExpanded(field) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" class="w-3 h-3" />
+            </span>
+          </div>
           <MockFieldRow
+            v-if="isExpanded(field)"
             :field="field"
             :index="index"
             :total="fields.length"
@@ -257,7 +289,7 @@ function addGenericType(type: string) {
         </div>
       </div>
 
-      <!-- ＋ 添加其他字段折叠面板 -->
+      <!-- ＋ 添加其他字段折叠面板（常显切换条，参考「更多设置」） -->
       <div ref="addPanelRef" class="add-panel">
         <button
           type="button"
@@ -265,11 +297,12 @@ function addGenericType(type: string) {
           :aria-expanded="addOpen"
           @click="addOpen = !addOpen"
         >
+          <div class="i-lucide-plus w-4 h-4" />
+          <span>添加其他字段</span>
           <div
-            :class="addOpen ? 'i-lucide-chevron-up' : 'i-lucide-plus'"
+            :class="addOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
             class="w-3.5 h-3.5"
           />
-          添加其他字段
         </button>
         <div v-if="addOpen" class="add-body">
           <div class="shelf-search-wrap add-search">
@@ -309,89 +342,23 @@ function addGenericType(type: string) {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-.shelf-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 2px 0 10px;
-}
-
-.shelf-search-wrap {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #fff;
-  color: #94a3b8;
-  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
-}
-
-.shelf-search-wrap:focus-within {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
-}
-
-.shelf-search {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 0;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: #0f172a;
-  font-size: 13px;
-}
-
-.shelf-search::placeholder {
-  color: #94a3b8;
-}
-
-.json-import-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 2px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: #6366f1;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.15s ease-out;
-}
-
-.json-import-link:hover {
-  color: #4f46e5;
-}
-
-.add-shortcut {
-  color: #4f46e5;
-}
-
-.add-shortcut:hover {
-  color: #4f46e5;
-  text-decoration: underline;
+  padding: 0 16px;
 }
 
 .scenario-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-bottom: 10px;
+  padding: 10px 0 10px;
 }
 
 .scenario-tab,
 .manage-scenarios {
   padding: 4px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 9999px;
-  background: #fff;
-  color: #64748b;
+  background: var(--dt-light-surface, #fff);
+  color: var(--text-secondary, #64748b);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -400,13 +367,13 @@ function addGenericType(type: string) {
 .scenario-tab:hover,
 .manage-scenarios:hover {
   border-color: #c7d2fe;
-  color: #4f46e5;
+  color: var(--primary-hover-start, #4f46e5);
   transform: translateY(-1px);
 }
 
 .scenario-tab.active {
   border-color: transparent;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, var(--primary-start), var(--primary-end));
   color: #fff;
   box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
 }
@@ -423,14 +390,14 @@ function addGenericType(type: string) {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 0 0 8px;
+  padding: 0 0 10px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-secondary, #64748b);
 }
 
 .selected-count {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-primary, #0f172a);
 }
 
 .bulk-actions {
@@ -443,14 +410,14 @@ function addGenericType(type: string) {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #6366f1;
+  color: var(--primary-start, #6366f1);
   font-size: 12px;
   cursor: pointer;
   transition: color 0.15s ease-out;
 }
 
 .link-btn:hover {
-  color: #4f46e5;
+  color: var(--primary-hover-start, #4f46e5);
   text-decoration: underline;
 }
 
@@ -465,7 +432,7 @@ function addGenericType(type: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .selected-chip {
@@ -476,7 +443,7 @@ function addGenericType(type: string) {
   border: 1px solid #c7d2fe;
   border-radius: 9999px;
   background: #eef2ff;
-  color: #4f46e5;
+  color: var(--primary-hover-start, #4f46e5);
   font-size: 12px;
 }
 
@@ -514,9 +481,9 @@ function addGenericType(type: string) {
 }
 
 .check-item {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 8px;
-  background: #fff;
+  background: var(--dt-light-surface, #fff);
 }
 
 .check-head {
@@ -524,60 +491,145 @@ function addGenericType(type: string) {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
+  border-radius: 8px;
   cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease-out;
+}
+
+.check-head:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.check-head:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: -2px;
 }
 
 .field-checkbox {
-  accent-color: #6366f1;
+  accent-color: var(--primary-start, #6366f1);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .check-display {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--text-primary, #0f172a);
+  flex-shrink: 0;
 }
 
 .check-key {
-  color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted, #94a3b8);
+  font-family: var(--font-mono);
   font-size: 11px;
+  flex-shrink: 0;
+}
+
+.check-range {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-muted, #94a3b8);
+  transition: color 0.15s ease-out;
+}
+
+.check-head:hover .check-chevron {
+  color: var(--primary-start, #6366f1);
 }
 
 .add-panel {
-  padding-bottom: 8px;
+  padding: 0;
+  border-top: 1px solid var(--border, #e2e8f0);
+  margin-top: 12px;
 }
 
 .add-toggle {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px dashed #c7d2fe;
-  border-radius: 9999px;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  border-radius: 0;
   background: transparent;
-  color: #6366f1;
+  color: var(--text-secondary, #64748b);
   font-size: 12px;
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
-  transition: all 0.15s ease-out;
+  transition: color 0.15s ease-out;
+}
+
+.add-toggle > span {
+  flex: 1;
 }
 
 .add-toggle:hover {
-  border-color: #6366f1;
-  color: #4f46e5;
-  transform: translateY(-1px);
+  color: var(--primary-start, #6366f1);
+}
+
+.add-toggle:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: -2px;
 }
 
 .add-body {
-  margin-top: 8px;
   padding: 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
+  border-top: 1px solid var(--border, #e2e8f0);
+  background: var(--bg-hover, #f8fafc);
 }
 
 .add-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--dt-light-surface, #fff);
+  color: var(--text-muted, #94a3b8);
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.add-search:focus-within {
+  border-color: var(--primary-start, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.add-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary, #0f172a);
+  font-size: 12px;
+}
+
+.add-search input::placeholder {
+  color: var(--text-muted, #94a3b8);
+}
+
+[data-dt-dark] .add-search {
+  border-color: var(--dt-dark-border, #30363d);
+  background: var(--dt-dark-surface-hover, #21262d);
+  color: var(--dt-dark-text-muted, #6e7681);
+}
+
+[data-dt-dark] .add-search input {
+  color: var(--dt-dark-text, #c9d1d9);
 }
 
 .add-group {
@@ -595,10 +647,10 @@ function addGenericType(type: string) {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 9999px;
-  background: #fff;
-  color: #334155;
+  background: var(--dt-light-surface, #fff);
+  color: var(--text-primary, #334155);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease-out;
@@ -606,7 +658,7 @@ function addGenericType(type: string) {
 
 .add-chip:hover {
   border-color: #c7d2fe;
-  color: #4f46e5;
+  color: var(--primary-hover-start, #4f46e5);
   transform: translateY(-1px);
 }
 
@@ -615,20 +667,19 @@ function addGenericType(type: string) {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: #94a3b8;
+  color: var(--text-muted, #94a3b8);
 }
 
 .shelf-no-result {
   padding: 8px 10px;
   text-align: center;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-muted, #94a3b8);
 }
 
 .scenario-tab:focus-visible,
 .manage-scenarios:focus-visible,
 .link-btn:focus-visible,
-.json-import-link:focus-visible,
 .chip-remove:focus-visible,
 .add-toggle:focus-visible,
 .add-chip:focus-visible {
@@ -636,49 +687,20 @@ function addGenericType(type: string) {
   outline-offset: 1px;
 }
 
-[data-dt-dark] .shelf-search-wrap {
-  border-color: #30363d;
-  background: #0f172a;
-  color: #6e7681;
-}
-
-[data-dt-dark] .shelf-search {
-  color: #c9d1d9;
-}
-
-[data-dt-dark] .shelf-search::placeholder {
-  color: #6e7681;
-}
-
-[data-dt-dark] .json-import-link {
-  color: #a5b4fc;
-}
-
 [data-dt-dark] .scenario-tab,
 [data-dt-dark] .manage-scenarios {
-  border-color: #30363d;
-  background: #161b22;
-  color: #8b949e;
+  background: var(--dt-dark-surface-1, #161b22);
 }
 
 [data-dt-dark] .scenario-tab:hover,
 [data-dt-dark] .manage-scenarios:hover {
   border-color: #4f46e5;
-  color: #a5b4fc;
 }
 
 [data-dt-dark] .scenario-tab.active {
   border-color: transparent;
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
+  background: linear-gradient(135deg, var(--primary-start), var(--primary-end));
   color: #fff;
-}
-
-[data-dt-dark] .selected-bar {
-  color: #8b949e;
-}
-
-[data-dt-dark] .selected-count {
-  color: #c9d1d9;
 }
 
 [data-dt-dark] .link-btn {
@@ -696,42 +718,31 @@ function addGenericType(type: string) {
 }
 
 [data-dt-dark] .chip-remove:hover {
-  background: #30363d;
-}
-
-[data-dt-dark] .shelf-empty,
-[data-dt-dark] .shelf-no-result,
-[data-dt-dark] .shelf-group-title {
-  color: #6e7681;
+  background: var(--dt-dark-border, #30363d);
 }
 
 [data-dt-dark] .check-item {
-  border-color: #30363d;
-  background: #161b22;
+  background: var(--dt-dark-surface-1, #161b22);
 }
 
-[data-dt-dark] .check-display {
-  color: #c9d1d9;
+[data-dt-dark] .check-head:hover {
+  background: rgba(99, 102, 241, 0.08);
 }
 
-[data-dt-dark] .check-key {
-  color: #6e7681;
+[data-dt-dark] .check-head:hover .check-chevron {
+  color: #a5b4fc;
 }
 
-[data-dt-dark] .add-toggle {
-  border-color: #4f46e5;
+[data-dt-dark] .add-toggle:hover {
   color: #a5b4fc;
 }
 
 [data-dt-dark] .add-body {
-  border-color: #30363d;
-  background: #161b22;
+  background: var(--dt-dark-surface-1, #161b22);
 }
 
 [data-dt-dark] .add-chip {
-  border-color: #30363d;
-  background: #161b22;
-  color: #c9d1d9;
+  background: var(--dt-dark-surface-1, #161b22);
 }
 
 [data-dt-dark] .add-chip:hover {

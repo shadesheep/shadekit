@@ -175,7 +175,7 @@ describe("ScenarioManagerDrawer", () => {
       rows: [{ key: "foo", type: "fixed", params: { value: "1" } }],
     });
     const file = new File([text], "scene.json", { type: "application/json" });
-    const input = root.querySelector<HTMLInputElement>(".scenario-file")!;
+    const input = root.querySelector<HTMLInputElement>(".file-input")!;
     Object.defineProperty(input, "files", {
       value: [file],
       configurable: true,
@@ -251,7 +251,7 @@ describe("JsonImportDrawer", () => {
     const file = new File(['{"age":18}'], "sample.json", {
       type: "application/json",
     });
-    const input = root.querySelector<HTMLInputElement>(".import-file")!;
+    const input = root.querySelector<HTMLInputElement>(".file-input")!;
     Object.defineProperty(input, "files", {
       value: [file],
       configurable: true,

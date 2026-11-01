@@ -43,6 +43,124 @@ export function fieldDisplayName(field: MockField): string {
   return field.label ?? getFieldType(field.type)?.label ?? field.key;
 }
 
+const DISTRIBUTION_LABELS: Record<string, string> = {
+  uniform: "均匀分布",
+  normal: "正态分布",
+  exponential: "指数分布",
+};
+
+const CHARSET_LABELS: Record<string, string> = {
+  alnum: "字母+数字",
+  alpha: "纯字母",
+  numeric: "纯数字",
+  hex: "十六进制",
+  cn: "中文",
+};
+
+function toNum(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function toText(value: unknown): string {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function fmtNumber(value: number): string {
+  return Number.isInteger(value)
+    ? String(value)
+    : String(Number(value.toFixed(4)));
+}
+
+/**
+ * 收缩展示需要的「生成范围」摘要：从类型 + 参数 + 约束推导一句简短描述。
+ * 无参数的类型（姓名、手机号等人名/通讯池）退化为兜底文案「随机生成」。
+ */
+export function fieldRangeSummary(field: MockField): string {
+  const definition = getFieldType(field.type);
+  if (!definition) return "";
+  const params = field.params ?? {};
+  const chunks: string[] = [];
+
+  switch (definition.id) {
+    case "increment": {
+      const start = fmtNumber(toNum(params.start) ?? 1);
+      const step = fmtNumber(toNum(params.step) ?? 1);
+      chunks.push(`自增（起始${start}·步长${step}）`);
+      break;
+    }
+    case "fixed": {
+      const value = toText(params.value);
+      chunks.push(value ? `固定值 ${value}` : "空固定值");
+      break;
+    }
+    case "enum": {
+      const count = toText(params.values)
+        .split(/[\s,|，、]+/)
+        .filter(Boolean).length;
+      chunks.push(`${count} 个候选值`);
+      break;
+    }
+    case "string": {
+      const length = toText(params.length) || "8";
+      const charset = CHARSET_LABELS[toText(params.charset)] ?? toText(params.charset);
+      chunks.push(`长度${length}${charset ? `·${charset}` : ""}`);
+      break;
+    }
+    case "date": {
+      const start = toText(params.start) || "2020-01-01";
+      const end = toText(params.end);
+      chunks.push(`日期 ${start} ~ ${end || "当前"}`);
+      if (toNum(params.step) && toNum(params.step)! > 1)
+        chunks.push(`步长 ${fmtNumber(toNum(params.step)!)}${toText(params.stepUnit) || "天"}`);
+      break;
+    }
+    case "derived": {
+      const transform = toText(params.transform) || "copy";
+      const transformLabel =
+        definition.params.find((param) => param.name === "transform")
+          ?.options?.find((option) => option.value === transform)?.label ??
+        transform;
+      chunks.push(transformLabel);
+      break;
+    }
+    case "object": {
+      chunks.push(`${field.children?.length ?? 0} 个子字段`);
+      break;
+    }
+    case "array": {
+      const minItems = fmtNumber(toNum(params.minItems) ?? 1);
+      const maxItems = fmtNumber(toNum(params.maxItems) ?? 3);
+      if (field.children) chunks.push(`${field.children.length} 个对象元素`);
+      else chunks.push(`${minItems}–${maxItems} 个元素`);
+      break;
+    }
+    default: {
+      // 数值类（int/float/age/salary/price/budget/bond 等）：min–max 范围。
+      const min = toNum(params.min);
+      const max = toNum(params.max);
+      if (min !== undefined && max !== undefined) {
+        const lo = fmtNumber(Math.min(min, max));
+        const hi = fmtNumber(Math.max(min, max));
+        const dist = DISTRIBUTION_LABELS[toText(params.distribution)];
+        chunks.push(`${lo} – ${hi}${dist ? `·${dist}` : ""}`);
+      } else {
+        chunks.push("随机生成");
+      }
+    }
+  }
+
+  // 约束提示：唯一 / 空值 / 异常值。
+  const constraint = field.constraints;
+  if (constraint?.unique === true) chunks.push("唯一");
+  const nullRate = Number(constraint?.nullRate ?? 0);
+  if (nullRate > 0) chunks.push(`空值 ${Math.round(nullRate * 100)}%`);
+  const invalidRate = Number(constraint?.invalidRate ?? 0);
+  if (invalidRate > 0) chunks.push(`异常 ${Math.round(invalidRate * 100)}%`);
+
+  return chunks.join(" · ");
+}
+
 /** 「全部」场景的通用条目：每个字段类型一条，key 取类型的默认 key。 */
 export function genericEntries(): ShelfEntry[] {
   return FIELD_TYPES.map((type) => ({

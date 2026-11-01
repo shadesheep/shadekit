@@ -208,24 +208,27 @@ describe("FieldShelf（A 方向：场景预勾 + 勾选清单）", () => {
     );
   });
 
-  it("管理场景与 JSON 导入入口发事件；场景标签触发 load", async () => {
+  it("管理场景入口发事件；场景标签触发 load", async () => {
     await mountShelf();
 
     buttonByText("管理场景").click();
     await flush();
-    buttonByText("从 JSON 导入").click();
-    await flush();
     scenarioTabByText("用户信息").click();
 
-    expect(events).toEqual(["manage", "json", "load:user"]);
+    expect(events).toEqual(["manage", "load:user"]);
   });
 
-  it("行内编辑字段（改 key）保留且不展开编辑层", async () => {
+  it("字段行默认折叠，点击行头展开后行内编辑（改 key）保留", async () => {
     const state = await mountShelf({
       fields: sanitizeFields([{ key: "name", type: "name", params: {} }]),
     });
 
     expect(root.querySelector(".checklist")).toBeTruthy();
+    // 默认折叠：行内编辑不可见
+    expect(root.querySelector(".key-input")).toBeNull();
+    // 点击行头展开
+    root.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
     const keyInput = root.querySelector<HTMLInputElement>(".key-input");
     expect(keyInput).toBeTruthy();
     keyInput!.value = "fullName";
@@ -245,7 +248,15 @@ describe("FieldShelf（A 方向：场景预勾 + 勾选清单）", () => {
 
     expect(state.fields).toHaveLength(2);
 
-    // 第二行的删除按钮
+    // 展开 age 所在行（data-row-id 定位）
+    const ageItem = Array.from(
+      root.querySelectorAll<HTMLElement>(".check-item"),
+    ).find(
+      (item) => item.querySelector(".check-key")?.textContent === "age",
+    )!;
+    ageItem.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
+
     const rows = Array.from(root.querySelectorAll<HTMLElement>(".field-row"));
     // 按 age 字段找第二行（name,age）
     const ageRow = rows.find(
@@ -268,6 +279,15 @@ describe("FieldShelf（A 方向：场景预勾 + 勾选清单）", () => {
         { key: "b", type: "phone", params: {} },
       ]),
     });
+
+    // 展开 b（phone）所在行
+    const bItem = Array.from(
+      root.querySelectorAll<HTMLElement>(".check-item"),
+    ).find(
+      (item) => item.querySelector(".check-key")?.textContent === "b",
+    )!;
+    bItem.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
 
     const rows = Array.from(root.querySelectorAll<HTMLElement>(".field-row"));
     // b 是第二行，点它的上移 → 顺序变为 b,a

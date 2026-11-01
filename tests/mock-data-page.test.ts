@@ -510,7 +510,7 @@ describe("mock-data 页面编排", () => {
       ],
     });
     const file = new File([text], "scene.json", { type: "application/json" });
-    const input = root.querySelector<HTMLInputElement>(".scenario-file")!;
+    const input = root.querySelector<HTMLInputElement>(".file-input")!;
     Object.defineProperty(input, "files", {
       value: [file],
       configurable: true,

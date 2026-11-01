@@ -151,7 +151,15 @@ describe("mock-data 源码视图", () => {
 
   it("编辑字段后参数控件按类型显示", async () => {
     await mountApp();
-    // 勾选清单把每个字段行内联展示，无需再点「编辑字段」
+    // 勾选清单字段默认折叠：先点击行头展开 age 所在行，再行内联编辑。
+    const ageItem = Array.from(
+      root.querySelectorAll<HTMLElement>(".check-item"),
+    ).find(
+      (item) => item.querySelector(".check-key")?.textContent === "age",
+    )!;
+    ageItem.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
+
     const ageRow = Array.from(
       root.querySelectorAll<HTMLElement>(".field-row"),
     ).find(
@@ -178,15 +186,20 @@ describe("mock-data 源码视图", () => {
   it("约束按需展开", async () => {
     await mountApp();
 
-    const firstRow = root.querySelector<HTMLElement>(".field-row");
-    expect(firstRow?.textContent).not.toContain("高级约束");
-    const settingsButton = firstRow?.querySelector<HTMLButtonElement>(
+    const firstItem = root.querySelector<HTMLElement>(".check-item");
+    // 字段默认折叠：.field-row 不可见，先展开第一行。
+    firstItem?.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
+    const expandedRow = root.querySelector<HTMLElement>(".field-row");
+    expect(expandedRow).toBeTruthy();
+    expect(expandedRow!.textContent).not.toContain("高级约束");
+    const settingsButton = expandedRow?.querySelector<HTMLButtonElement>(
       'button[aria-label="字段高级设置"]',
     );
     expect(settingsButton).toBeTruthy();
     settingsButton!.click();
     await flush();
     expect(settingsButton!.getAttribute("aria-expanded")).toBe("true");
-    expect(firstRow?.textContent).toContain("空值比例");
+    expect(expandedRow?.textContent).toContain("空值比例");
   });
 });

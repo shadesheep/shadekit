@@ -1484,11 +1484,13 @@ function boundaryValue(field: MockField, ctx: GenContext): unknown {
   }
   if (field.type === "string") {
     const lengths = parseLengths(field.params.length);
+    // 边界模式：偶数行取最短长度、奇数行取最长长度（极端长度边界），
+    // 但内容用随机字符填充，避免所有行输出同一静止串（如 aaaaaaaa）。
     const length =
       ctx.index % 2 === 0 ? Math.min(...lengths) : Math.max(...lengths);
     const charset =
       CHARSETS[str(field.params.charset, "alnum")] ?? CHARSETS.alnum;
-    return charset[0].repeat(length);
+    return randomString(length, charset, ctx.rng ?? defaultRandom);
   }
   if (field.type === "date") {
     const useStart = ctx.index % 2 === 0;

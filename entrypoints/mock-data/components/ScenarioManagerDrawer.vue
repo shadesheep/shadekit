@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import DtButton from "../../shared/components/DtButton.vue";
 import DtDrawer from "../../shared/components/DtDrawer.vue";
+import DtFilePicker from "../../shared/components/DtFilePicker.vue";
 import {
   buildDownloadName,
   downloadTextAsFile,
@@ -65,18 +66,13 @@ function exportTemplate(template: MockTemplate) {
   showToast(`已导出场景「${template.name}」`, "success");
 }
 
-async function importFile(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
+async function importFile(file: File) {
   try {
     const template = parseTemplateFile(await file.text());
     emit("import", template);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     showToast(`场景导入失败：${message}`, "error");
-  } finally {
-    input.value = "";
   }
 }
 </script>
@@ -153,15 +149,12 @@ async function importFile(event: Event) {
 
     <section class="scenario-section">
       <h4>导入场景文件</h4>
-      <label class="scenario-import">
-        <input
-          class="scenario-file"
-          type="file"
-          accept=".json,application/json"
-          @change="importFile"
-        />
-        <span>选择 .json 场景文件</span>
-      </label>
+      <DtFilePicker
+        accept=".json,application/json"
+        label="选择 .json 场景文件"
+        placeholder="选择文件后自动导入"
+        @select="importFile"
+      />
     </section>
   </DtDrawer>
 </template>
@@ -271,24 +264,16 @@ async function importFile(event: Event) {
   color: #94a3b8;
 }
 
-.scenario-import {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.scenario-file {
-  font-size: 12px;
-}
-
 [data-dt-dark] .scenario-section + .scenario-section {
   border-top-color: #30363d;
 }
 
 [data-dt-dark] .scenario-section h4 {
   color: #c9d1d9;
+}
+
+[data-dt-dark] .scenario-item-count {
+  color: #8b949e;
 }
 
 [data-dt-dark] .scenario-item {
@@ -306,8 +291,7 @@ async function importFile(event: Event) {
   color: #6e7681;
 }
 
-[data-dt-dark] .scenario-item-count,
-[data-dt-dark] .scenario-import {
+[data-dt-dark] .scenario-item-count {
   color: #8b949e;
 }
 

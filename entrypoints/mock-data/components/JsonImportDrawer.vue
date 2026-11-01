@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import DtButton from "../../shared/components/DtButton.vue";
 import DtDrawer from "../../shared/components/DtDrawer.vue";
+import DtFilePicker from "../../shared/components/DtFilePicker.vue";
 import { parseSchemaImport } from "../../tools/mock-data/lib/schema-import";
 import type { MockField } from "../../tools/mock-data/lib/types";
 
@@ -33,15 +34,12 @@ function importFields() {
   }
 }
 
-async function loadFile(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
+async function loadFile(file: File) {
   try {
     text.value = await file.text();
     errorText.value = "";
-  } finally {
-    input.value = "";
+  } catch {
+    errorText.value = "读取文件失败";
   }
 }
 </script>
@@ -61,15 +59,12 @@ async function loadFile(event: Event) {
         placeholder='例如 {"name":"张三","age":28}'
       />
 
-      <label class="import-file-label">
-        <input
-          class="import-file"
-          type="file"
-          accept=".json,application/json"
-          @change="loadFile"
-        />
-        <span>从文件读取（只填充文本，不自动导入）</span>
-      </label>
+      <DtFilePicker
+        accept=".json,application/json"
+        label="选择 JSON 文件"
+        placeholder="仅填充文本，不自动导入"
+        @select="loadFile"
+      />
 
       <p v-if="errorText" class="import-error" role="alert">
         {{ errorText }}
@@ -123,18 +118,6 @@ async function loadFile(event: Event) {
   color: #94a3b8;
 }
 
-.import-file-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.import-file {
-  font-size: 12px;
-}
-
 .import-error {
   margin: 0;
   padding: 8px 10px;
@@ -149,8 +132,7 @@ async function loadFile(event: Event) {
   justify-content: flex-end;
 }
 
-[data-dt-dark] .import-desc,
-[data-dt-dark] .import-file-label {
+[data-dt-dark] .import-desc {
   color: #8b949e;
 }
 
