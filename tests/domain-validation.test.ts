@@ -67,6 +67,22 @@ describe('isDuplicateDomain', () => {
     expect(isDuplicateDomain(domains, 'http://localhost:9999', null)).toBe(false);
   });
 
+  it('按 origin 归一化比对：同一 host 的登录页地址也算重复', () => {
+    expect(
+      isDuplicateDomain(
+        domains,
+        'http://localhost:8888/management/#/login',
+        null,
+      ),
+    ).toBe(true);
+  });
+
+  it('编辑时规范化自身 key 不算重复', () => {
+    expect(
+      isDuplicateDomain(domains, 'http://localhost:8888/', 'http://localhost:8888'),
+    ).toBe(false);
+  });
+
   it('编辑时排除自身（URL 未改不算重复）', () => {
     expect(
       isDuplicateDomain(domains, 'http://localhost:8888', 'http://localhost:8888'),

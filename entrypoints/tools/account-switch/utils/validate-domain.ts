@@ -1,4 +1,5 @@
 import type { DomainConfig } from '../types';
+import { normalizeDomain } from './env';
 
 /**
  * 环境域名 URL 校验
@@ -39,15 +40,20 @@ export function validateDomainUrl(raw: string): string | null {
 }
 
 /**
- * 重复检测：trim 后与既有 domains 的 key 精确比对（key 即原始 URL 字符串）。
+ * 重复检测：按归一化后的环境 key 比对（环境身份是 origin，路径/hash 不参与）。
  * 编辑场景传入 editingUrl（编辑前的 key）以排除自身。
+ *
+ * 只比原始字符串会漏掉「同一 host 的两种写法」（如存量 key 带 #/login、
+ * 新填的只到 host:port），保存后两个环境争抢同一页面，按插入顺序误选。
  */
 export function isDuplicateDomain(
   domains: Record<string, DomainConfig>,
   url: string,
   editingUrl: string | null,
 ): boolean {
-  const key = url.trim();
+  const key = normalizeDomain(url);
   if (!key) return false;
-  return key !== editingUrl && Object.hasOwn(domains, key);
+  return Object.keys(domains).some(
+    (existing) => existing !== editingUrl && normalizeDomain(existing) === key,
+  );
 }

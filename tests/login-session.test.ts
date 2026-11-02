@@ -193,7 +193,7 @@ describe('prepareLogin — prelude 不变量', () => {
     expect(isLoginLocked(1)).toBe(false);
   });
 
-  it('targetKind=origin（switch 路径）：不做 URL 解析，origin 原样使用', async () => {
+  it('targetKind=origin（switch 路径）：不解析路径，只做 origin 归一', async () => {
     storageWith(CONFIG);
     const outcome = await prepareLogin(
       baseInput({
@@ -206,6 +206,28 @@ describe('prepareLogin — prelude 不变量', () => {
     if (!outcome.ok) return;
     expect(outcome.prepared.origin).toBe('http://example.com');
     expect(outcome.prepared.redirect).toBeNull();
+    outcome.prepared.release();
+  });
+
+  it('targetKind=origin 携带路径/hash（存量环境 key）→ 收敛为 origin 后匹配执行', async () => {
+    const pageUrl = 'http://example.com/management/#/login';
+    storageWith({
+      domains: {
+        [pageUrl]: {
+          name: '存量环境',
+          loginMethod: 'generic',
+          strategyConfig: { spec: stubSpec() },
+        },
+      },
+    });
+    const outcome = await prepareLogin(
+      baseInput({ target: pageUrl, targetKind: 'origin' }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // 模板/权限/cookie 都按真实 origin 执行，路径与 hash 不进入 {origin}
+    expect(outcome.prepared.origin).toBe('http://example.com');
+    expect(outcome.prepared.ctx.origin).toBe('http://example.com');
     outcome.prepared.release();
   });
 

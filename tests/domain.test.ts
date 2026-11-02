@@ -50,6 +50,14 @@ describe('matchDomain', () => {
     expect(matchDomain('https://example.com/login/', 'https://example.com')).toBe(true);
   });
 
+  it('matches when either side is a full page URL with path and hash', () => {
+    const pageUrl = 'http://jfv2.dev.ebidding.net.cn:8880/management/#/login';
+    expect(matchDomain('http://jfv2.dev.ebidding.net.cn:8880', pageUrl)).toBe(true);
+    expect(matchDomain(pageUrl, 'http://jfv2.dev.ebidding.net.cn:8880')).toBe(true);
+    // 按环境 key 反查环境：两侧都可能是同一个完整地址（回归：ENV_NOT_MATCHED）
+    expect(matchDomain(pageUrl, pageUrl)).toBe(true);
+  });
+
   it('matches domain with trailing slash and different case', () => {
     expect(matchDomain('HTTPS://EXAMPLE.COM/', 'https://example.com')).toBe(true);
   });

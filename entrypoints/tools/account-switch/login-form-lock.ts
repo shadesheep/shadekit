@@ -73,11 +73,14 @@ function withTimeout<T>(
 export async function prepareLoginFormLock(input: {
   envKey: string;
   spec: LoginSpec;
+  /** 用户填写的完整地址（可能带登录页路径/hash），仅用于候选 tab 排序。 */
+  entryUrl?: string;
   timeoutMs?: number;
 }): Promise<PreparedLoginFormLock | null> {
   if (!autoLoginSpecShape(input.spec)) return null;
   const envUrl = environmentUrl(input.envKey);
   if (!envUrl) return null;
+  const preferredUrl = environmentUrl(input.entryUrl ?? "") ?? envUrl;
 
   const preparing = (async (): Promise<PreparedLoginFormLock | null> => {
     const own = await chrome.tabs.getCurrent().catch(() => undefined);
@@ -100,8 +103,8 @@ export async function prepareLoginFormLock(input: {
           ? environmentUrl(right.url)?.pathname
           : undefined;
         return (
-          Number(rightPath === envUrl.pathname) -
-          Number(leftPath === envUrl.pathname)
+          Number(rightPath === preferredUrl.pathname) -
+          Number(leftPath === preferredUrl.pathname)
         );
       });
     if (candidates.length === 0) return null;

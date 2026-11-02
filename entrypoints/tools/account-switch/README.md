@@ -51,6 +51,12 @@ interface DomainConfig {
 `recipe`，读取时自动迁移）。它只在「新建环境」时决定默认声明、以及日志里
 显示人类可读名称。
 
+环境以 `domains` 的 key（origin：`协议://主机:端口`）为身份。新建/编辑时粘贴
+完整登录页地址（如 `http://host:8880/management/#/login`）时，key 收敛为
+`http://host:8880`，路径、查询与 hash 写进登录声明的 `goto`（`{origin}/management/#/login`），
+因此识别表单、切换账号仍会打开真正的登录页。存量 key 即使带路径/hash，匹配与执行
+也会按 origin 归一处理。
+
 ### 2.3 Token 数据 (TokenData)
 
 ```typescript

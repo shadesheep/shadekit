@@ -6,7 +6,7 @@ const tabsGet = vi.fn();
 const tabsCreate = vi.fn();
 const runLoginSpec = vi.fn<(
   spec: unknown,
-  ctx: { credentials: { username: string; password: string } },
+  ctx: { credentials: { username: string; password: string }; origin: string },
 ) => Promise<{ success: boolean }>>();
 
 vi.stubGlobal("chrome", {
@@ -33,7 +33,7 @@ vi.stubGlobal("chrome", {
 vi.mock("../entrypoints/tools/account-switch/spec/login-run", () => ({
   runLoginSpec: (
     spec: unknown,
-    ctx: { credentials: { username: string; password: string } },
+    ctx: { credentials: { username: string; password: string }; origin: string },
   ) => runLoginSpec(spec, ctx),
 }));
 vi.mock("../entrypoints/tools/account-switch/login-tab-flow", async (importOriginal) => {
@@ -160,6 +160,25 @@ describe("Background 按 ID 解析已保存账号", () => {
     expect(tabsCreate).not.toHaveBeenCalled();
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
     expect(chrome.cookies.set).not.toHaveBeenCalled();
+  });
+
+  it("环境 key 是完整登录页地址（含路径/hash）时仍按 origin 执行", async () => {
+    const legacyKey = `${origin}/management/#/login`;
+    const legacyConfig: AccountSwitchConfig = {
+      ...config,
+      accounts: [{ ...config.accounts[0]!, domains: [legacyKey] }],
+      domains: { [legacyKey]: config.domains[origin]! },
+    };
+    storageGet.mockImplementation(async (keys: string[]) =>
+      keys.includes("devtools-account-switch")
+        ? { "devtools-account-switch": legacyConfig }
+        : {},
+    );
+
+    await expect(
+      handleSwitchAccount("acc-current", legacyKey, sender),
+    ).resolves.toMatchObject({ success: true });
+    expect(runLoginSpec.mock.calls[0]![1]).toMatchObject({ origin });
   });
   it("配置页已保存账号试跑由 Background 解析，不返回密码或 bindings", async () => {
     const result = await handleTrialSavedAccount("acc-current", origin);

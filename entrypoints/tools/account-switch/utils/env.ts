@@ -11,17 +11,27 @@
  *    所有带协议的通配符环境全部匹配失败（Node 不编码，vitest 测不出来）；
  * 2. new URL().origin 会丢弃显式写的默认端口（:80/:443）。
  * 这里手动截取 协议://host:port，仅做小写归一（origin 部分大小写不敏感）。
+ *
+ * 环境以 origin 为身份，路径 / 查询 / hash 一律不参与识别；保存环境时
+ * 也用本函数把用户填写的完整页面地址收敛成环境 key。
  */
-function normalizeDomain(domain: string): string {
+export function normalizeDomain(domain: string): string {
   const trimmed = domain.trim().replace(/\/+$/, '');
   const match = trimmed.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/?#]*/);
   return match ? match[0].toLowerCase() : trimmed;
 }
 
-/** 判断当前页面的 origin 是否与配置的 domain 匹配（支持通配符）。 */
+/**
+ * 判断当前页面的 origin 是否与配置的 domain 匹配（支持通配符）。
+ *
+ * 两侧都按 normalizeDomain 归一：入参不一定是干净 origin——存量环境 key
+ * 可能带路径/hash（如 `http://host:8880/management/#/login`），按环境 key
+ * 反查环境时会把它原样再传回来，只归一一侧会导致必然失配（ENV_NOT_MATCHED）。
+ */
 export function matchDomain(domain: string, origin: string): boolean {
   const normalized = normalizeDomain(domain);
-  if (normalized === origin) return true;
+  const actual = normalizeDomain(origin);
+  if (normalized === actual) return true;
   if (!normalized.includes('*')) return false;
 
   // Escape regex metacharacters, then convert escaped '*' to wildcard pattern
@@ -29,7 +39,7 @@ export function matchDomain(domain: string, origin: string): boolean {
   const pattern = escaped.replace(/\\\*/g, '[^.]*');
   const regex = new RegExp(`^${pattern}$`, 'i');
 
-  return regex.test(origin);
+  return regex.test(actual);
 }
 
 /**

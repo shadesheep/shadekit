@@ -33,7 +33,7 @@ import {
   type AccountPanelData,
 } from "./account-view";
 import { resolveAccountPassword, resolveDefaultPassword, resolveLoginPassword, resolveSpecSecrets } from "./secret-resolver";
-import { matchDomain, normalizedOrigin } from "./utils/env";
+import { matchDomain, normalizeDomain, normalizedOrigin } from "./utils/env";
 import type { ErrorCode } from "./utils/error-codes";
 import { ErrorCodes, errorCodeOf } from "./utils/error-codes";
 import { runTrialLogin } from "./spec/trial";
@@ -450,7 +450,9 @@ export async function handleTrialSavedAccount(
     }
     const result = await runTrialLogin(spec, {
       tabId: -1,
-      origin: environmentId,
+      // 环境 key 可能是带路径/hash 的存量配置；试跑与真实执行一样只认 origin，
+      // 否则 `{origin}/login` 之类模板会拼出错误地址。
+      origin: normalizeDomain(environmentId),
       domainConfig: resolved.domainConfig,
       credentials: { username: account.username, password },
       tokenData: null,

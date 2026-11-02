@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { validateDomainUrl, isDuplicateDomain } from '../utils/validate-domain';
+import { normalizeDomain } from '../utils/env';
 import SpecEditor from './SpecEditor.vue';
 import LoginFormLocator from './LoginFormLocator.vue';
-import { projectLegacyDefaultSpec } from '../spec/auto-login';
+import { autoLoginSpecShape, projectLegacyDefaultSpec } from '../spec/auto-login';
 import { prepareLoginFormLock, type PreparedLoginFormLock } from '../login-form-lock';
-import { defaultLoginSpec, type LoginSpec } from '../spec';
+import { defaultLoginSpec, setSpecLoginUrl, toSpecLoginUrl, type LoginSpec } from '../spec';
 import { readSpecFromConfig } from '../spec/migrate';
 import { inspectLoginSpecSupport, type SpecSupportReport } from '../spec/capabilities';
 import { requireSupportedLoginSpec, type SpecDocument } from '../spec/document';
@@ -206,19 +207,43 @@ const urlTouched = ref(false);
 
 const trimmedUrl = computed(() => newDomain.value.url.trim());
 
+/**
+ * 环境 key 的规范形态：环境以 origin 为身份，路径/查询/hash 不参与识别
+ * （见 utils/env.ts normalizeDomain）。用户贴登录页地址时保存的是 host:port，
+ * 否则 key 带着 `#/login` 既不会匹配页面，挑出来的环境又反查不到自己。
+ */
+const canonicalUrl = computed(() => normalizeDomain(trimmedUrl.value));
+
 /** 格式 + 重复校验的错误文案；null 表示合法（或未到提示时机） */
 const urlError = computed(() => {
   const url = trimmedUrl.value;
   if (!url) return urlTouched.value ? '请输入域名 URL' : null;
   const formatError = validateDomainUrl(url);
   if (formatError) return formatError;
-  if (isDuplicateDomain(props.domains, url, editingDomain.value)) {
+  if (isDuplicateDomain(props.domains, canonicalUrl.value, editingDomain.value)) {
     return '该域名已存在，请勿重复添加';
   }
   return null;
 });
 
 const showUrlError = computed(() => urlTouched.value && !!urlError.value);
+
+/**
+ * 用户粘贴的完整页面地址 → 登录声明的 goto（保留路径/hash，host 用 `{origin}`）。
+ * 环境 key 只保留 origin，但登录页本身不能丢：它是识别表单与切号时的实际入口。
+ * 地址只有 origin（无路径/查询/hash）时无需写入声明。
+ */
+function loginPageFromUrl(rawUrl: string, origin: string): string | null {
+  if (!rawUrl || !origin) return null;
+  try {
+    const url = new URL(rawUrl);
+    if (url.origin !== origin) return null;
+    if (url.pathname === '/' && !url.search && !url.hash) return null;
+    return toSpecLoginUrl(rawUrl, origin);
+  } catch {
+    return null;
+  }
+}
 
 // 名称 / 标签自动派生：新建态下只填 URL，名称取 host、tag 由 host 推断；
 // 用户一旦手改（nameTouched / tagsTouched）即停止跟随。编辑/克隆不覆盖存量值。
@@ -573,6 +598,10 @@ function hasCookieIncludeParent(d: DomainConfig): boolean {
  */
 function buildDomainEntry(): DomainConfig {
   const tags = [...newDomain.value.tags];
+  // 绑定时 loginMethod 记可读的策略名（不参与执行，只用于日志/下拉显示）
+  const boundEntry = newDomain.value.strategyId
+    ? props.strategies?.[newDomain.value.strategyId]
+    : undefined;
   // 不支持的原始声明原样保留：不做任何归一化/字段投影，避免改写未知结构。
   const spec = domainSupport.value && !domainSupport.value.supported
     ? newDomain.value.spec
@@ -580,16 +609,21 @@ function buildDomainEntry(): DomainConfig {
         newDomain.value.spec,
         newDomain.value.cookieClearIncludeParent,
       );
+  // 环境 key 只保留 origin；用户粘进表单的完整地址（路径/hash）不能丢——
+  // 它正是登录页，写进声明的 goto 才能被识别、切号真正打开。
+  // 只对标准表单登录声明补 goto：高级/API 声明有自己的导航语义，不改写。
+  const loginPage = !boundEntry && Array.isArray(spec.ops) && autoLoginSpecShape(spec)
+    ? loginPageFromUrl(trimmedUrl.value, canonicalUrl.value)
+    : null;
+  const executableSpec = loginPage && !spec.ops.some((op) => op.op === 'goto' && op.url.trim())
+    ? { ...spec, ops: setSpecLoginUrl(spec.ops, loginPage) }
+    : spec;
   const vars = Object.fromEntries(
     Object.entries(newDomain.value.vars).filter(([, value]) => value !== ''),
   );
-  // 绑定时 loginMethod 记可读的策略名（不参与执行，只用于日志/下拉显示）
-  const boundEntry = newDomain.value.strategyId
-    ? props.strategies?.[newDomain.value.strategyId]
-    : undefined;
   // 声明与库一致 → 镜像，不落 strategyConfig.spec；不一致 → 脱镜，落私有声明
   const diverged = boundEntry
-    ? JSON.stringify(spec) !== JSON.stringify(boundEntry.spec)
+    ? JSON.stringify(executableSpec) !== JSON.stringify(boundEntry.spec)
     : false;
   return {
     name: newDomain.value.name,
@@ -609,7 +643,7 @@ function buildDomainEntry(): DomainConfig {
     // 镜像态不写 strategyConfig；脱镜 / 未绑定时才落盘
     ...(boundEntry && !diverged ? {} : {
       strategyConfig: {
-        spec,
+        spec: executableSpec,
         ...(newDomain.value.declaredSpecVersion === undefined ? {} : {
           declaredSpecVersion: newDomain.value.declaredSpecVersion,
         }),
@@ -697,14 +731,19 @@ async function addDomain() {
   savingDomain.value = true;
   try {
     const entry = buildDomainEntry();
-    const envKey = trimmedUrl.value;
+    const envKey = canonicalUrl.value;
     const addedName = newDomain.value.name || envKey;
     const next = { ...props.domains, [envKey]: entry };
     let lockCandidate: PreparedLoginFormLock | undefined;
     try {
+      // 用实际落盘的声明做期望值：buildDomainEntry 可能把登录页写进 goto，
+      // 仍用表单原始 spec 会让保存后的自动锁定因「声明已变化」被跳过。
+      const lockSpec = readSpecFromConfig(entry, props.strategies).spec
+        ?? newDomain.value.spec;
       lockCandidate = (await prepareLoginFormLock({
         envKey,
-        spec: newDomain.value.spec,
+        entryUrl: trimmedUrl.value,
+        spec: lockSpec,
       })) ?? undefined;
     } catch {
       // 识别只是保存后的优化；任何准备异常都不阻断基础环境与账号保存。
@@ -742,16 +781,17 @@ function saveEditDomain() {
   if (!validateRecipeForSave()) return;
   const entry = buildDomainEntry();
   const previousKey = editingDomain.value;
+  const envKey = canonicalUrl.value;
   const next = { ...props.domains };
-  if (previousKey !== trimmedUrl.value) {
+  if (previousKey !== envKey) {
     delete next[previousKey];
   }
-  next[trimmedUrl.value] = entry;
+  next[envKey] = entry;
   editingDomain.value = null;
-  const savedName = newDomain.value.name || trimmedUrl.value;
+  const savedName = newDomain.value.name || envKey;
   const payload = buildSavePayload({
     domains: next,
-    envKey: trimmedUrl.value,
+    envKey,
     previousEnvKey: previousKey,
     baseMessage: `环境「${savedName}」已保存`,
   });
@@ -991,8 +1031,9 @@ async function importConfigPackage() {
     // 用户环境），提升为「环境地址」必填，落地时用它作环境 key——
     // 否则环境 key 是 `{origin}` 永远匹配不上真实页面。
     const needsEnvUrl = rawUrl === '{origin}';
-    const url = needsEnvUrl ? '' : rawUrl;
-    const taken = url !== '' && !!props.domains[url];
+    // 包里的地址可能是完整登录页地址（含路径/hash）：环境 key 只取 origin。
+    const url = needsEnvUrl ? '' : normalizeDomain(rawUrl);
+    const taken = url !== '' && isDuplicateDomain(props.domains, url, null);
     const vars: Record<string, string> = {};
     for (const rv of env.requiredVars) vars[rv.name] = '';
     return {
@@ -1083,7 +1124,9 @@ function confirmImport() {
     if (!importCreatesEnv.value || !item.checked) continue;
     // 字面 `{origin}` 占位：用用户填的真实地址作环境 key，
     // 否则 key 是 `{origin}` 永远匹配不上真实页面
-    const url = item.needsEnvUrl ? item.envUrlValue.trim() : item.url;
+    const url = normalizeDomain(
+      item.needsEnvUrl ? item.envUrlValue.trim() : item.url,
+    );
     if (url === '') {
       toast(`环境「${item.name}」缺少地址，未创建（策略已入库）`, 'error');
       continue;
@@ -1171,7 +1214,7 @@ async function runTrialLogin(): Promise<void> {
   try {
     const res = await sendBgMessage('TRIAL_LOGIN', {
       spec: newDomain.value.spec,
-      origin: trimmedUrl.value,
+      origin: canonicalUrl.value,
       username: trialCred.value.username,
       password: trialCred.value.password,
       writeSession: trialWriteSession.value,
@@ -1215,6 +1258,7 @@ async function runTrialLogin(): Promise<void> {
         <p v-if="showUrlError" class="field-error">
           <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ urlError }}
         </p>
+        <p v-else class="field-hint">环境按「协议://主机:端口」识别；填完整登录页地址时，路径与 #hash 会写入登录声明的「登录页」，不会被丢弃。</p>
       </div>
       <div class="form-row">
         <label for="domain-name">名称</label>
@@ -1259,6 +1303,7 @@ async function runTrialLogin(): Promise<void> {
         ref="loginFormLocatorRef"
         :spec="newDomain.spec"
         :origin="formOrigin"
+        :entry-url="trimmedUrl"
         :mirrored="!!newDomain.strategyId"
         @change="onSpecChange"
       />

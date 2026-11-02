@@ -1,6 +1,7 @@
 import { getConfig } from "../../../shared/tool-config";
 import { readSpecFromConfig } from "../spec/migrate";
 import type { AccountSwitchConfig } from "../types";
+import { normalizeDomain } from "../utils/env";
 import { planLoginPermissions, type PermissionPlan } from "./permission-planner";
 import { originToMatchPattern } from "./origin-pattern";
 import { PermissionError } from "./permission-error";
@@ -25,7 +26,8 @@ export async function getEnvironmentPermissionPlan(environmentId: string): Promi
   const plan = planLoginPermissions(environment, spec ?? { version: 2, ops: [], success: [], auth: { mode: "page" } }, {
     username: "",
     password: "",
-    origin: environmentId,
+    // 存量环境 key 可能带路径/hash；权限规划只认 origin（与登录执行一致）。
+    origin: normalizeDomain(environmentId),
     debugRedirect: environment.debugRedirect,
     vars: environment.vars,
   });

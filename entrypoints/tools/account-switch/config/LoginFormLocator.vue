@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import DtButton from "../../../shared/components/DtButton.vue";
 import { sendBgMessage } from "../../../shared/messages";
 import { type LoginSpec, setSpecLoginUrl, toSpecLoginUrl } from "../spec";
-import { applyLoginFormFrame } from "../spec/auto-login";
+import { applyLoginFormFrame, autoLoginSpecShape } from "../spec/auto-login";
 import type { AuthStorageSelection } from "../strategies/auth-storage";
 import {
   type FormScanFrame,
@@ -18,6 +18,8 @@ import { rankPickerTabs } from "./target-picker";
 const props = defineProps<{
   spec: LoginSpec;
   origin?: string;
+  /** 环境表单填写的完整地址（登录页入口）：声明还没配置登录页时用它打开扫描。 */
+  entryUrl?: string;
   mirrored: boolean;
 }>();
 const emit = defineEmits<{ change: [spec: LoginSpec] }>();
@@ -41,7 +43,9 @@ const loginPageUrl = computed(() => {
   const configuredUrl = props.spec.ops
     .find((op) => op.op === "goto")
     ?.url.trim();
-  const value = (configuredUrl || props.origin)?.replaceAll(
+  // 声明未配置登录页时回退到环境表单里填的完整地址（可能带路径/hash），
+  // 最后才退到 origin：只打开 origin 常常到不了真正的登录页。
+  const value = (configuredUrl || props.entryUrl || props.origin)?.replaceAll(
     "{origin}",
     props.origin ?? "",
   );
@@ -62,10 +66,29 @@ const hint = computed(
       advanced: "此入口不替换高级多步流程",
     })[view.value.mode],
 );
+function loginPageWithPath(rawUrl: string | undefined): URL | null {
+  if (!rawUrl) return null;
+  try {
+    const url = new URL(rawUrl.replaceAll("{origin}", props.origin ?? ""));
+    if (!/^https?:$/.test(url.protocol)) return null;
+    return url.pathname !== "/" || url.search || url.hash ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 环境表单里填了带路径/hash 的地址、且声明是标准表单登录时，保存会把它
+ * 写进 goto（见 DomainsPanel buildDomainEntry）：此时不应再提示「未配置登录页」。
+ */
+const entryPageWillBeSaved = computed(
+  () => autoLoginSpecShape(props.spec) !== null && !!loginPageWithPath(props.entryUrl),
+);
 const loginPageMissing = computed(
   () =>
     view.value.mode !== "advanced" &&
-    !props.spec.ops.some((op) => op.op === "goto" && op.url.trim()),
+    !props.spec.ops.some((op) => op.op === "goto" && op.url.trim()) &&
+    !entryPageWillBeSaved.value,
 );
 
 function sameOriginForScan(url: string | undefined, origin: string): boolean {

@@ -30,7 +30,7 @@ import {
   type DebugBuffer,
 } from "./utils/debug-log";
 import type { DebugLogEntry } from "./types";
-import { matchDomain, normalizedOrigin, originMatches } from "./utils/env";
+import { matchDomain, normalizeDomain, normalizedOrigin, originMatches } from "./utils/env";
 import {
   ErrorCodes,
   errorCodeOf,
@@ -239,11 +239,15 @@ export type PrepareLoginOutcome =
 export async function prepareLogin(
   input: PrepareLoginInput,
 ): Promise<PrepareLoginOutcome> {
+  // origin 身份不含路径/hash：日志与执行都用归一后的 key（存量环境可能填了登录页地址）
+  const originTarget = input.targetKind === "origin"
+    ? normalizeDomain(input.target)
+    : input.target;
   const session = new AuthSession(
     input.action,
     input.account,
-    input.target,
-    input.target,
+    originTarget,
+    originTarget,
     input.debugRedirect,
   );
   const restoreLogSecrets = registerLogSecrets([
@@ -335,7 +339,8 @@ export async function prepareLogin(
   }
 
   try {
-    // quick-login 传完整 URL：解析出 origin；switch 直接给 origin
+    // quick-login 传完整 URL：解析出 origin；switch 传环境 key，可能是带路径/hash
+    // 的存量配置（如 .../management/#/login），同样收敛成 origin 再匹配与执行。
     let urlObj: URL | null = null;
     let origin = input.target;
     if (input.targetKind === "url") {
@@ -345,6 +350,8 @@ export async function prepareLogin(
         return fail("目标 URL 格式无效", { code: ErrorCodes.INVALID_URL });
       }
       origin = urlObj.origin;
+    } else {
+      origin = normalizeDomain(input.target);
     }
 
     // 通配符环境（如 https://*.example.com）不能作为运行期的具体 origin：
