@@ -22,7 +22,7 @@ import {
 } from "./account-view";
 import type { SpecSupportReport } from "./spec/capabilities";
 import { accountInitial } from "./account-palette";
-import { closePanel, getCurrentOrigin } from "./utils/env";
+import { closePanel, getCurrentOrigin, getCurrentUrl } from "./utils/env";
 import {
   ErrorCodes,
   type ErrorCode,
@@ -34,6 +34,7 @@ import { parseLoginText, type ParsedLogin } from "./utils/parse-text";
 import type { LoginSpec } from "./spec/types";
 
 const accounts = ref<PublicAccount[]>([]);
+const pageUrl = ref("");
 const origin = ref("");
 const matchedEnv = ref<PublicEnvironment | null>(null);
 const matchedEnvKey = ref("");
@@ -114,7 +115,7 @@ const loadConfig = async () => {
     }
     const cfg = response;
     publicDomains.value = cfg.domains;
-    const resolved = resolveEnvironment(origin.value, cfg.domains);
+    const resolved = resolveEnvironment(pageUrl.value, cfg.domains);
     matchedEnvKey.value = cfg.matchedEnvKey || resolved?.domain || "";
     matchedEnv.value = resolved?.env ?? null;
     accounts.value = cfg.accounts;
@@ -138,8 +139,14 @@ const loadConfig = async () => {
 };
 
 onMounted(async () => {
-  // 获取当前域名（popup 环境需通过 chrome.tabs.query 获取）
-  origin.value = await getCurrentOrigin();
+  // 获取完整页面地址：同一 origin 的多个路径子系统靠 pathname 区分环境。
+  // origin 仍保留用于展示与密码回退。
+  pageUrl.value = await getCurrentUrl();
+  try {
+    origin.value = pageUrl.value ? new URL(pageUrl.value).origin : await getCurrentOrigin();
+  } catch {
+    origin.value = await getCurrentOrigin();
+  }
   await loadConfig();
 });
 
@@ -352,15 +359,15 @@ const quickLoginSupport = computed<SpecSupportReport | null>(
   () => quickLoginMatchedEnv.value?.support ?? null,
 );
 
-/** 从粘贴的快捷登录文本中提取域名（仅 URL） */
-function extractOriginFromText(text: string): string | null {
+/** 从粘贴的快捷登录文本中提取完整 URL（保留路径以命中路径子环境） */
+function extractUrlFromText(text: string): string | null {
   const parsed = parseLoginText(text, "");
   if (!parsed?.url) return null;
   try {
     const u = new URL(
       parsed.url.startsWith("http") ? parsed.url : `http://${parsed.url}`,
     );
-    return u.origin;
+    return u.href;
   } catch {
     return null;
   }
@@ -381,7 +388,7 @@ const handleQuickLogin = async () => {
   // 纯账号模式：优先使用当前页面匹配的环境（URL + 默认密码）
   const isPureAccount = !parsed.hasUrl;
   const targetUrl =
-    isPureAccount && matchedEnv.value ? origin.value : parsed.url;
+    isPureAccount && matchedEnv.value ? pageUrl.value : parsed.url;
 
   // 面板只判断“是否存在默认密码”，实际秘密由 Background 按目标环境解析。
   const hasEnvDefault = isPureAccount
@@ -471,14 +478,14 @@ const handleQuickLoginKeydown = (e: KeyboardEvent) => {
 
 // 根据粘贴文本中的 URL 匹配环境
 watch(quickLoginText, () => {
-  const textOrigin = extractOriginFromText(quickLoginText.value);
-  if (!textOrigin) {
+  const textUrl = extractUrlFromText(quickLoginText.value);
+  if (!textUrl) {
     quickLoginMatchedEnv.value = null;
     quickLoginMatchedEnvKey.value = "";
     redirectEnabled.value = false;
     return;
   }
-  const resolved = resolveEnvironment(textOrigin, publicDomains.value);
+  const resolved = resolveEnvironment(textUrl, publicDomains.value);
   if (resolved) {
     quickLoginMatchedEnvKey.value = resolved.domain;
     quickLoginMatchedEnv.value = resolved.env;

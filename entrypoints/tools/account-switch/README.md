@@ -32,6 +32,8 @@ interface Account {
 interface DomainConfig {
   name: string;               // 环境名称: "本地开发", "测试环境" 等
   tags: string[];             // 环境标签: local/dev/test/staging/prod
+  matchPath?: string;         // 路径作用域（如 /management）；缺省 = 整个 origin
+  entryUrl?: string;          // 仅从扩展页打开环境时使用的具体入口地址
   loginMethod?: string;       // 仅作 SpecTemplate.id：新建环境时的默认声明 + 日志名称
   debugRedirect?: string;     // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
   debugRedirectEnabled?: boolean;  // 「登录后打开复现页面」开关默认值
@@ -51,13 +53,45 @@ interface DomainConfig {
 `recipe`，读取时自动迁移）。它只在「新建环境」时决定默认声明、以及日志里
 显示人类可读名称。
 
-环境以 `domains` 的 key（origin：`协议://主机:端口`）为身份。新建/编辑时粘贴
+环境以 `domains` 的 key（`origin + 可选路径作用域`）为身份。新建/编辑时粘贴
 完整登录页地址（如 `http://host:8880/management/#/login`）时，key 收敛为
-`http://host:8880`，路径、查询与 hash 写进登录声明的 `goto`（`{origin}/management/#/login`），
-因此识别表单、切换账号仍会打开真正的登录页。存量 key 即使带路径/hash，匹配与执行
-也会按 origin 归一处理。
+`http://host:8880`；若另填「路径作用域」`/management`，key 是
+`http://host:8880/management`。路径、查询与 hash 仍写进登录声明的 `goto`
+（`{origin}/management/#/login`），因此识别表单、切换账号仍会打开真正的登录页。
+存量 key 即使带路径/hash 且没有 `matchPath`，匹配与执行也会按 origin 归一处理。
 
-### 2.3 Token 数据 (TokenData)
+### 2.3 环境匹配与路径作用域
+
+`utils/env.ts` 的纯函数是所有入口（账号面板、切换/试跑、快捷登录、环境角标）
+共用的唯一匹配链：
+
+| 规则 | 行为 |
+|---|---|
+| 身份 | `domains` key = `normalizeDomain(url) + normalizeMatchPath(matchPath)` |
+| 路径匹配 | 大小写敏感、按路径段边界前缀匹配；`/management` 不命中 `/management2`；忽略 query/hash |
+| 优先级 | 具体 origin > 通配符；同 origin 下 `matchPath` 越长越具体；仍相同按配置插入顺序 |
+| 存量 key | key 带路径但无 `matchPath` → 仍匹配整个 origin（不改变旧行为） |
+| 账号绑定 | 整站（无 `matchPath`）或通配符绑定是家族兜底：在任意具体子环境（含路径子环境）可见，并使用该子环境的声明；具体路径绑定不跨路径泄漏 |
+
+`entryUrl` 只服务「从 Popup / 快捷登录打开环境」：必须是具体 http/https 地址，
+host 不能含 `*`，且必须落在该环境的 `(origin, matchPath)` 内。页面内切换仍由
+登录声明的 `goto` 决定；通配符环境未配置 `entryUrl` 时保持 `TAB_RESTRICTED`
+明确报错。
+
+示例：
+
+- **zcjb 家族**：配置 `https://*.zcjb.com.cn` 作为兜底，再配置
+  `https://chn.zcjb.com.cn` 这类具体子系统环境。`chn` 页面始终命中后者；删除
+  具体环境后自动回退通配符。通配符环境配置 `entryUrl` 后可从 Popup 直接打开。
+- **jfv2 同 origin 双子系统**：`domains` 同时存在
+  `http://jfv2.dev.ebidding.net.cn:8880/management`（`matchPath: "/management"`）与
+  `.../ebidding`（`matchPath: "/ebidding"`）。两个页面各自命中自己的声明与账号；
+  `management` 环境可配 `entryUrl: "http://.../management/#/login"`。
+
+> 同 origin 的两个子系统共享 Cookie。登录声明里的 `clear.cookies range: "all"`
+> 会互相踢下线；需要并存时把清理范围收窄到具体键。
+
+### 2.4 Token 数据 (TokenData)
 
 ```typescript
 interface TokenData {

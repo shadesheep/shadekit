@@ -35,6 +35,30 @@ describe('快捷登录目标选择', () => {
     });
   });
 
+  it('同一 origin 的路径子页面：保留 pathname 以命中对应环境', () => {
+    const pathDomains: Record<string, DomainConfig> = {
+      'https://app.example.com/management': {
+        name: '管理端',
+        loginMethod: 'generic',
+        matchPath: '/management',
+        tags: [],
+      },
+      'https://app.example.com/ebidding': {
+        name: '招采端',
+        loginMethod: 'generic',
+        matchPath: '/ebidding',
+        tags: [],
+      },
+    };
+    const pageUrl = 'https://app.example.com/ebidding/list';
+    expect(
+      parseQuickLoginSelection('demo-user', pageUrl, '', pathDomains),
+    ).toMatchObject({
+      url: pageUrl,
+      targetSource: 'current-page',
+    });
+  });
+
   it('当前页面未匹配环境时回退默认环境', () => {
     const result = parseQuickLoginSelection(
       'admin/secret',

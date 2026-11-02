@@ -73,4 +73,61 @@ describe('resolveEnvironment', () => {
       resolveEnvironment('http://app.dev.example.com:16800', devDomains),
     ).toBeUndefined();
   });
+
+  it('同一 origin 按路径作用域选中各自的环境', () => {
+    const pathDomains: Record<string, DomainConfig> = {
+      'https://app.example.com/management': env({
+        name: '管理端',
+        matchPath: '/management',
+      }),
+      'https://app.example.com/ebidding': env({
+        name: '招采端',
+        matchPath: '/ebidding',
+      }),
+    };
+    expect(
+      resolveEnvironment('https://app.example.com/management/#/home', pathDomains)?.env.name,
+    ).toBe('管理端');
+    expect(
+      resolveEnvironment('https://app.example.com/ebidding/list', pathDomains)?.env.name,
+    ).toBe('招采端');
+    expect(
+      resolveEnvironment('https://app.example.com/other', pathDomains),
+    ).toBeUndefined();
+  });
+
+  it('路径按段边界匹配：/management 不命中 /management2', () => {
+    const pathDomains: Record<string, DomainConfig> = {
+      'https://app.example.com/management': env({ matchPath: '/management' }),
+    };
+    expect(
+      resolveEnvironment('https://app.example.com/management2', pathDomains),
+    ).toBeUndefined();
+  });
+
+  it('具体子域优先于通配符，即使通配符先配置', () => {
+    const mixed: Record<string, DomainConfig> = {
+      'https://*.example.com': env({ name: '家族兜底' }),
+      'https://app.example.com': env({ name: '具体应用' }),
+    };
+    expect(
+      resolveEnvironment('https://app.example.com/management', mixed)?.env.name,
+    ).toBe('具体应用');
+  });
+
+  it('同 origin 下更长的路径作用域优先', () => {
+    const nested: Record<string, DomainConfig> = {
+      'https://app.example.com/management': env({
+        name: '管理端',
+        matchPath: '/management',
+      }),
+      'https://app.example.com/management/audit': env({
+        name: '审计',
+        matchPath: '/management/audit',
+      }),
+    };
+    expect(
+      resolveEnvironment('https://app.example.com/management/audit/log', nested)?.env.name,
+    ).toBe('审计');
+  });
 });

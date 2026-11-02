@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   showLoginRecoveryToast: vi.fn(),
   closePanel: vi.fn(),
   getCurrentOrigin: vi.fn(),
+  getCurrentUrl: vi.fn(),
 }));
 
 vi.mock("../entrypoints/shared/tool-config", () => ({
@@ -31,6 +32,7 @@ vi.mock("../entrypoints/tools/account-switch/utils/env", async (importOriginal) 
     ...original,
     closePanel: mocks.closePanel,
     getCurrentOrigin: mocks.getCurrentOrigin,
+    getCurrentUrl: mocks.getCurrentUrl,
   };
 });
 
@@ -106,6 +108,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   renderErrors.length = 0;
   mocks.getCurrentOrigin.mockResolvedValue("https://current.example.com");
+  mocks.getCurrentUrl.mockResolvedValue("https://current.example.com/");
   mocks.getConfig.mockResolvedValue(config);
   mocks.sendBgMessage.mockImplementation((type: string) =>
     type === "GET_ACCOUNT_PANEL"
@@ -222,6 +225,7 @@ describe("SwitcherPanel 零配置快捷登录", () => {
 describe("SwitcherPanel 不支持的环境", () => {
   it("展示版本/算子原因，但登录仍交给 Background 能力门（不做事先禁用）", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
     const unsupportedPanel = {
       ...structuredClone(panelData),
       origin: "https://target.example.com",
@@ -290,6 +294,7 @@ describe("SwitcherPanel 不支持的环境", () => {
 describe("SwitcherPanel 已配置环境", () => {
   it("保留快捷登录和选择账号 Tab", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
     await mountPanel();
 
     const labels = Array.from(root.querySelectorAll(".as-tab-btn")).map(
@@ -300,6 +305,7 @@ describe("SwitcherPanel 已配置环境", () => {
 
   it("账号切换只发送 accountId/environmentId，不读取或传播保存密码", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
     mocks.sendBgMessage.mockImplementation((type: string) =>
       type === "GET_ACCOUNT_PANEL"
         ? Promise.resolve({
@@ -334,6 +340,7 @@ describe("SwitcherPanel 已配置环境", () => {
 
   it("无保存密码账号使用当次临时密码且不重新保存", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
     mocks.sendBgMessage.mockImplementation((type: string) => {
       if (type === "GET_ACCOUNT_PANEL") return Promise.resolve({
         ...structuredClone(panelData),

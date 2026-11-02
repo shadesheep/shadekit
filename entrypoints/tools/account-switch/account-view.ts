@@ -16,7 +16,13 @@ import type {
   StrategyEntry,
 } from './types';
 import { ACCOUNT_COLORS, ACCOUNT_FALLBACK_COLOR, accountColorIndex } from './account-palette';
-import { matchDomain } from './utils/env';
+import {
+  matchDomain,
+  normalizeDomain,
+  normalizeMatchPath,
+  pickEnvironment,
+  toPageLocation,
+} from './utils/env';
 import {
   inspectLoginSpecSupport,
   type SpecSupportReport,
@@ -44,6 +50,8 @@ export interface PublicAccount {
 export interface PublicEnvironment {
   name: string;
   tags: string[];
+  /** 路径作用域；客户端可据此在面板内重新解析命中环境 */
+  matchPath?: string;
   loginMethod?: string;
   debugRedirect?: string;
   debugRedirectEnabled: boolean;
@@ -195,13 +203,14 @@ export interface AccountPanelData {
 
 /**
  * Background → Content Script 的唯一面板投影。完整配置留在受控运行层；
- * 其他环境只提供快捷登录匹配所需的公开摘要，账号只投影当前 origin。
+ * 其他环境只提供快捷登录匹配所需的公开摘要，账号只投影当前页面。
+ * `target` 是完整 URL（或 origin）：同一 origin 下的多个子系统靠 pathname 区分。
  */
 export function buildAccountPanel(
   config: AccountSwitchConfig,
-  origin: string,
+  target: string,
 ): AccountPanelData {
-  const resolved = resolveEnvironment(origin, config.domains ?? {});
+  const resolved = resolveEnvironment(target, config.domains ?? {});
   const domains = Object.fromEntries(
     Object.entries(config.domains ?? {}).map(([id, env]) => {
       const support = environmentLoginSupport(env, config.strategies);
@@ -210,6 +219,7 @@ export function buildAccountPanel(
         {
           name: env.name,
           tags: Array.isArray(env.tags) ? [...env.tags] : [],
+          ...(env.matchPath ? { matchPath: env.matchPath } : {}),
           ...(env.loginMethod ? { loginMethod: env.loginMethod } : {}),
           ...(env.debugRedirect ? { debugRedirect: env.debugRedirect } : {}),
           debugRedirectEnabled: env.debugRedirectEnabled === true,
@@ -222,7 +232,7 @@ export function buildAccountPanel(
   );
   const accounts = filterAccounts(
     (config.accounts ?? []).map(normalizeAccount),
-    { origin },
+    { origin: target, domains: config.domains },
   ).map((account) => ({
     id: account.id,
     name: account.name,
@@ -235,7 +245,7 @@ export function buildAccountPanel(
       ? [...config.tabOrder]
       : ['users', 'quicklogin'];
   return {
-    origin,
+    origin: toPageLocation(target)?.origin ?? "",
     matchedEnvKey: resolved?.domain ?? '',
     accounts,
     domains,
@@ -340,8 +350,13 @@ export function normalizeAccount(raw: RawAccount): Account {
 // ============================================================
 
 export interface AccountFilter {
-  /** 当前页面 origin；空值不做域过滤 */
+  /** 当前页面地址（URL 或 origin）；空值不做域过滤 */
   origin?: string;
+  /**
+   * 环境配置。提供时按环境作用域（origin + matchPath）过滤：
+   * 绑定到路径子系统的账号不会出现在同一 origin 的另一个子系统里。
+   */
+  domains?: Record<string, { matchPath?: string }>;
   /** 角色筛选；null/undefined 不过滤 */
   role?: string | null;
   /** 搜索关键词（匹配 name / username，大小写不敏感） */
@@ -355,14 +370,31 @@ export interface FilterableAccount {
   domains?: string[];
 }
 
-/** 三段过滤：域（origin）→ 角色（role）→ 搜索（query），各段独立可选 */
+/** 账号绑定 key 是否覆盖当前页面：环境存在时按环境作用域判定，否则回退 origin 匹配。 */
+export function accountBindingMatches(
+  accountDomain: string,
+  target: string,
+  domains?: Record<string, { matchPath?: string }>,
+): boolean {
+  const targetEnvironment = pickEnvironment(target, domains)?.domain;
+  if (targetEnvironment) {
+    // 面板可见性与切换/试跑共用同一条绑定规则，避免「看得到但切不过去」。
+    return accountBoundToEnvironment(accountDomain, targetEnvironment, domains);
+  }
+  return matchDomain(accountDomain, target);
+}
+
+/** 三段过滤：域（页面）→ 角色（role）→ 搜索（query），各段独立可选 */
 export function filterAccounts<T extends FilterableAccount>(accounts: T[], filter: AccountFilter): T[] {
   if (!Array.isArray(accounts)) return [];
   let result = accounts;
 
   if (filter.origin) {
-    const origin = filter.origin;
-    result = result.filter((acc) => acc.domains?.some((d) => matchDomain(d, origin)));
+    const target = filter.origin;
+    const domains = filter.domains;
+    result = result.filter((acc) =>
+      acc.domains?.some((d) => accountBindingMatches(d, target, domains)),
+    );
   }
 
   if (filter.role) {
@@ -439,16 +471,41 @@ export interface ResolvedEnvironment<T = DomainConfig> {
 }
 
 /**
- * 按 origin 匹配已配置环境:取第一个 matchDomain 命中的 domain。
- * 无匹配或 origin 为空返回 undefined(调用方静默降级)。
+ * 按页面位置匹配已配置环境：精确 origin 优先于通配符，路径作用域更长者优先，
+ * 同分保持配置插入顺序。无匹配或目标为空返回 undefined（调用方静默降级）。
+ *
+ * `target` 可以是完整 URL（推荐，路径作用域才会生效）或 origin。
  */
-export function resolveEnvironment<T>(
-  origin: string,
+export function resolveEnvironment<T extends { matchPath?: string }>(
+  target: string,
   domains: Record<string, T>,
 ): ResolvedEnvironment<T> | undefined {
-  if (!origin) return undefined;
-  for (const [domain, env] of Object.entries(domains ?? {})) {
-    if (matchDomain(domain, origin)) return { domain, env };
+  if (!target) return undefined;
+  return pickEnvironment(target, domains);
+}
+
+/**
+ * 账号绑定的环境 key 是否指向目标环境。
+ *
+ * 绑定 key 与环境 key 都是具体环境时要求路径作用域一致；通配符绑定可以
+ * 覆盖具体子域环境（家族兜底）。无法解析到环境的脏 key 回退 origin 匹配。
+ */
+export function accountBoundToEnvironment(
+  accountDomain: string,
+  environmentId: string,
+  domains?: Record<string, { matchPath?: string }>,
+): boolean {
+  if (accountDomain === environmentId) return true;
+  if (!matchDomain(accountDomain, environmentId)) return false;
+  const bound = domains?.[accountDomain];
+  const target = domains?.[environmentId];
+  if (bound && target) {
+    const boundScope = normalizeMatchPath(bound.matchPath);
+    // 无路径作用域的绑定覆盖整个 origin（与 matchEnvironment 的面板可见性一致）
+    if (!boundScope) return true;
+    // D1：通配符绑定是家族兜底，允许使用任意具体子环境（含路径子环境）
+    if (normalizeDomain(accountDomain).includes("*")) return true;
+    return boundScope === normalizeMatchPath(target.matchPath);
   }
-  return undefined;
+  return true;
 }

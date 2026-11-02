@@ -64,6 +64,27 @@ describe('evaluateEnv — 环境匹配评估', () => {
     expect(evaluateEnv(undefined, 'https://prod.example.com')).toBeNull();
     expect(evaluateEnv({ domains: {} }, 'https://prod.example.com')).toBeNull();
   });
+
+  it('同一 origin 按 pathname 返回最具体环境', () => {
+    const scoped = {
+      domains: {
+        'https://app.example.com': { name: '整站', tags: [] },
+        'https://app.example.com/management': {
+          name: '管理端',
+          tags: ['test'],
+          matchPath: '/management',
+        },
+      },
+    };
+    expect(evaluateEnv(scoped, 'https://app.example.com/management/#/home')).toEqual({
+      name: '管理端',
+      tags: ['test'],
+    });
+    expect(evaluateEnv(scoped, 'https://app.example.com/ebidding')).toEqual({
+      name: '整站',
+      tags: [],
+    });
+  });
 });
 
 // ============================================================

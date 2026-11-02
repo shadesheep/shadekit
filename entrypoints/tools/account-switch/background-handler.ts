@@ -24,16 +24,18 @@ import { prepareLogin } from "./login-session";
 import type { DryRunStepResult } from "./strategies/generic-dry-run";
 import { normalizeRecipe } from "./strategies/generic-recipe";
 import type { RecipeStepTrace } from "./strategies/generic-runner";
-import type { Account, AccountSwitchConfig, AuthContext } from "./types";
+import type { Account, AccountSwitchConfig, AuthContext, DomainConfig } from "./types";
 import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
 import {
+  accountBoundToEnvironment,
   assertEnvironmentLoginSupported,
   buildAccountPanel,
   resolveEnvironment,
   type AccountPanelData,
 } from "./account-view";
 import { resolveAccountPassword, resolveDefaultPassword, resolveLoginPassword, resolveSpecSecrets } from "./secret-resolver";
-import { matchDomain, normalizeDomain, normalizedOrigin } from "./utils/env";
+import { matchEnvironment, normalizeDomain, normalizedOrigin } from "./utils/env";
+import { hasWildcardHostname } from "./utils/quick-login-target";
 import type { ErrorCode } from "./utils/error-codes";
 import { ErrorCodes, errorCodeOf } from "./utils/error-codes";
 import { runTrialLogin } from "./spec/trial";
@@ -67,9 +69,10 @@ async function readAccountSwitchConfig(): Promise<AccountSwitchConfig | undefine
 export async function handleGetAccountPanel(
   sender: chrome.runtime.MessageSender,
 ): Promise<AccountPanelData> {
+  const pageUrl = sender.url || sender.tab?.url || "";
   let origin = "";
   try {
-    origin = new URL(sender.url || sender.tab?.url || "").origin;
+    origin = new URL(pageUrl).origin;
   } catch {
     origin = "";
   }
@@ -77,7 +80,7 @@ export async function handleGetAccountPanel(
   const config = await readAccountSwitchConfig();
   return buildAccountPanel(
     config ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS },
-    origin,
+    pageUrl,
   );
 }
 
@@ -86,33 +89,29 @@ async function resolveSavedAccount(
   accountId: string,
   environmentId: string,
   sender: chrome.runtime.MessageSender,
-): Promise<{ account: Account; password: string; origin: string } | { error: LoginResponse }> {
+): Promise<
+  | { account: Account; password: string; origin: string; environment: DomainConfig }
+  | { error: LoginResponse }
+> {
   const config = await readAccountSwitchConfig();
   const account = config?.accounts.find((candidate) => candidate.id === accountId);
   const environment = config?.domains[environmentId];
   if (!account || !environment) {
     return { error: rejectedLogin("账号或环境不存在") };
   }
-  const bound = account.domains.some(
-    (domain) => domain === environmentId || matchDomain(domain, environmentId),
+  const bound = account.domains.some((domain) =>
+    accountBoundToEnvironment(domain, environmentId, config?.domains),
   );
   if (!bound) return { error: rejectedLogin("账号未绑定到当前环境") };
 
-  // 通配符环境（如 https://*.example.com）本身不是可执行 origin；
-  // 用当前页面解析出的具体 origin 做权限规划与后续登录。
-  let effectiveOrigin = environmentId;
+  // 环境 key 可能带路径作用域或通配符：执行 origin 只取协议://host:port。
+  let effectiveOrigin = normalizeDomain(environmentId);
   if (sender.tab) {
-    const tabOrigin = (() => {
-      try {
-        return new URL(sender.tab?.url || sender.url || "").origin;
-      } catch {
-        return "";
-      }
-    })();
-    if (!tabOrigin || !matchDomain(environmentId, tabOrigin)) {
+    const tabUrl = sender.tab.url || sender.url || "";
+    if (!tabUrl || !matchEnvironment(environmentId, environment, tabUrl)) {
       return { error: rejectedLogin("当前页面已离开账号绑定环境") };
     }
-    if (environmentId.includes("*")) effectiveOrigin = tabOrigin;
+    effectiveOrigin = normalizedOrigin(tabUrl);
   }
   // 能力门必须在权限规划、tab/导航/HTTP、会话写入与密码/秘密解析之前。
   // 抛出的结构化错误会由 handleSwitchAccount 转成 { success:false, errorCode }。
@@ -124,21 +123,22 @@ async function resolveSavedAccount(
     debugRedirect: environment.debugRedirect,
     vars: environment.vars,
   });
-  registerEnvironmentPlan(effectiveOrigin, plan);
+  registerEnvironmentPlan(environmentId, plan);
   await assertLoginPermissions(plan);
   return {
     account,
     password: await resolveAccountPassword(account),
     origin: effectiveOrigin,
+    environment,
   };
 }
 async function resolveQuickLoginPassword(
   targetUrl: string,
   input: string | undefined,
 ): Promise<{ password: string } | { error: LoginResponse }> {
-  let targetOrigin = "";
   try {
-    targetOrigin = new URL(targetUrl).origin;
+    // 只做合法性检查；环境匹配与密码回退都使用完整 URL（路径作用域）。
+    void new URL(targetUrl);
   } catch {
     return {
       error: { success: false, error: "目标 URL 格式无效", errorCode: ErrorCodes.INVALID_URL },
@@ -149,14 +149,14 @@ async function resolveQuickLoginPassword(
     // 不支持的声明也不能创建 tab 或发起请求。
     const config =
       (await readAccountSwitchConfig()) ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS };
-    const environment = resolveEnvironment(targetOrigin, config.domains);
+    const environment = resolveEnvironment(targetUrl, config.domains);
     if (environment) {
       assertEnvironmentLoginSupported(environment.env, config.strategies);
     }
     if (input) return { password: input };
     // 权限拒绝也要走结构化返回；放在 try 外会以未处理拒绝结束，调用方收不到响应。
     await assertRuntimeTarget(targetUrl);
-    const password = await resolveDefaultPassword(config, targetOrigin);
+    const password = await resolveDefaultPassword(config, targetUrl);
     if (!password) {
       return {
         error: {
@@ -189,14 +189,17 @@ async function getTabId(
 }
 
 /**
- * 从 extension 页面（options/popup）发起登录时，找账号第一个绑定环境的「可打开
- * URL」：环境 key 本身是具体地址（非通配符）直接用；通配符无法直接打开，返回
- * null（由调用方给明确提示，引导用户先手动打开目标页面或改配具体环境）。
- * 不做真实 URL 校验（交给 new URL 或在 new-tab prelude 里报错）。
+ * 从 extension 页面（options/popup）发起登录时，找账号绑定环境的「可打开 URL」：
+ * 1. 环境配置了 `entryUrl` 且是具体地址 → 直接打开（通配符环境靠它落地到真实入口）；
+ * 2. 否则环境 key 本身是具体地址（非通配符）→ 用 key；
+ * 3. 通配符且无入口 → null（由调用方提示先手动打开目标页面）。
  */
-export async function resolveOpenableUrl(
+export function resolveOpenableUrl(
   domainKey: string,
-): Promise<string | null> {
+  entryUrl?: string,
+): string | null {
+  const explicit = entryUrl?.trim();
+  if (explicit && !hasWildcardHostname(explicit)) return explicit;
   if (!domainKey) return null;
   // 环境 key 通常是「协议://host[:port][/path]」形态；含 * 是通配符，无法直接打开
   if (domainKey.includes("*")) return null;
@@ -252,10 +255,10 @@ export async function handleSwitchAccount(
     };
   }
   if ("error" in resolved) return resolved.error;
-  const { account, password, origin } = resolved;
+  const { account, password, environment } = resolved;
   // options/popup 环境：sender.tab 缺省（非 content script 来源）
   if (!sender.tab) {
-    const openableUrl = await resolveOpenableUrl(origin);
+    const openableUrl = resolveOpenableUrl(environmentId, environment.entryUrl);
     if (openableUrl) {
       return handleQuickLoginInNewTab(
         openableUrl,
@@ -268,8 +271,8 @@ export async function handleSwitchAccount(
       success: false,
       error:
         `执行目标受限 (chrome-extension://)：请先打开目标系统页面再点登录。` +
-        `该账号绑定的环境「${origin}」是通配符，无法自动打开，` +
-        `请先手动打开目标页面后用内容面板登录，或改配具体环境地址。`,
+        `该账号绑定的环境「${environmentId}」是通配符且未配置入口地址，` +
+        `请先手动打开目标页面后用内容面板登录，或为该环境配置「入口地址」。`,
       errorCode: ErrorCodes.TAB_RESTRICTED,
     };
   }
@@ -278,7 +281,8 @@ export async function handleSwitchAccount(
     action: "SWITCH_ACCOUNT",
     account: { name: account.name, username: account.username },
     credentials: { username: account.username, password },
-    target: origin,
+    // 环境 key（可能带路径作用域）是身份；通配符由 prelude 用执行 tab 的 origin 落地
+    target: environmentId,
     targetKind: "origin",
     execTarget: { kind: "existing", tabId: tabId ?? 0 },
   });
@@ -429,7 +433,7 @@ export async function handleTrialSavedAccount(
     const account = config?.accounts.find((candidate) => candidate.id === accountId);
     const domainConfig = config?.domains[environmentId];
     if (!config || !account || !domainConfig || !account.domains.some((domain) =>
-      domain === environmentId || matchDomain(domain, environmentId)
+      accountBoundToEnvironment(domain, environmentId, config.domains)
     )) {
       throw new Error("账号未绑定到目标环境");
     }

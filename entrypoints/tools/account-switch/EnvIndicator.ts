@@ -15,13 +15,13 @@
 import { sendBgMessage } from '../../shared/messages';
 import type { AccountPanelData } from './account-view';
 import type { EnvBadgeConfig, EnvBadgePosition } from './types';
-import { matchDomain } from './utils/env';
+import { matchDomain, pickEnvironment } from './utils/env';
 import { watchSpaRoutes, type SpaRouteWatcher } from './utils/spa-route';
 import { normalizeEnvTag, tagColor } from './account-env-view';
 
 /** evaluateEnv 入参：账号切换配置中参与评估的部分 */
 export interface EnvEvaluateConfig {
-  domains?: Record<string, { name: string; tags: string[] }>;
+  domains?: Record<string, { name: string; tags: string[]; matchPath?: string }>;
   envBadge?: { whitelist?: string[] };
 }
 
@@ -41,26 +41,23 @@ const POSITION_STYLES: Record<EnvBadgePosition, string> = {
 };
 
 /**
- * 纯函数：根据合并后的配置与 origin 评估匹配环境。
- * envBadge.whitelist 非空时，origin 不在白名单中直接判不匹配。
+ * 纯函数：根据合并后的配置与页面地址评估匹配环境。
+ * envBadge.whitelist 非空时，页面 origin 不在白名单中直接判不匹配。
+ * 同一 origin 的多个路径环境按 matchPath 择优（与面板/登录共用 pickEnvironment）。
  */
 export function evaluateEnv(
   cfg: EnvEvaluateConfig | undefined,
-  origin: string,
+  pageUrl: string,
 ): EnvMatch | null {
   if (!cfg?.domains) return null;
 
   const whitelist = cfg.envBadge?.whitelist ?? [];
-  if (whitelist.length > 0 && !whitelist.some((d) => matchDomain(d, origin))) {
+  if (whitelist.length > 0 && !whitelist.some((d) => matchDomain(d, pageUrl))) {
     return null;
   }
 
-  for (const [domain, env] of Object.entries(cfg.domains)) {
-    if (matchDomain(domain, origin)) {
-      return { name: env.name, tags: env.tags };
-    }
-  }
-  return null;
+  const matched = pickEnvironment(pageUrl, cfg.domains);
+  return matched ? { name: matched.env.name, tags: matched.env.tags } : null;
 }
 
 /** 路由监听器（单例：重复 init 不重复安装） */
@@ -122,7 +119,7 @@ async function refreshEnvBadge(): Promise<void> {
     applyEnvBadge(
       evaluateEnv(
         { domains: accountCfg?.domains, envBadge: badge },
-        window.location.origin,
+        window.location.href,
       ),
       badge.position,
     );

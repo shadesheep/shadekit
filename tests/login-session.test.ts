@@ -231,6 +231,109 @@ describe('prepareLogin — prelude 不变量', () => {
     outcome.prepared.release();
   });
 
+  it('同一 origin 的路径环境：按 environmentId 命中自己的声明', async () => {
+    storageWith({
+      domains: {
+        'http://example.com/management': {
+          name: '管理端',
+          loginMethod: 'generic',
+          matchPath: '/management',
+          strategyConfig: { spec: { ...stubSpec(), template: 'management' } },
+        },
+        'http://example.com/ebidding': {
+          name: '招采端',
+          loginMethod: 'generic',
+          matchPath: '/ebidding',
+          strategyConfig: { spec: { ...stubSpec(), template: 'ebidding' } },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://example.com/management/#/home',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://example.com/management',
+        targetKind: 'origin',
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.spec.template).toBe('management');
+    expect(outcome.prepared.origin).toBe('http://example.com');
+    outcome.prepared.release();
+  });
+
+  it('targetKind=url：URL 落在 /ebidding 时选中该路径环境', async () => {
+    storageWith({
+      domains: {
+        'http://example.com/management': {
+          name: '管理端',
+          loginMethod: 'generic',
+          matchPath: '/management',
+          strategyConfig: { spec: { ...stubSpec(), template: 'management' } },
+        },
+        'http://example.com/ebidding': {
+          name: '招采端',
+          loginMethod: 'generic',
+          matchPath: '/ebidding',
+          strategyConfig: { spec: { ...stubSpec(), template: 'ebidding' } },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://example.com/ebidding/list',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://example.com/ebidding/list',
+        targetKind: 'url',
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.spec.template).toBe('ebidding');
+    outcome.prepared.release();
+  });
+
+  it('通配符 environmentId 是身份：即使存在具体子环境也使用家族声明，只用页面 origin 执行', async () => {
+    storageWith({
+      domains: {
+        'http://*.example.com': {
+          name: '家族',
+          loginMethod: 'generic',
+          strategyConfig: { spec: { ...stubSpec(), template: 'family' } },
+        },
+        'http://app.example.com/management': {
+          name: '管理端',
+          loginMethod: 'generic',
+          matchPath: '/management',
+          strategyConfig: { spec: { ...stubSpec(), template: 'management' } },
+        },
+      },
+    });
+    tabsGetMock.mockResolvedValue({
+      id: 1,
+      status: 'complete',
+      url: 'http://app.example.com/management/#/home',
+    });
+    const outcome = await prepareLogin(
+      baseInput({
+        target: 'http://*.example.com',
+        targetKind: 'origin',
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.prepared.spec.template).toBe('family');
+    expect(outcome.prepared.origin).toBe('http://app.example.com');
+    outcome.prepared.release();
+  });
+
   it('通配符环境按执行页面的具体 origin 构建 ctx', async () => {
     storageWith({
       domains: {

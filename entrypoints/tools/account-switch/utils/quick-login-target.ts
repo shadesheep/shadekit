@@ -22,7 +22,7 @@ export function parseQuickLoginSelection(
     const current = new URL(pageUrl);
     if (
       (current.protocol === 'http:' || current.protocol === 'https:') &&
-      resolveEnvironment(current.origin, domains ?? {})
+      resolveEnvironment(current.href, domains ?? {})
     ) {
       fallback = current.href;
       fallbackSource = 'current-page';

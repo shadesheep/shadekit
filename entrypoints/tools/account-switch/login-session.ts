@@ -30,7 +30,8 @@ import {
   type DebugBuffer,
 } from "./utils/debug-log";
 import type { DebugLogEntry } from "./types";
-import { matchDomain, normalizeDomain, normalizedOrigin, originMatches } from "./utils/env";
+import { resolveEnvironment } from "./account-view";
+import { normalizeDomain, normalizedOrigin, originMatches } from "./utils/env";
 import {
   ErrorCodes,
   errorCodeOf,
@@ -355,15 +356,16 @@ export async function prepareLogin(
     }
 
     // 通配符环境（如 https://*.example.com）不能作为运行期的具体 origin：
-    // 解析成本次执行页面的 origin，后续 cookie/storage 写入与异步 origin 防线
-    // 都必须使用它。页面不匹配时在副作用前明确拒绝。
+    // 先用 key 选中环境（下面 resolveDomain 的第 1 条），再把执行 origin 替换为
+    // 页面真实 origin。页面不匹配时在副作用前明确拒绝。
+    let wildcardExecutionOrigin = "";
     if (input.targetKind === "origin" && origin.includes("*")) {
       if (!executionUrl || !originMatches(origin, executionUrl)) {
         return fail(`执行页面不在环境「${origin}」内，无法确定登录站点`, {
           code: ErrorCodes.ENV_NOT_MATCHED,
         });
       }
-      origin = normalizedOrigin(executionUrl);
+      wildcardExecutionOrigin = normalizedOrigin(executionUrl);
     }
 
     // 解析 debugRedirect（ADR-0003 D4：URL 推导规则收口至 login-tab-flow）
@@ -386,13 +388,18 @@ export async function prepareLogin(
       return fail("配置未找到", { code: ErrorCodes.CONFIG_NOT_FOUND });
     }
 
-    const domainResult = resolveDomain(config, origin);
+    const domainResult = resolveDomain(config, {
+      target: input.target,
+      targetKind: input.targetKind,
+      executionUrl,
+    });
     if (!domainResult) {
       return fail("未找到匹配的环境配置", {
         code: ErrorCodes.ENV_NOT_MATCHED,
       });
     }
     const { domainConfig } = domainResult;
+    if (wildcardExecutionOrigin) origin = wildcardExecutionOrigin;
 
     const { spec, invalid } = readSpecFromConfig(domainConfig, config.strategies);
     if (!spec) {
@@ -497,19 +504,28 @@ export async function prepareLogin(
 }
 
 /**
- * 解析 origin 对应的 domain 配置。
- * v1.1.4：`apiBase` 字段已从 DomainConfig 删除；spec 模板变量只剩 `{origin}`。
+ * 解析本次登录对应的环境配置。
+ *
+ * 1. `targetKind === "origin"` 且环境 key 存在 → 直接按 key 取身份。环境 key 可能
+ *    带路径作用域，不能先收敛成 origin 再反查（同 origin 的多个子系统会错配）。
+ * 2. 否则按执行位置择优：URL 目标用目标 URL；origin 目标优先用执行 tab 的真实
+ *    地址（含 pathname），拿不到再退回 key 本身。
  */
 function resolveDomain(
   config: AccountSwitchConfig,
-  origin: string,
+  input: {
+    target: string;
+    targetKind: "origin" | "url";
+    executionUrl: string;
+  },
 ): { domainConfig: DomainConfig } | null {
   const domains =
     config.domains && typeof config.domains === "object" ? config.domains : {};
-  for (const [domain, env] of Object.entries(domains)) {
-    if (matchDomain(domain, origin)) {
-      return { domainConfig: env };
-    }
+  if (input.targetKind === "origin" && domains[input.target]) {
+    return { domainConfig: domains[input.target] };
   }
-  return null;
+  const location =
+    input.targetKind === "url" ? input.target : input.executionUrl || input.target;
+  const resolved = resolveEnvironment(location, domains);
+  return resolved ? { domainConfig: resolved.env } : null;
 }

@@ -279,8 +279,7 @@ async function handleQuickLoginFromSelection(
   let matchedDebugRedirect: string | undefined;
   if (asConfig?.domains) {
     try {
-      const checkOrigin = new URL(parsed.url).origin;
-      const resolved = resolveEnvironment(checkOrigin, asConfig.domains);
+      const resolved = resolveEnvironment(parsed.url, asConfig.domains);
       if (resolved) {
         if (resolved.env.debugRedirect && resolved.env.debugRedirectEnabled) {
           matchedDebugRedirect = resolved.env.debugRedirect;

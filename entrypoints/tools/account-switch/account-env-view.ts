@@ -30,6 +30,7 @@ import type {
   AccountSwitchConfig,
   DomainConfig,
 } from "./types";
+import { environmentKeyFor, normalizeMatchPath } from "./utils/env";
 
 // ============================================================
 // 主视图分组（S3）
@@ -391,7 +392,11 @@ export function planImport(
         }
       });
       envs = candidates.map(({ env, spec, support }) => {
-        const url = env.url.trim();
+        const rawUrl = env.url.trim();
+        const matchPath = normalizeMatchPath(env.matchPath);
+        // 环境 key = origin + 路径作用域；包里的完整登录页地址只取 origin。
+        const url = environmentKeyFor(rawUrl, matchPath);
+        const entryUrl = env.entryUrl?.trim();
         const vars = isRecord(env.vars)
           ? Object.fromEntries(
               Object.entries(env.vars).filter(
@@ -405,6 +410,8 @@ export function planImport(
           {
             name: env.name,
             tags: [],
+            ...(matchPath ? { matchPath } : {}),
+            ...(entryUrl ? { entryUrl } : {}),
             // loginMethod 仅作显示名：用声明自己的名称，让导入的策略在日志与
             // 下拉里可辨认；执行始终认 strategyConfig.spec。
             loginMethod:

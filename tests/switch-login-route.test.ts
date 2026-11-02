@@ -28,4 +28,28 @@ describe('resolveOpenableUrl — extension 页登录的可打开 URL 推导', ()
   it('空 key → null', async () => {
     expect(await resolveOpenableUrl('')).toBeNull();
   });
+
+  it('通配符环境配置了具体入口地址 → 打开入口', async () => {
+    expect(
+      await resolveOpenableUrl(
+        'https://*.example.com',
+        'https://app.example.com/management/#/login',
+      ),
+    ).toBe('https://app.example.com/management/#/login');
+  });
+
+  it('入口地址含通配符 → 仍不可打开', async () => {
+    expect(
+      await resolveOpenableUrl('https://*.example.com', 'https://*.example.com/login'),
+    ).toBeNull();
+  });
+
+  it('具体环境也优先使用配置的入口地址', async () => {
+    expect(
+      await resolveOpenableUrl(
+        'https://app.example.com/management',
+        'https://app.example.com/management/#/login',
+      ),
+    ).toBe('https://app.example.com/management/#/login');
+  });
 });

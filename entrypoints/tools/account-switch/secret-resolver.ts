@@ -27,9 +27,9 @@ export async function resolveAccountPassword(account: Account): Promise<string> 
 
 export async function resolveDefaultPassword(
   config: AccountSwitchConfig,
-  origin: string,
+  target: string,
 ): Promise<string | undefined> {
-  const environment = resolveEnvironment(origin, config.domains);
+  const environment = resolveEnvironment(target, config.domains);
   if (environment?.env.defaultCredentialRef) {
     const value = await requiredSecret(environment.env.defaultCredentialRef);
     if (value) return value;
@@ -53,11 +53,11 @@ export async function resolveDefaultPassword(
 export async function resolveLoginPassword(
   account: Account,
   config: AccountSwitchConfig,
-  origin: string,
+  target: string,
 ): Promise<string> {
   return (
     (await resolveAccountPassword(account)) ||
-    (await resolveDefaultPassword(config, origin)) ||
+    (await resolveDefaultPassword(config, target)) ||
     ""
   );
 }

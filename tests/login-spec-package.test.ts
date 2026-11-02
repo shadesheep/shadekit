@@ -143,6 +143,85 @@ describe("buildConfigPackage — 导出", () => {
     expect(issues.some((i) => i.varName === "typo")).toBe(true);
   });
 
+  it("路径作用域与入口地址随包导出，url 仍是 origin", () => {
+    const d = domain({
+      matchPath: "/management",
+      entryUrl: "https://example.com/management/#/login",
+    });
+    const { package: pkg, issues } = buildConfigPackage(
+      d,
+      "https://example.com/management",
+      [],
+    );
+    expect(issues).toEqual([]);
+    expect(pkg!.environments[0]).toMatchObject({
+      url: "https://example.com",
+      matchPath: "/management",
+      entryUrl: "https://example.com/management/#/login",
+    });
+  });
+
+  it("旧包缺少新字段 → 仍通过校验", () => {
+    const pkg = {
+      format: "dt-login-config/v1",
+      specVersion: 2,
+      requiredVars: [],
+      environments: [
+        {
+          name: "dev",
+          url: "https://example.com",
+          spec: spec(),
+          requiredVars: [],
+        },
+      ],
+    };
+    expect(validateConfigPackage(pkg)).toEqual([]);
+  });
+
+  it("路径作用域缺少前导 / → CONFIG_INVALID", () => {
+    const pkg = {
+      format: "dt-login-config/v1",
+      specVersion: 2,
+      requiredVars: [],
+      environments: [
+        {
+          name: "dev",
+          url: "https://example.com",
+          matchPath: "management",
+          spec: spec(),
+          requiredVars: [],
+        },
+      ],
+    };
+    const issues = validateConfigPackage(pkg);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe("CONFIG_INVALID");
+    expect(issues[0].message).toContain("以 / 开头");
+  });
+
+  it("入口地址含通配符或落在作用域外 → CONFIG_INVALID", () => {
+    const base = {
+      format: "dt-login-config/v1",
+      specVersion: 2,
+      requiredVars: [],
+      environments: [
+        {
+          name: "dev",
+          url: "https://example.com",
+          matchPath: "/management",
+          entryUrl: "https://*.example.com/management",
+          spec: spec(),
+          requiredVars: [],
+        },
+      ],
+    };
+    expect(validateConfigPackage(base)[0]?.message).toContain("通配符");
+
+    const outside = structuredClone(base);
+    outside.environments[0].entryUrl = "https://example.com/ebidding";
+    expect(validateConfigPackage(outside)[0]?.message).toContain("路径作用域");
+  });
+
   it("无 spec → 拒绝", () => {
     const d = domain({ strategyConfig: {} });
     const { issues } = buildConfigPackage(d, "https://example.com", []);

@@ -15,6 +15,8 @@
  */
 
 import type { DomainConfig, StrategyEntry } from "../types";
+import { normalizeDomain, normalizeMatchPath } from "../utils/env";
+import { validateEntryUrl, validateMatchPath } from "../utils/validate-domain";
 import type { SpecDocument } from "./document";
 import { LOGIN_SPEC_VERSION } from "./types";
 
@@ -30,6 +32,10 @@ export interface ConfigPackageEnvironment {
   name: string;
   /** 环境地址（origin） */
   url: string;
+  /** 可选路径作用域（规范化后，空 = 整个 origin） */
+  matchPath?: string;
+  /** 可选入口地址：只用于从扩展页打开该环境 */
+  entryUrl?: string;
   loginMethod?: string;
   /** 该环境的登录声明（不含 script / secret 变量的 spec） */
   spec: SpecDocument;
@@ -204,6 +210,8 @@ export function buildConfigPackage(
     title: packageVars.find((v) => v.name === name)?.title,
   }));
 
+  const matchPath = normalizeMatchPath(environment.matchPath);
+  const entryUrl = environment.entryUrl?.trim();
   const packageObj: ConfigPackage = {
     format: CONFIG_PACKAGE_FORMAT,
     specVersion:
@@ -213,7 +221,9 @@ export function buildConfigPackage(
     environments: [
       {
         name: environment.name,
-        url: origin,
+        url: normalizeDomain(origin),
+        ...(matchPath ? { matchPath } : {}),
+        ...(entryUrl ? { entryUrl } : {}),
         loginMethod: environment.loginMethod,
         spec,
         ...(environment.vars ? { vars: { ...environment.vars } } : {}),
@@ -280,7 +290,7 @@ export function validateConfigPackage(raw: unknown): PackageIssue[] {
       });
       return;
     }
-    const spec = (env as { spec?: unknown }).spec;
+    const spec = env.spec;
     if (!isRecord(spec)) {
       issues.push({
         code: "CONFIG_INVALID",
@@ -331,13 +341,54 @@ export function validateConfigPackage(raw: unknown): PackageIssue[] {
       });
     }
 
+    // 可选路径作用域 / 入口地址：旧包缺省保持原行为；新字段必须自洽。
+    const rawMatchPath = env.matchPath;
+    let matchPath = "";
+    if (rawMatchPath !== undefined) {
+      if (typeof rawMatchPath !== "string") {
+        issues.push({
+          code: "CONFIG_INVALID",
+          message: `第 ${envIndex + 1} 个环境的路径作用域必须是字符串`,
+        });
+      } else {
+        const pathError = validateMatchPath(rawMatchPath);
+        if (pathError) {
+          issues.push({
+            code: "CONFIG_INVALID",
+            message: `第 ${envIndex + 1} 个环境：${pathError}`,
+          });
+        } else {
+          matchPath = normalizeMatchPath(rawMatchPath);
+        }
+      }
+    }
+    const rawEntryUrl = env.entryUrl;
+    if (rawEntryUrl !== undefined) {
+      if (typeof rawEntryUrl !== "string") {
+        issues.push({
+          code: "CONFIG_INVALID",
+          message: `第 ${envIndex + 1} 个环境的入口地址必须是字符串`,
+        });
+      } else {
+        const entryError = validateEntryUrl(
+          typeof env.url === "string" ? env.url : "",
+          matchPath,
+          rawEntryUrl,
+        );
+        if (entryError) {
+          issues.push({
+            code: "CONFIG_INVALID",
+            message: `第 ${envIndex + 1} 个环境：${entryError}`,
+          });
+        }
+      }
+    }
+
     // 环境级 requiredVars ⊆ spec.vars
-    const envRequired = Array.isArray(
-      (env as { requiredVars?: unknown }).requiredVars,
-    )
-      ? ((env as { requiredVars: unknown[] }).requiredVars
-          .filter((item) => isRecord(item) && typeof item.name === "string")
-          .map((item) => (item as { name: string }).name))
+    const envRequired = Array.isArray(env.requiredVars)
+      ? env.requiredVars.flatMap((item) =>
+          isRecord(item) && typeof item.name === "string" ? [item.name] : [],
+        )
       : [];
     const overflow = checkRequiredVars(
       Array.from(new Set([...packageRequired, ...envRequired])),

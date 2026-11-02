@@ -155,6 +155,60 @@ describe("planImport — 登录策略包", () => {
     });
   });
 
+  it("带路径作用域与入口地址的包：key = origin + matchPath，字段原样落地", () => {
+    const plan = planImport(
+      strategyPackage({
+        environments: [
+          {
+            name: "管理端",
+            url: "https://dev.example.com",
+            matchPath: "/management",
+            entryUrl: "https://dev.example.com/management/#/login",
+            spec: spec(),
+            requiredVars: [],
+          },
+        ],
+      }),
+      EMPTY_CONFIG,
+    );
+    expect(plan.issues).toEqual([]);
+    expect(plan.envs[0]).toMatchObject({
+      url: "https://dev.example.com/management",
+      conflict: false,
+    });
+    expect(plan.envs[0].domain).toMatchObject({
+      matchPath: "/management",
+      entryUrl: "https://dev.example.com/management/#/login",
+    });
+  });
+
+  it("已存在同 (origin, matchPath) 环境 → 冲突默认不勾选", () => {
+    const plan = planImport(
+      strategyPackage({
+        environments: [
+          {
+            name: "管理端",
+            url: "https://dev.example.com",
+            matchPath: "/management",
+            spec: spec(),
+            requiredVars: [],
+          },
+        ],
+      }),
+      {
+        accounts: [],
+        domains: {
+          "https://dev.example.com/management": domain({
+            name: "已有",
+            matchPath: "/management",
+          }),
+        },
+      },
+    );
+    expect(plan.envs[0].conflict).toBe(true);
+    expect(plan.envs[0].checked).toBe(false);
+  });
+
   it("字面 JSON 对象的 cookie value：结构花括号自动转义后通过校验并落地（原 user 1.json）", () => {
     const pkg = strategyPackage({
       environments: [

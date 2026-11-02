@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
  */
 
 import {
+  accountBoundToEnvironment,
   assertEnvironmentLoginSupported,
   buildAccountPanel,
   environmentLoginSupport,
@@ -25,7 +26,7 @@ import {
   ROLE_NAMES,
 } from '../entrypoints/tools/account-switch/account-view';
 import { ACCOUNT_COLORS, ACCOUNT_FALLBACK_COLOR, accountColorIndex } from '../entrypoints/tools/account-switch/account-palette';
-import type { Account } from '../entrypoints/tools/account-switch/types';
+import type { Account, DomainConfig } from '../entrypoints/tools/account-switch/types';
 import * as accountView from '../entrypoints/tools/account-switch/account-view';
 
 function acc(partial: Partial<Account> & { id: string }): Account {
@@ -113,6 +114,35 @@ describe('filterAccounts — 三段过滤', () => {
 
   it('输入非数组时返回空数组（脏配置防御）', () => {
     expect(filterAccounts(null as unknown as Account[], { query: 'x' })).toEqual([]);
+  });
+
+  it('路径作用域：具体绑定不跨路径，通配符绑定全家族可见', () => {
+    const scopedDomains: Record<string, DomainConfig> = {
+      'https://*.example.com': { name: '家族', tags: [] },
+      'https://app.example.com': { name: '整站', tags: [] },
+      'https://app.example.com/management': {
+        name: '管理端',
+        tags: [],
+        matchPath: '/management',
+      },
+      'https://app.example.com/ebidding': {
+        name: '招采端',
+        tags: [],
+        matchPath: '/ebidding',
+      },
+    };
+    const scoped = [
+      acc({ id: 'wild', domains: ['https://*.example.com'] }),
+      acc({ id: 'mgmt', domains: ['https://app.example.com/management'] }),
+      acc({ id: 'bid', domains: ['https://app.example.com/ebidding'] }),
+      acc({ id: 'origin', domains: ['https://app.example.com'] }),
+    ];
+    const management = filterAccounts(scoped, {
+      origin: 'https://app.example.com/management/dashboard',
+      domains: scopedDomains,
+    });
+    // 整站绑定覆盖所有路径，具体路径绑定只在本路径可见
+    expect(management.map((a) => a.id)).toEqual(['wild', 'mgmt', 'origin']);
   });
 });
 
@@ -240,7 +270,96 @@ describe('roleColor / roleColorStyle — 预设走 pin 表，自定义按名哈�
   });
 });
 
+describe('accountBoundToEnvironment — 绑定语义', () => {
+  const domains: Record<string, DomainConfig> = {
+    'https://*.example.com': { name: '家族', tags: [] },
+    'https://app.example.com': { name: '应用', tags: [] },
+    'https://app.example.com/management': {
+      name: '管理端',
+      tags: [],
+      matchPath: '/management',
+    },
+    'https://app.example.com/ebidding': {
+      name: '招采端',
+      tags: [],
+      matchPath: '/ebidding',
+    },
+  };
+
+  it('精确环境 key → true', () => {
+    expect(
+      accountBoundToEnvironment(
+        'https://app.example.com/management',
+        'https://app.example.com/management',
+        domains,
+      ),
+    ).toBe(true);
+  });
+
+  it('通配符绑定可以在任意具体子环境（含路径子环境）使用', () => {
+    expect(
+      accountBoundToEnvironment(
+        'https://*.example.com',
+        'https://app.example.com/management',
+        domains,
+      ),
+    ).toBe(true);
+  });
+
+  it('具体路径绑定不跨路径泄漏', () => {
+    expect(
+      accountBoundToEnvironment(
+        'https://app.example.com/ebidding',
+        'https://app.example.com/management',
+        domains,
+      ),
+    ).toBe(false);
+  });
+
+  it('整站绑定覆盖具体路径环境（与面板可见性同规则）', () => {
+    expect(
+      accountBoundToEnvironment(
+        'https://app.example.com',
+        'https://app.example.com/management',
+        domains,
+      ),
+    ).toBe(true);
+  });
+
+  it('脏 key（环境不存在）回退 origin 匹配', () => {
+    expect(
+      accountBoundToEnvironment('https://app.example.com/legacy', 'https://app.example.com', domains),
+    ).toBe(true);
+  });
+});
+
 describe('buildAccountPanel — Content Script 公共 DTO', () => {
+  it('同一 origin 按页面路径投影当前环境与账号', () => {
+    const panel = buildAccountPanel({
+      accounts: [
+        acc({ id: 'mgmt', domains: ['https://app.example.com/management'] }),
+        acc({ id: 'bid', domains: ['https://app.example.com/ebidding'] }),
+        acc({ id: 'family', domains: ['https://*.example.com'] }),
+      ],
+      domains: {
+        'https://app.example.com/management': {
+          name: '管理端',
+          tags: [],
+          matchPath: '/management',
+        },
+        'https://app.example.com/ebidding': {
+          name: '招采端',
+          tags: [],
+          matchPath: '/ebidding',
+        },
+      },
+    }, 'https://app.example.com/ebidding/#/list');
+    expect(panel.matchedEnvKey).toBe('https://app.example.com/ebidding');
+    expect(panel.origin).toBe('https://app.example.com');
+    expect(panel.accounts.map((a) => a.id)).toEqual(['bid', 'family']);
+    expect(panel.domains['https://app.example.com/ebidding'].matchPath).toBe('/ebidding');
+  });
+
   it('只公开当前环境账号和布尔密码提示，不泄露秘密、变量或策略库', () => {
     const build = (accountView as unknown as {
       buildAccountPanel?: (

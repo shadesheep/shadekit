@@ -57,11 +57,21 @@
 
 ### 4.1 三个对象
 
-- **环境** `DomainConfig`：以 origin 为 key，保存名称、tags、调试跳转、默认密码、环境变量覆盖和策略绑定。环境是「策略 + 凭据」的绑定点。
+- **环境** `DomainConfig`：以 `origin + 可选路径作用域` 为 key，保存名称、tags、调试跳转、默认密码、环境变量覆盖和策略绑定。环境是「策略 + 凭据」的绑定点。
 - **凭据** `Account`：用户名、明文密码、角色、环境绑定；账号备份和全部工具设置可包含它们，但只能用于本人迁移/同步。
 - **登录策略** `LoginSpec`：描述如何登录，可作为 `dt-login-config/v1` 策略包分享；账号绑定、真实凭据、secret 变量和 `script` 不得进入策略包。
 
 默认产品路径是 1 环境 1 账号；多对多绑定仍支持。密码回退顺序由账号视图模型统一处理，不要在 UI/background 各写一份。
+
+**路径作用域不变量**：所有环境匹配（面板、切换/试跑、快捷登录、环境角标）只走
+`utils/env.ts` 的 `matchEnvironment` / `pickEnvironment`，不要按 `origin` 另写一套。
+环境身份是 `normalizeDomain(url) + normalizeMatchPath(matchPath)`；`matchPath` 按
+路径段边界前缀匹配（`/management` 不命中 `/management2`）。优先级为具体 origin >
+通配符、路径更长者优先、同分按插入顺序。存量 key 带路径但没有 `matchPath` 时仍
+匹配整个 origin。`entryUrl` 只用于从扩展页打开环境，必须是具体地址、不含 `*`
+且落在该环境作用域内。账号绑定到不带 `matchPath` 的整站环境或通配符环境时，可在其
+覆盖的任意具体路径子环境可见并复用该子环境的声明；具体路径绑定不得跨路径泄漏——
+面板、切换与试跑共用同一条规则。
 
 ### 4.2 策略库：引用 + 镜像
 

@@ -123,6 +123,18 @@ export interface DomainConfig {
    * 导入的具名策略（如 custom-login）用自己的 `spec.template` 作显示名。
    */
   loginMethod?: string;
+  /**
+   * 路径作用域：只匹配 pathname 落在该前缀下的页面。缺省 = 整个 origin。
+   * 同一 origin 下的多个子系统（如 `/management` 与 `/ebidding`）各自持有
+   * 独立的登录声明时使用；匹配按路径段边界，`/management` 不会命中
+   * `/management2`。环境 key 会带上该路径以保证唯一。
+   */
+  matchPath?: string;
+  /**
+   * 规范入口地址（含路径/hash）。环境 key 是通配符或不含入口路径时，
+   * 从 Popup/快捷登录打开环境优先使用它；缺省回退 key（仅当 key 具体可导航）。
+   */
+  entryUrl?: string;
   debugRedirect?: string; // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
   debugRedirectEnabled?: boolean; // 「登录后打开复现页面」开关默认值
   defaultPassword?: string; // 旧版快捷登录默认密码；迁移后由 defaultCredentialRef 取代

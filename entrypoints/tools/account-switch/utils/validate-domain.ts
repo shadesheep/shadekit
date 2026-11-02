@@ -1,13 +1,14 @@
 import type { DomainConfig } from '../types';
-import { normalizeDomain } from './env';
+import { environmentKeyFor, matchEnvironment, normalizeDomain, normalizeMatchPath } from './env';
 
 /**
- * 环境域名 URL 校验
+ * 环境域名 / 路径作用域 / 入口地址校验
  *
  * 在 DomainsPanel 新增/编辑环境时行内校验：
  * 1. 必须是合法的 http/https URL，或无协议的通配符写法（matchDomain 支持，
  *    见 utils/env.ts 的 normalizeDomain，如 *.example.com）；
- * 2. 同环境配置内不允许重复域名（domains 以 URL 为 key，重复会静默覆盖）。
+ * 2. 同环境配置内不允许重复的 `(origin, matchPath)`；
+ * 3. 入口地址必须是具体地址（无 `*`），且落在该环境作用域内。
  */
 
 const FORMAT_ERROR = 'URL 格式不正确，例: http://localhost:8888';
@@ -40,7 +41,40 @@ export function validateDomainUrl(raw: string): string | null {
 }
 
 /**
- * 重复检测：按归一化后的环境 key 比对（环境身份是 origin，路径/hash 不参与）。
+ * 校验路径作用域格式：空值合法（匹配整个 origin）；否则必须以 `/` 开头，
+ * 且不含 query / hash / 空白。匹配语义见 `matchPathScope`。
+ */
+export function validateMatchPath(raw: string): string | null {
+  const path = raw.trim();
+  if (!path) return null;
+  if (!path.startsWith('/')) return '路径作用域需以 / 开头，例: /management';
+  if (path.startsWith('//')) return '路径作用域不能以 // 开头';
+  if (/[?#\s]/.test(path)) return '路径作用域不能包含查询、hash 或空白';
+  return null;
+}
+
+/** 校验入口地址：空值合法；必须是具体 http/https 地址并落在环境作用域内。 */
+export function validateEntryUrl(
+  key: string,
+  matchPath: string,
+  entryUrl: string,
+): string | null {
+  const raw = entryUrl.trim();
+  if (!raw) return null;
+  if (!key.trim()) return '请先填写域名 / URL';
+  const formatError = validateDomainUrl(raw);
+  if (formatError) return formatError;
+  if (/[a-z][a-z0-9+.-]*:\/\/[^/?#]*\*/i.test(raw) || /%2a/i.test(raw)) {
+    return '入口地址必须指向具体主机，不能包含通配符 *';
+  }
+  if (!matchEnvironment(key, { matchPath: normalizeMatchPath(matchPath) }, raw)) {
+    return '入口地址必须落在该环境的路径作用域内';
+  }
+  return null;
+}
+
+/**
+ * 重复检测：`(origin, 路径作用域)` 都相同才算重复。
  * 编辑场景传入 editingUrl（编辑前的 key）以排除自身。
  *
  * 只比原始字符串会漏掉「同一 host 的两种写法」（如存量 key 带 #/login、
@@ -49,11 +83,18 @@ export function validateDomainUrl(raw: string): string | null {
 export function isDuplicateDomain(
   domains: Record<string, DomainConfig>,
   url: string,
+  matchPath: string,
   editingUrl: string | null,
 ): boolean {
-  const key = normalizeDomain(url);
-  if (!key) return false;
+  const origin = normalizeDomain(url);
+  if (!origin) return false;
+  const path = normalizeMatchPath(matchPath);
+  const key = environmentKeyFor(origin, path);
   return Object.keys(domains).some(
-    (existing) => existing !== editingUrl && normalizeDomain(existing) === key,
+    (existing) =>
+      existing !== editingUrl &&
+      (existing.trim() === key ||
+        (normalizeDomain(existing) === origin &&
+          normalizeMatchPath(domains[existing]?.matchPath) === path)),
   );
 }

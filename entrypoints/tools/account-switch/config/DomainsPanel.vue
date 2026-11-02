@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { validateDomainUrl, isDuplicateDomain } from '../utils/validate-domain';
-import { normalizeDomain } from '../utils/env';
+import { validateDomainUrl, isDuplicateDomain, validateEntryUrl, validateMatchPath } from '../utils/validate-domain';
+import { environmentKeyFor, normalizeDomain, normalizeMatchPath } from '../utils/env';
 import SpecEditor from './SpecEditor.vue';
 import LoginFormLocator from './LoginFormLocator.vue';
 import { autoLoginSpecShape, projectLegacyDefaultSpec } from '../spec/auto-login';
@@ -109,6 +109,8 @@ const showDomainForm = ref(false);
 // 环境表单
 const newDomain = ref({
   url: '',
+  matchPath: '',
+  entryUrl: '',
   name: '',
   tags: [] as string[],
   loginMethod: DEFAULT_LOGIN_METHOD,
@@ -208,11 +210,24 @@ const urlTouched = ref(false);
 const trimmedUrl = computed(() => newDomain.value.url.trim());
 
 /**
- * 环境 key 的规范形态：环境以 origin 为身份，路径/查询/hash 不参与识别
- * （见 utils/env.ts normalizeDomain）。用户贴登录页地址时保存的是 host:port，
- * 否则 key 带着 `#/login` 既不会匹配页面，挑出来的环境又反查不到自己。
+ * 环境 key 的规范形态：`origin + 路径作用域`（见 utils/env.ts）。用户贴登录页
+ * 地址时保存的是 host:port（+ matchPath）；路径/查询/hash 不再作为身份。
  */
-const canonicalUrl = computed(() => normalizeDomain(trimmedUrl.value));
+const canonicalUrl = computed(() =>
+  environmentKeyFor(trimmedUrl.value, newDomain.value.matchPath),
+);
+
+/** 路径作用域格式校验；null 表示合法（或未到提示时机） */
+const matchPathError = computed(() => validateMatchPath(newDomain.value.matchPath));
+
+/** 入口地址校验；空值合法 */
+const entryUrlError = computed(() =>
+  validateEntryUrl(
+    canonicalUrl.value,
+    newDomain.value.matchPath,
+    newDomain.value.entryUrl,
+  ),
+);
 
 /** 格式 + 重复校验的错误文案；null 表示合法（或未到提示时机） */
 const urlError = computed(() => {
@@ -220,8 +235,15 @@ const urlError = computed(() => {
   if (!url) return urlTouched.value ? '请输入域名 URL' : null;
   const formatError = validateDomainUrl(url);
   if (formatError) return formatError;
-  if (isDuplicateDomain(props.domains, canonicalUrl.value, editingDomain.value)) {
-    return '该域名已存在，请勿重复添加';
+  if (
+    isDuplicateDomain(
+      props.domains,
+      url,
+      newDomain.value.matchPath,
+      editingDomain.value,
+    )
+  ) {
+    return '该域名与路径作用域的组合已存在，请勿重复添加';
   }
   return null;
 });
@@ -443,6 +465,8 @@ function resetDomainForm() {
   domainSupport.value = null;
   newDomain.value = {
     url: '',
+    matchPath: '',
+    entryUrl: '',
     name: '',
     tags: [],
     loginMethod: DEFAULT_LOGIN_METHOD,
@@ -471,6 +495,8 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
   nameTouched.value = true;
   tagsTouched.value = true;
   newDomain.value.url = url;
+  newDomain.value.matchPath = d.matchPath || '';
+  newDomain.value.entryUrl = d.entryUrl || '';
   newDomain.value.name = d.name;
   newDomain.value.tags = [...d.tags];
   newDomain.value.loginMethod = d.loginMethod || DEFAULT_LOGIN_METHOD;
@@ -613,7 +639,7 @@ function buildDomainEntry(): DomainConfig {
   // 它正是登录页，写进声明的 goto 才能被识别、切号真正打开。
   // 只对标准表单登录声明补 goto：高级/API 声明有自己的导航语义，不改写。
   const loginPage = !boundEntry && Array.isArray(spec.ops) && autoLoginSpecShape(spec)
-    ? loginPageFromUrl(trimmedUrl.value, canonicalUrl.value)
+    ? loginPageFromUrl(trimmedUrl.value, normalizeDomain(trimmedUrl.value))
     : null;
   const executableSpec = loginPage && !spec.ops.some((op) => op.op === 'goto' && op.url.trim())
     ? { ...spec, ops: setSpecLoginUrl(spec.ops, loginPage) }
@@ -621,6 +647,8 @@ function buildDomainEntry(): DomainConfig {
   const vars = Object.fromEntries(
     Object.entries(newDomain.value.vars).filter(([, value]) => value !== ''),
   );
+  const matchPath = normalizeMatchPath(newDomain.value.matchPath);
+  const entryUrl = newDomain.value.entryUrl.trim();
   // 声明与库一致 → 镜像，不落 strategyConfig.spec；不一致 → 脱镜，落私有声明
   const diverged = boundEntry
     ? JSON.stringify(executableSpec) !== JSON.stringify(boundEntry.spec)
@@ -628,6 +656,8 @@ function buildDomainEntry(): DomainConfig {
   return {
     name: newDomain.value.name,
     tags,
+    ...(matchPath ? { matchPath } : {}),
+    ...(entryUrl ? { entryUrl } : {}),
     loginMethod: boundEntry
       ? strategyTitle(boundEntry.spec, boundEntry.name)
       : newDomain.value.loginMethod || DEFAULT_LOGIN_METHOD,
@@ -716,7 +746,8 @@ function cloneDomain(url: string) {
   showAdvanced.value = false;
   resetDomainForm();
   fillFormFromDomain(url, d);
-  newDomain.value.url = url + '-clone';
+  // 路径作用域环境的 key 已带路径：克隆基于 origin，path 只保留在 matchPath。
+  newDomain.value.url = (d.matchPath ? normalizeDomain(url) : url) + '-clone';
   newDomain.value.name = d.name + ' (副本)';
   domainFormHighlight.value = true;
   setTimeout(() => {
@@ -726,7 +757,7 @@ function cloneDomain(url: string) {
 
 async function addDomain() {
   urlTouched.value = true;
-  if (savingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
+  if (savingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value || matchPathError.value || entryUrlError.value) return;
   if (!validateRecipeForSave()) return;
   savingDomain.value = true;
   try {
@@ -777,7 +808,7 @@ function editDomain(url: string) {
 
 function saveEditDomain() {
   urlTouched.value = true;
-  if (!editingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value) return;
+  if (!editingDomain.value || !trimmedUrl.value || !newDomain.value.name || urlError.value || matchPathError.value || entryUrlError.value) return;
   if (!validateRecipeForSave()) return;
   const entry = buildDomainEntry();
   const previousKey = editingDomain.value;
@@ -1031,14 +1062,19 @@ async function importConfigPackage() {
     // 用户环境），提升为「环境地址」必填，落地时用它作环境 key——
     // 否则环境 key 是 `{origin}` 永远匹配不上真实页面。
     const needsEnvUrl = rawUrl === '{origin}';
-    // 包里的地址可能是完整登录页地址（含路径/hash）：环境 key 只取 origin。
-    const url = needsEnvUrl ? '' : normalizeDomain(rawUrl);
-    const taken = url !== '' && isDuplicateDomain(props.domains, url, null);
+    // 计划里的 url/conflict 已按 origin + matchPath 归一化，直接复用，
+    // 避免向导与 planImport 各算一套 key/冲突语义。
+    const matchPath = planned?.domain.matchPath ?? '';
+    const entryUrl = planned?.domain.entryUrl ?? '';
+    const url = needsEnvUrl ? '' : (planned?.url ?? '');
+    const taken = planned?.conflict ?? false;
     const vars: Record<string, string> = {};
     for (const rv of env.requiredVars) vars[rv.name] = '';
     return {
       url,
       name: env.name,
+      matchPath,
+      entryUrl,
       spec: planned?.domain.strategyConfig?.spec ?? env.spec,
       declaredSpecVersion: pkg.specVersion,
       support: planned?.support ?? inspectLoginSpecSupport(env.spec, pkg.specVersion),
@@ -1058,6 +1094,10 @@ async function importConfigPackage() {
 interface ImportPlanItem {
   url: string;
   name: string;
+  /** 包内可选路径作用域（规范化） */
+  matchPath: string;
+  /** 包内可选入口地址（trim 后） */
+  entryUrl: string;
   spec: SpecDocument;
   declaredSpecVersion?: number;
   support: SpecSupportReport;
@@ -1124,8 +1164,9 @@ function confirmImport() {
     if (!importCreatesEnv.value || !item.checked) continue;
     // 字面 `{origin}` 占位：用用户填的真实地址作环境 key，
     // 否则 key 是 `{origin}` 永远匹配不上真实页面
-    const url = normalizeDomain(
+    const url = environmentKeyFor(
       item.needsEnvUrl ? item.envUrlValue.trim() : item.url,
+      item.matchPath,
     );
     if (url === '') {
       toast(`环境「${item.name}」缺少地址，未创建（策略已入库）`, 'error');
@@ -1139,6 +1180,8 @@ function confirmImport() {
     nextDomains[url] = {
       name: item.name,
       tags: [],
+      ...(item.matchPath ? { matchPath: item.matchPath } : {}),
+      ...(item.entryUrl ? { entryUrl: item.entryUrl } : {}),
       // 绑定入库的策略：只写 strategyId，不存声明（ADR-0019 修订：镜像）
       loginMethod: title,
       strategyId: upsert.id,
@@ -1214,7 +1257,7 @@ async function runTrialLogin(): Promise<void> {
   try {
     const res = await sendBgMessage('TRIAL_LOGIN', {
       spec: newDomain.value.spec,
-      origin: canonicalUrl.value,
+      origin: formOrigin.value ?? '',
       username: trialCred.value.username,
       password: trialCred.value.password,
       writeSession: trialWriteSession.value,
@@ -1260,6 +1303,37 @@ async function runTrialLogin(): Promise<void> {
         </p>
         <p v-else class="field-hint">环境按「协议://主机:端口」识别；填完整登录页地址时，路径与 #hash 会写入登录声明的「登录页」，不会被丢弃。</p>
       </div>
+      <div class="form-row">
+        <label for="domain-match-path">路径作用域</label>
+        <input
+          id="domain-match-path"
+          class="dt-input"
+          :class="{ 'input-invalid': !!matchPathError }"
+          v-model="newDomain.matchPath"
+          placeholder="/management"
+        />
+        <p v-if="matchPathError" class="field-error">
+          <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ matchPathError }}
+        </p>
+        <p v-else class="field-hint">留空匹配整个站点；按路径段边界匹配，/management 不会命中 /management2。</p>
+      </div>
+      <div class="form-row">
+        <label for="domain-entry-url">入口地址 <span class="optional">（选填）</span></label>
+        <input
+          id="domain-entry-url"
+          class="dt-input"
+          :class="{ 'input-invalid': !!entryUrlError }"
+          v-model="newDomain.entryUrl"
+          placeholder="http://host:8880/management/#/login"
+        />
+        <p v-if="entryUrlError" class="field-error">
+          <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ entryUrlError }}
+        </p>
+        <p v-else class="field-hint">仅从 Popup / 快捷登录打开该环境时使用；必须落在上面的路径作用域内。</p>
+      </div>
+      <p v-if="trimmedUrl" class="field-hint">
+        环境 key：<strong>{{ canonicalUrl }}</strong>
+      </p>
       <div class="form-row">
         <label for="domain-name">名称</label>
         <input id="domain-name" class="dt-input" v-model="newDomain.name" @input="nameTouched = true" placeholder="留空按 URL 的 host 自动填充" />
