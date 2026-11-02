@@ -146,9 +146,9 @@ describe('validateMatchPath', () => {
   });
 
   it('含 query / hash / 空白 / // 报错', () => {
-    expect(validateMatchPath('/management?x=1')).toContain('查询');
-    expect(validateMatchPath('/management#/login')).toContain('查询');
-    expect(validateMatchPath('/man agement')).toContain('空白');
+    expect(validateMatchPath('/management?x=1')).toContain('?');
+    expect(validateMatchPath('/management#/login')).toContain('#');
+    expect(validateMatchPath('/man agement')).toContain('空格');
     expect(validateMatchPath('//management')).toContain('//');
   });
 });
@@ -167,10 +167,10 @@ describe('validateEntryUrl', () => {
     ).toBeNull();
   });
 
-  it('不在路径作用域内报错', () => {
+  it('不在页面路径内报错', () => {
     expect(
       validateEntryUrl(key, matchPath, 'https://app.example.com/ebidding'),
-    ).toContain('路径作用域');
+    ).toContain('页面路径');
   });
 
   it('通配符主机被拒', () => {

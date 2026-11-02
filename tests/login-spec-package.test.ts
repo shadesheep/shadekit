@@ -219,7 +219,7 @@ describe("buildConfigPackage — 导出", () => {
 
     const outside = structuredClone(base);
     outside.environments[0].entryUrl = "https://example.com/ebidding";
-    expect(validateConfigPackage(outside)[0]?.message).toContain("路径作用域");
+    expect(validateConfigPackage(outside)[0]?.message).toContain("页面路径");
   });
 
   it("无 spec → 拒绝", () => {

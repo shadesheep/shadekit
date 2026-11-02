@@ -47,9 +47,9 @@ export function validateDomainUrl(raw: string): string | null {
 export function validateMatchPath(raw: string): string | null {
   const path = raw.trim();
   if (!path) return null;
-  if (!path.startsWith('/')) return '路径作用域需以 / 开头，例: /management';
-  if (path.startsWith('//')) return '路径作用域不能以 // 开头';
-  if (/[?#\s]/.test(path)) return '路径作用域不能包含查询、hash 或空白';
+  if (!path.startsWith('/')) return '页面路径要以 / 开头，例: /management';
+  if (path.startsWith('//')) return '页面路径不能以 // 开头';
+  if (/[?#\s]/.test(path)) return '页面路径里不能有 ?、# 或空格';
   return null;
 }
 
@@ -65,10 +65,10 @@ export function validateEntryUrl(
   const formatError = validateDomainUrl(raw);
   if (formatError) return formatError;
   if (/[a-z][a-z0-9+.-]*:\/\/[^/?#]*\*/i.test(raw) || /%2a/i.test(raw)) {
-    return '入口地址必须指向具体主机，不能包含通配符 *';
+    return '入口地址要填具体地址，不能用 * 通配符';
   }
   if (!matchEnvironment(key, { matchPath: normalizeMatchPath(matchPath) }, raw)) {
-    return '入口地址必须落在该环境的路径作用域内';
+    return '入口地址不在这个环境的页面路径内';
   }
   return null;
 }

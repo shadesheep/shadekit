@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { validateDomainUrl, isDuplicateDomain, validateEntryUrl, validateMatchPath } from '../utils/validate-domain';
-import { environmentKeyFor, normalizeDomain, normalizeMatchPath } from '../utils/env';
+import { environmentKeyFor, normalizeDomain, normalizeMatchPath, toPageLocation } from '../utils/env';
 import SpecEditor from './SpecEditor.vue';
 import LoginFormLocator from './LoginFormLocator.vue';
 import { autoLoginSpecShape, projectLegacyDefaultSpec } from '../spec/auto-login';
@@ -217,7 +217,26 @@ const canonicalUrl = computed(() =>
   environmentKeyFor(trimmedUrl.value, newDomain.value.matchPath),
 );
 
-/** 路径作用域格式校验；null 表示合法（或未到提示时机） */
+/**
+ * 用户粘贴地址里带的路径（如 `/management`）。它只是登录页位置，不会被自动
+ * 当成页面路径：`/login`、SPA 的 `#/login` 这类路径并不是子系统的范围。
+ */
+const pastedUrlPath = computed(() =>
+  normalizeMatchPath(toPageLocation(trimmedUrl.value)?.pathname),
+);
+
+/** 地址带路径、但页面路径还没填时，提示用户可以一键限定到该路径 */
+const suggestedMatchPath = computed(() =>
+  newDomain.value.matchPath.trim() ? '' : pastedUrlPath.value,
+);
+
+/** 把粘贴地址里的路径填进页面路径（用户主动限定作用域；留空仍是整个网站） */
+function applySuggestedMatchPath(): void {
+  if (!suggestedMatchPath.value) return;
+  newDomain.value.matchPath = suggestedMatchPath.value;
+}
+
+/** 页面路径格式校验；null 表示合法（或未到提示时机） */
 const matchPathError = computed(() => validateMatchPath(newDomain.value.matchPath));
 
 /** 入口地址校验；空值合法 */
@@ -243,7 +262,7 @@ const urlError = computed(() => {
       editingDomain.value,
     )
   ) {
-    return '该域名与路径作用域的组合已存在，请勿重复添加';
+    return '这个网址和页面路径的组合已经添加过了，不用重复添加';
   }
   return null;
 });
@@ -1301,10 +1320,10 @@ async function runTrialLogin(): Promise<void> {
         <p v-if="showUrlError" class="field-error">
           <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ urlError }}
         </p>
-        <p v-else class="field-hint">环境按「协议://主机:端口」识别；填完整登录页地址时，路径与 #hash 会写入登录声明的「登录页」，不会被丢弃。</p>
+        <p v-else class="field-hint">填网站地址即可，例如 http://localhost:8888。直接粘贴完整登录页地址也没问题，后面的路径会保留为登录页。</p>
       </div>
       <div class="form-row">
-        <label for="domain-match-path">路径作用域</label>
+        <label for="domain-match-path">页面路径 <span class="optional">（选填）</span></label>
         <input
           id="domain-match-path"
           class="dt-input"
@@ -1315,10 +1334,16 @@ async function runTrialLogin(): Promise<void> {
         <p v-if="matchPathError" class="field-error">
           <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ matchPathError }}
         </p>
-        <p v-else class="field-hint">留空匹配整个站点；按路径段边界匹配，/management 不会命中 /management2。</p>
+        <p v-else class="field-hint">
+          留空表示整个网站。用于区分子系统。
+          <template v-if="suggestedMatchPath">
+            你填的地址里带着 <strong>{{ suggestedMatchPath }}</strong>，只想让这个路径下的页面用这个环境就
+            <button type="button" class="hint-fill" @click="applySuggestedMatchPath">填入</button>。
+          </template>
+        </p>
       </div>
       <div class="form-row">
-        <label for="domain-entry-url">入口地址 <span class="optional">（选填）</span></label>
+        <label for="domain-entry-url">登录页面 <span class="optional">（选填）</span></label>
         <input
           id="domain-entry-url"
           class="dt-input"
@@ -1329,14 +1354,13 @@ async function runTrialLogin(): Promise<void> {
         <p v-if="entryUrlError" class="field-error">
           <span class="i-lucide-alert-circle w-3.5 h-3.5" />{{ entryUrlError }}
         </p>
-        <p v-else class="field-hint">仅从 Popup / 快捷登录打开该环境时使用；必须落在上面的路径作用域内。</p>
       </div>
       <p v-if="trimmedUrl" class="field-hint">
-        环境 key：<strong>{{ canonicalUrl }}</strong>
+        环境地址：<strong>{{ canonicalUrl }}</strong>
       </p>
       <div class="form-row">
         <label for="domain-name">名称</label>
-        <input id="domain-name" class="dt-input" v-model="newDomain.name" @input="nameTouched = true" placeholder="留空按 URL 的 host 自动填充" />
+        <input id="domain-name" class="dt-input" v-model="newDomain.name" @input="nameTouched = true" placeholder="留空时用网站地址自动填写" />
       </div>
       <div class="form-row">
         <label id="domain-tags-label">标签</label>
@@ -2095,6 +2119,21 @@ async function runTrialLogin(): Promise<void> {
 
 [data-dt-dark] .strategy-unbind {
   color: #f87171;
+}
+
+/* 「填入」动作：提示句里的内联可选操作，不抢主按钮注意力 */
+.hint-fill {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: #3b82f6;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+[data-dt-dark] .hint-fill {
+  color: #60a5fa;
 }
 
 /* 环境级变量覆盖（ADR-0019） */

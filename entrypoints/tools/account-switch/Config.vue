@@ -1310,7 +1310,7 @@ function saveGlobalDefaultPassword() {
           >
             <span class="rail-dot" :style="{ backgroundColor: envDotColor(g.env) }" />
             <span class="rail-label">{{ g.env.name }}</span>
-            <span v-if="g.env.matchPath" class="env-tag rail-env-tag" title="路径作用域">{{ g.env.matchPath }}</span>
+            <span v-if="g.env.matchPath" class="env-tag rail-env-tag" title="页面路径">{{ g.env.matchPath }}</span>
             <span
               v-if="!envSupportOf(g.key).supported"
               class="rail-support-warn"
@@ -1344,7 +1344,7 @@ function saveGlobalDefaultPassword() {
           <div v-if="envFilter !== 'all' && envFilter !== 'unbound' && envGroups.groups.find((g) => g.key === envFilter)" class="env-context-bar">
             <span class="rail-dot" :style="{ backgroundColor: envDotColor(envOfKey(envFilter)) }" />
             <span class="item-name">{{ envOfKey(envFilter).name }}</span>
-            <span v-if="envOfKey(envFilter).matchPath" class="env-tag" title="路径作用域">{{ envOfKey(envFilter).matchPath }}</span>
+            <span v-if="envOfKey(envFilter).matchPath" class="env-tag" title="页面路径">{{ envOfKey(envFilter).matchPath }}</span>
             <span class="item-sub">{{ envFilter }}</span>
             <span class="context-spacer" />
             <DtButton v-if="!envBadge.enabled" size="sm" variant="secondary" title="前往设置启用环境角标" @click="activeTab = 'settings'">启用角标</DtButton>

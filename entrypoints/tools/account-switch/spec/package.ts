@@ -348,7 +348,7 @@ export function validateConfigPackage(raw: unknown): PackageIssue[] {
       if (typeof rawMatchPath !== "string") {
         issues.push({
           code: "CONFIG_INVALID",
-          message: `第 ${envIndex + 1} 个环境的路径作用域必须是字符串`,
+          message: `第 ${envIndex + 1} 个环境的页面路径必须是一段文字`,
         });
       } else {
         const pathError = validateMatchPath(rawMatchPath);

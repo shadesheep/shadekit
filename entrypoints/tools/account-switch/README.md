@@ -32,7 +32,7 @@ interface Account {
 interface DomainConfig {
   name: string;               // 环境名称: "本地开发", "测试环境" 等
   tags: string[];             // 环境标签: local/dev/test/staging/prod
-  matchPath?: string;         // 路径作用域（如 /management）；缺省 = 整个 origin
+  matchPath?: string;         // 路径作用域（界面显示为「页面路径」，如 /management）；缺省 = 整个 origin
   entryUrl?: string;          // 仅从扩展页打开环境时使用的具体入口地址
   loginMethod?: string;       // 仅作 SpecTemplate.id：新建环境时的默认声明 + 日志名称
   debugRedirect?: string;     // 本地 Bug 复现页面：替换测试环境域名和端口，保留完整后续 URL
@@ -55,7 +55,7 @@ interface DomainConfig {
 
 环境以 `domains` 的 key（`origin + 可选路径作用域`）为身份。新建/编辑时粘贴
 完整登录页地址（如 `http://host:8880/management/#/login`）时，key 收敛为
-`http://host:8880`；若另填「路径作用域」`/management`，key 是
+`http://host:8880`；若另填「页面路径」（`matchPath`）`/management`，key 是
 `http://host:8880/management`。路径、查询与 hash 仍写进登录声明的 `goto`
 （`{origin}/management/#/login`），因此识别表单、切换账号仍会打开真正的登录页。
 存量 key 即使带路径/hash 且没有 `matchPath`，匹配与执行也会按 origin 归一处理。
@@ -72,6 +72,10 @@ interface DomainConfig {
 | 优先级 | 具体 origin > 通配符；同 origin 下 `matchPath` 越长越具体；仍相同按配置插入顺序 |
 | 存量 key | key 带路径但无 `matchPath` → 仍匹配整个 origin（不改变旧行为） |
 | 账号绑定 | 整站（无 `matchPath`）或通配符绑定是家族兜底：在任意具体子环境（含路径子环境）可见，并使用该子环境的声明；具体路径绑定不跨路径泄漏 |
+
+粘贴登录页地址时，路径只写进登录声明的 `goto`，不会自动成为 `matchPath`：
+`/login`、SPA 的 `#/login` 是登录页位置，不是子系统范围。表单检测到粘贴地址带
+路径时会提示，可一键把该路径填入「页面路径」（手动确认后才改变匹配范围）。
 
 `entryUrl` 只服务「从 Popup / 快捷登录打开环境」：必须是具体 http/https 地址，
 host 不能含 `*`，且必须落在该环境的 `(origin, matchPath)` 内。页面内切换仍由

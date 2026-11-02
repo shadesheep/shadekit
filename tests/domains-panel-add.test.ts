@@ -111,4 +111,61 @@ describe("DomainsPanel 添加环境", () => {
       entryUrl: "http://jfv2.dev.ebidding.net.cn:8880/management/#/login",
     });
   });
+
+  it("粘贴带路径的地址：可一键填成页面路径，环境 key 随之带上该路径", async () => {
+    const saves: EnvSavePayload[] = [];
+    const panel = ref<{ openCreate: () => void } | null>(null);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    app = createApp({
+      render: () =>
+        h(DomainsPanel, {
+          ref: panel,
+          domains: {},
+          strategies: {},
+          accounts: [],
+          onSaveWithAccounts: (payload: EnvSavePayload) => saves.push(payload),
+        }),
+    });
+    app.mount(root);
+    panel.value?.openCreate();
+    await nextTick();
+
+    const fillButton = () =>
+      Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
+        (button) => button.textContent?.trim() === "填入",
+      );
+    // 没填地址时无可填入的路径
+    expect(fillButton()).toBeUndefined();
+
+    const input = root.querySelector<HTMLInputElement>("#domain-url")!;
+    input.value = "http://jfv2.dev.ebidding.net.cn:8880/management/#/login";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+
+    // 路径只作提示，不自动改写：留空仍是整个网站
+    const pathInput = root.querySelector<HTMLInputElement>("#domain-match-path")!;
+    expect(pathInput.value).toBe("");
+    expect(fillButton()).toBeTruthy();
+
+    fillButton()!.click();
+    await nextTick();
+    expect(pathInput.value).toBe("/management");
+    expect(fillButton()).toBeUndefined();
+
+    const submit = Array.from(root.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "添加环境",
+    );
+    submit!.click();
+    await vi.waitFor(() => expect(saves).toHaveLength(1));
+
+    expect(saves[0]!.envKey).toBe(
+      "http://jfv2.dev.ebidding.net.cn:8880/management",
+    );
+    const spec = saves[0]!.domains[saves[0]!.envKey]!.strategyConfig
+      ?.spec as LoginSpec;
+    expect(spec.ops.find((op) => op.op === "goto")).toMatchObject({
+      url: "{origin}/management/#/login",
+    });
+  });
 });
