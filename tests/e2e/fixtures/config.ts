@@ -15,6 +15,8 @@ import { validateLoginSpec } from '../../../entrypoints/tools/account-switch/spe
 import { findExtensionWorker } from './extension';
 
 export const FIXTURE_PASSWORD = 'fixture-pass';
+export const FIXTURE_ADMIN_NAME = '林屿 · 交付管理员';
+export const FIXTURE_TESTER_NAME = '周然 · 验收测试';
 
 export type LoginSelectors = {
   username: LoginFormTarget;
@@ -37,6 +39,24 @@ export type MakeAccountSwitchConfigOptions = {
   tags?: string[];
   matchPath?: string;
   entryUrl?: string;
+  tabOrder?: ('users' | 'quicklogin')[];
+  envBadge?: Partial<EnvBadgeConfig>;
+};
+
+export type FixtureEnvironment = {
+  /** 环境 key：具体 origin，或带路径作用域/通配符的完整 key。 */
+  key: string;
+  name: string;
+  tags?: string[];
+  matchPath?: string;
+  entryUrl?: string;
+  spec: LoginSpec;
+};
+
+export type MakeMultiEnvironmentConfigOptions = {
+  /** 按数组顺序写入 domains；匹配优先级由产品规则决定，不由插入顺序决定。 */
+  environments: FixtureEnvironment[];
+  accounts: Account[];
   tabOrder?: ('users' | 'quicklogin')[];
   envBadge?: Partial<EnvBadgeConfig>;
 };
@@ -99,23 +119,46 @@ export function pageLoginSpec(
     version: LOGIN_SPEC_VERSION,
     template: 'generic',
     ops,
-    success: [
-      {
-        page: {
-          type: 'any',
-          of: [{ type: 'formGone' }, { type: 'urlChanged' }],
-        },
-      },
-    ],
+    // 等目标文档真正出现（登录表单消失），而不是等 `window.location.assign`
+    // 一改地址就成立的 urlChanged：后者可能在表单重定向提交前触发，使
+    // `refreshAfterSwitch` 的尾部 reload 竞态地重载旧登录页。
+    success: [{ page: { type: 'formGone' } }],
     auth: { mode: 'page' },
   });
+}
+
+function cloneAccounts(accounts: Account[]): Account[] {
+  return accounts.map((account) => ({
+    ...account,
+    roles: [...account.roles],
+    domains: [...account.domains],
+  }));
+}
+
+function toDomainConfig(environment: {
+  name: string;
+  tags?: string[];
+  matchPath?: string;
+  entryUrl?: string;
+  spec: LoginSpec;
+}): DomainConfig {
+  // 调用方可能传入手写声明；种子工厂统一在落盘前走校验器。
+  assertValidLoginSpec(environment.spec);
+  return {
+    name: environment.name,
+    tags: [...(environment.tags ?? [])],
+    loginMethod: 'generic',
+    ...(environment.matchPath ? { matchPath: environment.matchPath } : {}),
+    ...(environment.entryUrl ? { entryUrl: environment.entryUrl } : {}),
+    strategyConfig: { spec: structuredClone(environment.spec) },
+  };
 }
 
 export function fixtureAccounts(domains: string[]): Account[] {
   return [
     {
       id: 'fixture-admin',
-      name: '林屿 · 交付管理员',
+      name: FIXTURE_ADMIN_NAME,
       username: 'admin@fixture.test',
       password: FIXTURE_PASSWORD,
       roles: ['管理员'],
@@ -123,7 +166,7 @@ export function fixtureAccounts(domains: string[]): Account[] {
     },
     {
       id: 'fixture-tester',
-      name: '周然 · 验收测试',
+      name: FIXTURE_TESTER_NAME,
       username: 'tester@fixture.test',
       password: FIXTURE_PASSWORD,
       roles: ['普通用户'],
@@ -135,28 +178,46 @@ export function fixtureAccounts(domains: string[]): Account[] {
 export function makeAccountSwitchConfig(
   options: MakeAccountSwitchConfigOptions,
 ): AccountSwitchConfig {
-  // 调用方可能传入手写声明；种子工厂统一在落盘前走校验器。
-  assertValidLoginSpec(options.spec);
-  const environment: DomainConfig = {
+  const environment = toDomainConfig({
     name: options.name ?? '测试环境',
-    tags: [...(options.tags ?? [])],
-    loginMethod: 'generic',
-    ...(options.matchPath ? { matchPath: options.matchPath } : {}),
-    ...(options.entryUrl ? { entryUrl: options.entryUrl } : {}),
-    strategyConfig: { spec: structuredClone(options.spec) },
-  };
+    tags: options.tags,
+    matchPath: options.matchPath,
+    entryUrl: options.entryUrl,
+    spec: options.spec,
+  });
 
   return {
-    accounts: options.accounts.map((account) => ({
-      ...account,
-      roles: [...account.roles],
-      domains: [...account.domains],
-    })),
+    accounts: cloneAccounts(options.accounts),
     domains: { [options.originPattern]: environment },
     envBadge: {
       enabled: true,
       position: 'bottom-right',
       whitelist: [options.originPattern],
+      ...(options.envBadge ?? {}),
+    },
+    tabOrder: [...(options.tabOrder ?? ['users', 'quicklogin'])],
+  };
+}
+
+/**
+ * 多环境配置：用于同 origin 路径子环境、通配符 + 精确 origin 等需要多个
+ * domains key 的 E2E 场景。环境名与登录声明各自独立，账号按 domains 绑定过滤。
+ */
+export function makeMultiEnvironmentConfig(
+  options: MakeMultiEnvironmentConfigOptions,
+): AccountSwitchConfig {
+  const domains: Record<string, DomainConfig> = {};
+  for (const environment of options.environments) {
+    domains[environment.key] = toDomainConfig(environment);
+  }
+
+  return {
+    accounts: cloneAccounts(options.accounts),
+    domains,
+    envBadge: {
+      enabled: true,
+      position: 'bottom-right',
+      whitelist: Object.keys(domains),
       ...(options.envBadge ?? {}),
     },
     tabOrder: [...(options.tabOrder ?? ['users', 'quicklogin'])],

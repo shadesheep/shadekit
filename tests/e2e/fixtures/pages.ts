@@ -1,4 +1,5 @@
 import type { Page, Worker } from '@playwright/test';
+import { pickEnvironment } from '../../../entrypoints/tools/account-switch/utils/env';
 import { expect } from './extension';
 import type { FixtureServer } from './server';
 
@@ -10,6 +11,10 @@ const TOAST_ITEM = `${TOAST_ROOT} .toast-item`;
 const ENV_BADGE_HOST = '#shadekit-env-badge-host';
 const SESSION_COOKIE = 'shadekit_session';
 const LOGIN_TIMEOUT = 30_000;
+/** 尾随刷新稳定窗口：连续这么久文档身份不变，才认为整页刷新已提交。 */
+const DOCUMENT_SETTLE_MS = 300;
+const DOCUMENT_POLL_MS = 50;
+const DOCUMENT_SETTLE_TIMEOUT = 5_000;
 
 /** 认证相关存储键：切换/清理用例的观察面，未登录时不得出现。 */
 const AUTH_STORAGE_KEYS = [
@@ -31,7 +36,7 @@ export type AccountIdentity = {
 type PanelProjection = {
   matchedEnvKey: string;
   accounts: Array<{ id: string; name: string }>;
-  domains: Record<string, { name: string }>;
+  domains: Record<string, { name: string; matchPath?: string }>;
 };
 
 function accountCard(page: Page, accountName: string) {
@@ -133,12 +138,13 @@ export async function openSwitcher(
   await expect(panel.locator(PANEL_ROOT)).toBeVisible();
 
   const projection = await readPanelProjection(worker, tabId);
-  const matchedName = projection.matchedEnvKey
-    ? projection.domains[projection.matchedEnvKey]?.name
-    : undefined;
-  if (matchedName) {
+  // 用页面实时 URL + 配置摘要推导当前应命中的环境名。不能用
+  // `projection.matchedEnvKey`：程序化注入消息的 sender.url 可能仍停留在
+  // pushState 之前的地址，而面板自身读的是实时 location。
+  const expectedName = pickEnvironment(page.url(), projection.domains)?.env.name;
+  if (expectedName) {
     // 命中环境时，环境名只在 `loadConfig` 完成后才出现，可作为加载完成信号。
-    await expect(panel.locator('.as-tab-env-label')).toHaveText(matchedName);
+    await expect(panel.locator('.as-tab-env-label')).toHaveText(expectedName);
     await expect(panel.locator('.as-tab-btn').first()).toBeVisible();
   } else {
     await expect(panel.locator('.as-tab-env-label')).toHaveText('未配置环境');
@@ -170,6 +176,50 @@ export async function expectAccountSuccess(page: Page): Promise<void> {
   });
 }
 
+let navigationProbe = 0;
+
+async function documentIdentity(page: Page): Promise<string> {
+  try {
+    return await page.evaluate(
+      () => `${performance.timeOrigin}|${location.href}`,
+    );
+  } catch {
+    // 导航中执行上下文会被销毁：每次轮询都视为尚未稳定的新身份。
+    navigationProbe += 1;
+    return `navigating:${navigationProbe}`;
+  }
+}
+
+/**
+ * 等待登录成功后的尾随整页刷新提交完成。
+ *
+ * `refreshAfterSwitch` 在成功响应后对执行页发起同 URL reload；面板可能先
+ * 于导航提交关闭。此时若立刻在旧文档上开面板，随后的导航会把面板连同正在
+ * 点击的账号卡一起销毁。这里轮询文档身份，直到连续一个稳定窗口不再变化；
+ * 超时仍未稳定说明登录尾部没有落到可交互页面，直接失败而不是静默放行。
+ */
+async function waitForDocumentSettled(page: Page): Promise<void> {
+  const deadline = Date.now() + DOCUMENT_SETTLE_TIMEOUT;
+  let previous = await documentIdentity(page);
+  let stableSince = Date.now();
+  while (Date.now() < deadline) {
+    if (page.isClosed()) {
+      throw new Error('page closed while waiting for navigation to settle');
+    }
+    await page.waitForTimeout(DOCUMENT_POLL_MS);
+    const current = await documentIdentity(page);
+    if (current !== previous) {
+      previous = current;
+      stableSince = Date.now();
+      continue;
+    }
+    if (Date.now() - stableSince >= DOCUMENT_SETTLE_MS) return;
+  }
+  throw new Error(
+    `page did not settle after login within ${DOCUMENT_SETTLE_TIMEOUT}ms`,
+  );
+}
+
 /** 等待失败 Toast，并确认面板仍在、账号卡恢复可点击。 */
 export async function expectAccountFailure(
   page: Page,
@@ -196,6 +246,7 @@ export async function loginViaPanel(
   await page.waitForURL((url) => url.pathname === path, {
     timeout: LOGIN_TIMEOUT,
   });
+  await waitForDocumentSettled(page);
 }
 
 /**
@@ -209,6 +260,7 @@ export async function switchTo(
 ): Promise<void> {
   await runAccount(page, worker, accountName);
   await expectAccountSuccess(page);
+  await waitForDocumentSettled(page);
 }
 
 /** 读取 Shadow Host 的文本内容（面板与角标都在 open shadow root 内）。 */
@@ -220,6 +272,51 @@ export async function shadowText(
     const host = document.querySelector(target);
     return host?.shadowRoot?.textContent ?? '';
   }, selector);
+}
+
+/** 等待环境角标出现并显示指定环境名；SPA 路由变更后的角标更新也走这里。 */
+export async function expectEnvBadge(page: Page, name: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((selector) => {
+          const host = document.querySelector(selector);
+          return host?.shadowRoot?.querySelector('.label')?.textContent ?? '';
+        }, ENV_BADGE_HOST),
+      { timeout: LOGIN_TIMEOUT },
+    )
+    .toBe(name);
+}
+
+/**
+ * 关闭已打开的面板。面板只在挂载时读取一次页面 URL，SPA 路由变化后必须
+ * 关闭再打开，才能观察当前路由对应的环境与账号过滤。
+ */
+export async function closeSwitcher(page: Page): Promise<void> {
+  const panel = page.locator(PANEL_HOST);
+  if ((await panel.count()) === 0) return;
+  await page.bringToFront();
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+}
+
+/**
+ * 命中环境的证据：背景投影的环境名与面板渲染一致，且账号卡正好是当前
+ * 环境作用域内的账号（未绑定账号不得混入）。
+ */
+export async function expectMatchedEnvironment(
+  page: Page,
+  worker: Worker,
+  envName: string,
+  accountNames: string[],
+): Promise<void> {
+  await openSwitcher(page, worker);
+  const panel = page.locator(PANEL_HOST);
+  await expect(panel.locator('.as-tab-env-label')).toHaveText(envName);
+  await expect(panel.locator(ACCOUNT_CARD)).toHaveCount(accountNames.length);
+  for (const name of accountNames) {
+    await expect(accountCard(page, name)).toHaveCount(1);
+  }
 }
 
 export class LoginPage {
