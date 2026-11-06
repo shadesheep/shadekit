@@ -29,6 +29,8 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "test": "vitest run && node --test tests/*.test.mjs docs/readme-demo/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "test:demo": "node --test docs/readme-demo/server.test.mjs && vitest run tests/readme-demo-config.test.ts",
     "release": "node scripts/release.mjs",
     "chrome:login": "node scripts/chrome-login.mjs"
@@ -51,6 +53,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@iconify-json/lucide": "^1.2.147",
+    "@playwright/test": "1.64.1",
     "@types/chrome": "^0.3.6",
     "@types/fs-extra": "^11.0.4",
     "@types/js-beautify": "^1.14.3",

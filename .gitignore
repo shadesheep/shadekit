@@ -5,6 +5,11 @@ node_modules/
 .output/
 .dist/
 
+# Playwright
+playwright-report/
+test-results/
+coverage/
+
 # WXT
 .wxt/
 
