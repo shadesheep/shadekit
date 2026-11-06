@@ -29,6 +29,8 @@ export type PageLoginSpecOptions = {
   selectors?: Partial<LoginSelectors>;
   /** true 时填充前清空输入框（运行期默认也是 true，显式声明便于用例自证） */
   clearFirst?: boolean;
+  /** 在密码填充之后、提交点击之前插入的算子（select / checkbox 等）。 */
+  preSubmitOps?: SpecOp[];
 };
 
 export type MakeAccountSwitchConfigOptions = {
@@ -111,6 +113,7 @@ export function pageLoginSpec(
       value: '{password}',
       clearFirst,
     },
+    ...(options.preSubmitOps ?? []),
     { op: 'click', target: selectors.submit, onNotFound: 'fail' },
     { op: 'auth.write' },
   ];

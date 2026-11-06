@@ -30,6 +30,12 @@
       const form = document.getElementById('login-form');
       const error = document.getElementById('login-error');
 
+      // FORM-06：页面自带旧值，验证引擎的 clearFirst 后提交的是新值。
+      if (new URLSearchParams(window.location.search).get('prefill') === '1') {
+        document.getElementById('username').value = 'stale@fixture.test';
+        document.getElementById('password').value = 'stale-pass';
+      }
+
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         error.hidden = true;

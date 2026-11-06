@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture Options Login</title>
+  </head>
+  <body>
+    <main>
+      <h1>Sign in (options)</h1>
+      <form id="login-form" method="post" action="/api/session/login">
+        <p>
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" />
+        </p>
+        <p>
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+          />
+        </p>
+        <p>
+          <label for="tenant">Tenant</label>
+          <select id="tenant" name="tenant">
+            <option value="blue">Blue</option>
+            <option value="green">Green</option>
+          </select>
+        </p>
+        <p>
+          <label for="remember">Remember me</label>
+          <input id="remember" name="remember" type="checkbox" />
+        </p>
+        <button id="submit-btn" type="submit">Sign in</button>
+        <p id="login-error" role="alert" hidden></p>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById('login-form');
+      const error = document.getElementById('login-error');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        error.textContent = '';
+
+        try {
+          const response = await fetch('/api/session/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              username: document.getElementById('username').value,
+              password: document.getElementById('password').value,
+              tenant: document.getElementById('tenant').value,
+              remember: document.getElementById('remember').checked,
+            }),
+          });
+          if (response.ok) {
+            window.location.assign('/console');
+            return;
+          }
+          error.textContent = 'Invalid username or password';
+        } catch {
+          error.textContent = 'Login request failed';
+        }
+        error.hidden = false;
+      });
+    </script>
+  </body>
+</html>

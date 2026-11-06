@@ -254,10 +254,14 @@ function renderConsole(template: string, identity: FixtureIdentity): string {
 export async function createFixtureServer(
   options: CreateFixtureServerOptions = {},
 ): Promise<FixtureServer> {
-  const [loginPage, consoleTemplate] = await Promise.all([
-    readFile(join(PUBLIC_DIR, 'login.html'), 'utf8'),
-    readFile(join(PUBLIC_DIR, 'console.html'), 'utf8'),
-  ]);
+  const [loginPage, consoleTemplate, textareaLoginPage, submitInputPage, optionsPage] =
+    await Promise.all([
+      readFile(join(PUBLIC_DIR, 'login.html'), 'utf8'),
+      readFile(join(PUBLIC_DIR, 'console.html'), 'utf8'),
+      readFile(join(PUBLIC_DIR, 'textarea-login.html'), 'utf8'),
+      readFile(join(PUBLIC_DIR, 'login-submit-input.html'), 'utf8'),
+      readFile(join(PUBLIC_DIR, 'login-options.html'), 'utf8'),
+    ]);
 
   const sessions = new Map<string, FixtureIdentity>();
   const requests: FixtureRequest[] = [];
@@ -395,6 +399,21 @@ export async function createFixtureServer(
 
     if (method === 'GET' && pathname === '/login') {
       sendHtml(response, 200, loginPage);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/textarea-login') {
+      sendHtml(response, 200, textareaLoginPage);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/login-submit-input') {
+      sendHtml(response, 200, submitInputPage);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/login-options') {
+      sendHtml(response, 200, optionsPage);
       return;
     }
 
