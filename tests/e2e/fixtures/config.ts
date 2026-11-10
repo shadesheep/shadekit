@@ -207,6 +207,35 @@ export function apiStorageLoginSpec(): LoginSpec {
   });
 }
 
+/**
+ * 请求改写矩阵：用 `apply.set` 改 header / query，再 POST JSON 到回显端点。
+ * 成功信号读取回显里的真实 method，避免只看 HTTP 200。
+ */
+export function httpEchoSpec(): LoginSpec {
+  return assertValidLoginSpec({
+    version: LOGIN_SPEC_VERSION,
+    template: 'api',
+    ops: [
+      { op: 'goto', url: '{origin}/login', waitForLoad: true },
+      { op: 'apply.set', target: 'header', key: 'x-extra', value: 'yes' },
+      { op: 'apply.set', target: 'query', key: 'q', value: '1' },
+      {
+        op: 'http.execute',
+        url: '{origin}/api/echo',
+        method: 'POST',
+        body: { json: { source: 'e2e' } },
+        parse: 'json',
+        expectStatus: '2xx',
+        as: 'echo',
+      },
+      { op: 'auth.write' },
+    ],
+    success: [{ response: { from: 'echo', path: 'method', equals: 'POST' } }],
+    auth: { mode: 'engine', cookiesWrite: [] },
+    limits: { requestMs: 15000, stepMs: 5000, settleMs: 10000 },
+  });
+}
+
 function cloneAccounts(accounts: Account[]): Account[] {
   return accounts.map((account) => ({
     ...account,

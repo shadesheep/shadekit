@@ -537,6 +537,100 @@ export async function createFixtureServer(
       return;
     }
 
+
+    if (pathname === '/api/echo') {
+      const parsedUrl = new URL(rawPath, 'http://fixture.invalid');
+      sendJson(response, 200, {
+        method,
+        host,
+        path: pathname,
+        query: Object.fromEntries(parsedUrl.searchParams),
+        headers: request.headers,
+        body: parseRequestBody(body, request.headers['content-type']),
+      });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/csrf') {
+      sendJson(response, 200, { csrfToken: 'csrf-fixture' });
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/secure-login') {
+      if (request.headers['x-csrf-token'] !== 'csrf-fixture') {
+        sendJson(response, 403, { error: 'invalid_csrf' });
+        return;
+      }
+      const token = randomBytes(32).toString('hex');
+      const payload = parseRequestBody(body, request.headers['content-type']);
+      const username =
+        typeof payload.username === 'string'
+          ? payload.username
+          : 'admin@fixture.test';
+      const account = FIXTURE_ACCOUNTS[username];
+      if (account) {
+        sessions.set(token, {
+          username,
+          email: username,
+          name: account.name,
+          title: account.title,
+          scope: account.scope,
+          role: account.role,
+        });
+      }
+      sendJson(response, 200, { sessionToken: token });
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/slow') {
+      const parsedUrl = new URL(rawPath, 'http://fixture.invalid');
+      const ms = Math.min(
+        Number(parsedUrl.searchParams.get('ms') ?? '300') || 300,
+        5_000,
+      );
+      setTimeout(() => {
+        if (!response.destroyed && !response.writableEnded) {
+          sendJson(response, 200, { delayedMs: ms });
+        }
+      }, ms);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/malformed') {
+      send(response, 200, '{bad', 'text/html; charset=utf-8');
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/set-cookie') {
+      sendJson(
+        response,
+        200,
+        { ok: true },
+        {
+          'set-cookie':
+            'attr_cookie=fixture-cookie; HttpOnly; SameSite=Strict; Path=/',
+        },
+      );
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/business-error') {
+      sendJson(response, 200, {
+        success: false,
+        code: 'LOGIN_REJECTED',
+      });
+      return;
+    }
+
+    if (
+      (method === 'GET' || method === 'POST') &&
+      pathname === '/api/token-empty'
+    ) {
+      sendJson(response, 200, {
+        data: { sessionToken: '', accessToken: '', refreshToken: '' },
+      });
+      return;
+    }
     const statusMatch = /^\/api\/status\/(\d{3})$/.exec(pathname);
     if (method === 'GET' && statusMatch) {
       const status = Number(statusMatch[1]);
