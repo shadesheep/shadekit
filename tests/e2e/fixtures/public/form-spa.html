@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture SPA Login</title>
+  </head>
+  <body>
+    <main id="view">
+      <h1>Sign in (SPA)</h1>
+      <form id="login-form">
+        <p>
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" />
+        </p>
+        <p>
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+          />
+        </p>
+        <button id="submit-btn" type="submit">Sign in</button>
+        <p id="login-error" role="alert" hidden></p>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById('login-form');
+      const error = document.getElementById('login-error');
+      const view = document.getElementById('view');
+
+      function showIdentity(identity) {
+        document.body.dataset.currentRole = identity.role;
+        if (!document.getElementById('identity-name')) {
+          const summary = document.createElement('dl');
+          summary.innerHTML = `
+            <dt>Name</dt><dd id="identity-name"></dd>
+            <dt>Email</dt><dd id="identity-email"></dd>
+            <dt>Title</dt><dd id="identity-title"></dd>
+            <dt>Scope</dt><dd id="identity-scope"></dd>
+          `;
+          view.append(summary);
+        }
+        document.getElementById('identity-name').textContent = identity.name;
+        document.getElementById('identity-email').textContent = identity.email;
+        document.getElementById('identity-title').textContent = identity.title;
+        document.getElementById('identity-scope').textContent = identity.scope;
+      }
+
+      async function hydrate() {
+        const response = await fetch('/api/session/me', {
+          credentials: 'same-origin',
+        });
+        if (!response.ok) return;
+        form.remove();
+        showIdentity(await response.json());
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        error.textContent = '';
+
+        try {
+          const response = await fetch('/api/session/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              username: document.getElementById('username').value,
+              password: document.getElementById('password').value,
+            }),
+          });
+          if (!response.ok) {
+            error.textContent = 'Invalid username or password';
+            error.hidden = false;
+            return;
+          }
+
+          const identity = await response.json();
+          history.pushState({}, '', '/form-spa/dashboard');
+          form.remove();
+          showIdentity(identity);
+        } catch {
+          error.textContent = 'Login request failed';
+          error.hidden = false;
+        }
+      });
+
+      // 登录成功后引擎会对同一文档发起尾随刷新：刷新落在
+      // /form-spa/dashboard 时用既有 HttpOnly 会话重建身份视图。
+      hydrate().catch(() => undefined);
+    </script>
+  </body>
+</html>

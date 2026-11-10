@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture Shadow Login</title>
+    <style>
+      #login-host {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sign in (open shadow root)</h1>
+      <div id="login-host"></div>
+    </main>
+    <script>
+      const host = document.getElementById('login-host');
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML = `
+        <style>
+          input, button { display: block; margin: 8px 0; }
+        </style>
+        <form id="login-form">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" />
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" />
+          <button id="submit-btn" type="submit">Sign in</button>
+          <p id="login-error" role="alert" hidden></p>
+        </form>
+      `;
+
+      const form = root.querySelector('#login-form');
+      const error = root.querySelector('#login-error');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        error.hidden = true;
+        error.textContent = '';
+        try {
+          const response = await fetch('/api/session/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              username: root.querySelector('#username').value,
+              password: root.querySelector('#password').value,
+            }),
+          });
+          if (response.ok) {
+            window.location.assign('/console');
+            return;
+          }
+          error.textContent = 'Invalid username or password';
+        } catch {
+          error.textContent = 'Login request failed';
+        }
+        error.hidden = false;
+      });
+    </script>
+  </body>
+</html>

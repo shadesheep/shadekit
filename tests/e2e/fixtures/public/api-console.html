@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture API Console</title>
+  </head>
+  <body data-current-role="anonymous">
+    <header>
+      <strong id="current-account">Not signed in</strong>
+    </header>
+    <main>
+      <dl>
+        <dt>Name</dt>
+        <dd id="identity-name">Not signed in</dd>
+        <dt>Email</dt>
+        <dd id="identity-email"></dd>
+        <dt>Title</dt>
+        <dd id="identity-title"></dd>
+        <dt>Scope</dt>
+        <dd id="identity-scope"></dd>
+        <dt>Role</dt>
+        <dd id="identity-role">anonymous</dd>
+      </dl>
+    </main>
+    <script>
+      // 会话来自 localStorage 中的 access token；服务端按 token → identity
+      // 映射校验，未知/空 token 只能得到 401，绝不按字符串形状渲染身份。
+      async function bootstrap() {
+        const token = localStorage.getItem('access_token');
+        if (!token) return;
+        const response = await fetch('/api/session/me', {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) return;
+        const identity = await response.json();
+        document.body.dataset.currentRole = identity.role;
+        document.getElementById('current-account').textContent = identity.name;
+        document.getElementById('identity-name').textContent = identity.name;
+        document.getElementById('identity-email').textContent = identity.email;
+        document.getElementById('identity-title').textContent = identity.title;
+        document.getElementById('identity-scope').textContent = identity.scope;
+        document.getElementById('identity-role').textContent = identity.role;
+      }
+
+      bootstrap().catch(() => undefined);
+    </script>
+  </body>
+</html>

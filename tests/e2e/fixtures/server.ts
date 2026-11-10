@@ -254,14 +254,29 @@ function renderConsole(template: string, identity: FixtureIdentity): string {
 export async function createFixtureServer(
   options: CreateFixtureServerOptions = {},
 ): Promise<FixtureServer> {
-  const [loginPage, consoleTemplate, textareaLoginPage, submitInputPage, optionsPage] =
-    await Promise.all([
-      readFile(join(PUBLIC_DIR, 'login.html'), 'utf8'),
-      readFile(join(PUBLIC_DIR, 'console.html'), 'utf8'),
-      readFile(join(PUBLIC_DIR, 'textarea-login.html'), 'utf8'),
-      readFile(join(PUBLIC_DIR, 'login-submit-input.html'), 'utf8'),
-      readFile(join(PUBLIC_DIR, 'login-options.html'), 'utf8'),
-    ]);
+  const [
+    loginPage,
+    consoleTemplate,
+    textareaLoginPage,
+    submitInputPage,
+    optionsPage,
+    iframePage,
+    shadowPage,
+    spaPage,
+    multistepPage,
+    apiConsolePage,
+  ] = await Promise.all([
+    readFile(join(PUBLIC_DIR, 'login.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'console.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'textarea-login.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'login-submit-input.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'login-options.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'form-iframe.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'form-shadow.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'form-spa.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'form-multistep.html'), 'utf8'),
+    readFile(join(PUBLIC_DIR, 'api-console.html'), 'utf8'),
+  ]);
 
   const sessions = new Map<string, FixtureIdentity>();
   const requests: FixtureRequest[] = [];
@@ -293,6 +308,24 @@ export async function createFixtureServer(
     headers: IncomingHttpHeaders,
   ): FixtureIdentity | undefined => {
     const token = sessionToken(headers);
+    return token ? sessions.get(token) : undefined;
+  };
+
+  const bearerToken = (headers: IncomingHttpHeaders): string | undefined => {
+    const match = /^Bearer\s+(.+)$/i.exec(headers.authorization ?? '');
+    return match?.[1];
+  };
+
+  /**
+   * 会话身份：HttpOnly Cookie 与服务端签发的 bearer token 都映射到同一
+   * `sessions` 表；未知或空 token 一律视为未登录。
+   */
+  const requestIdentity = (
+    headers: IncomingHttpHeaders,
+  ): FixtureIdentity | undefined => {
+    const cookieIdentity = currentIdentity(headers);
+    if (cookieIdentity) return cookieIdentity;
+    const token = bearerToken(headers);
     return token ? sessions.get(token) : undefined;
   };
 
@@ -333,6 +366,46 @@ export async function createFixtureServer(
     sendJson(response, 200, { ok: true }, { 'set-cookie': sessionCookie() });
   };
 
+  /** `POST /api/token`：一次 API 登录返回三种可写入会话的 token。 */
+  const handleTokenIssue = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: string,
+  ) => {
+    const payload = parseRequestBody(body, request.headers['content-type']);
+    const username =
+      typeof payload.username === 'string' ? payload.username : '';
+    const password =
+      typeof payload.password === 'string' ? payload.password : '';
+    const account = FIXTURE_ACCOUNTS[username];
+    if (!account || account.password !== password) {
+      sendJson(response, 401, { error: 'invalid_credentials' });
+      return;
+    }
+    const identity: FixtureIdentity = {
+      username,
+      email: username,
+      name: account.name,
+      title: account.title,
+      scope: account.scope,
+      role: account.role,
+    };
+    const sessionTokenValue = randomBytes(32).toString('hex');
+    const accessToken = randomBytes(32).toString('hex');
+    const refreshToken = randomBytes(32).toString('hex');
+    // Cookie 会话与 bearer 身份共用一张 token → identity 表；未知 token
+    // 不会因为“看起来像 token”而被当作已登录。
+    sessions.set(sessionTokenValue, identity);
+    sessions.set(accessToken, identity);
+    sendJson(response, 200, {
+      data: {
+        sessionToken: sessionTokenValue,
+        accessToken,
+        refreshToken,
+      },
+    });
+  };
+
   const server = createServer(async (request, response) => {
     const hostHeader = request.headers.host;
     const host = hostHeader ? normalizeHostname(hostHeader) : '';
@@ -371,7 +444,7 @@ export async function createFixtureServer(
     await waitOnBarrier(pathname);
     if (closed || response.destroyed || response.writableEnded) return;
 
-    const identity = currentIdentity(request.headers);
+    const identity = requestIdentity(request.headers);
 
     if (method === 'GET' && pathname === '/health') {
       sendJson(response, 200, { ok: true });
@@ -380,6 +453,21 @@ export async function createFixtureServer(
 
     if (method === 'POST' && pathname === '/api/session/login') {
       handleLogin(request, response, body);
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/token') {
+      handleTokenIssue(request, response, body);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api/token-text') {
+      send(response, 200, 'fixture-token', 'text/plain; charset=utf-8');
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/api-console') {
+      sendHtml(response, 200, apiConsolePage);
       return;
     }
 
@@ -417,12 +505,42 @@ export async function createFixtureServer(
       return;
     }
 
+    if (method === 'GET' && pathname === '/form-iframe') {
+      sendHtml(response, 200, iframePage);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/form-shadow') {
+      sendHtml(response, 200, shadowPage);
+      return;
+    }
+
+    if (
+      method === 'GET' &&
+      (pathname === '/form-spa' || pathname === '/form-spa/dashboard')
+    ) {
+      sendHtml(response, 200, spaPage);
+      return;
+    }
+
+    if (method === 'GET' && pathname === '/form-multistep') {
+      sendHtml(response, 200, multistepPage);
+      return;
+    }
+
     if (method === 'GET' && pathname === '/console') {
       if (!identity) {
         sendRedirect(response, '/login');
         return;
       }
       sendHtml(response, 200, renderConsole(consoleTemplate, identity));
+      return;
+    }
+
+    const statusMatch = /^\/api\/status\/(\d{3})$/.exec(pathname);
+    if (method === 'GET' && statusMatch) {
+      const status = Number(statusMatch[1]);
+      sendJson(response, status, { status });
       return;
     }
 

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fixture Multi-step Login</title>
+  </head>
+  <body>
+    <main>
+      <h1>Sign in (multi-step)</h1>
+      <form id="login-form">
+        <section id="step-username">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" />
+          <button id="next" type="button">Next</button>
+        </section>
+        <section id="step-password" hidden>
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+          />
+          <button id="submit-btn" type="submit">Sign in</button>
+        </section>
+        <p id="login-error" role="alert" hidden></p>
+      </form>
+    </main>
+    <script>
+      const next = document.getElementById('next');
+      const error = document.getElementById('login-error');
+      const usernameStep = document.getElementById('step-username');
+      const passwordStep = document.getElementById('step-password');
+
+      next.addEventListener('click', () => {
+        if (!document.getElementById('username').value) {
+          error.textContent = 'Username is required';
+          error.hidden = false;
+          return;
+        }
+        usernameStep.hidden = true;
+        passwordStep.hidden = false;
+        document.getElementById('password').focus();
+      });
+
+      document
+        .getElementById('login-form')
+        .addEventListener('submit', async (event) => {
+          event.preventDefault();
+          error.hidden = true;
+          error.textContent = '';
+          try {
+            const response = await fetch('/api/session/login', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+              }),
+            });
+            if (response.ok) {
+              window.location.assign('/console');
+              return;
+            }
+            error.textContent = 'Invalid username or password';
+          } catch {
+            error.textContent = 'Login request failed';
+          }
+          error.hidden = false;
+        });
+    </script>
+  </body>
+</html>

@@ -51,7 +51,13 @@
             }),
           });
           if (response.ok) {
-            window.location.assign('/console');
+            // FORM-07：iframe 内提交成功后由顶层窗口进入控制台，避免只把
+            // iframe 自身导航到 /console 而外层仍停留在登录壳页面。
+            const target =
+              window.top && window.top !== window.self
+                ? window.top.location
+                : window.location;
+            target.assign('/console');
             return;
           }
           error.textContent = 'Invalid username or password';

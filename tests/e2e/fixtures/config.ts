@@ -130,6 +130,83 @@ export function pageLoginSpec(
   });
 }
 
+/**
+ * API 登录（HttpOnly Cookie）：请求 `/api/token`，把响应里的 sessionToken
+ * 写成 Cookie，再导航到控制台。成功信号只认响应里的 sessionToken。
+ */
+export function apiCookieLoginSpec(): LoginSpec {
+  return assertValidLoginSpec({
+    version: LOGIN_SPEC_VERSION,
+    template: 'api',
+    ops: [
+      { op: 'clear.cookies', range: 'all' },
+      { op: 'goto', url: '{origin}/login', waitForLoad: true },
+      {
+        op: 'http.execute',
+        url: '{origin}/api/token',
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: { json: { username: '{username}', password: '{password}' } },
+        parse: 'json',
+        expectStatus: '2xx',
+        as: 'token',
+      },
+      { op: 'auth.write' },
+      { op: 'goto', url: '{origin}/console', waitForLoad: true },
+    ],
+    success: [{ token: { from: 'token', path: 'data.sessionToken' } }],
+    auth: {
+      mode: 'engine',
+      cookiesWrite: [
+        {
+          name: 'shadekit_session',
+          value: '$token.data.sessionToken',
+          httpOnly: true,
+          sameSite: 'lax',
+        },
+      ],
+    },
+    limits: { requestMs: 15000, stepMs: 5000, settleMs: 10000 },
+  });
+}
+
+/**
+ * API 登录（localStorage）：accessToken 写入 `access_token`，由
+ * `/api-console` 用 bearer 头向服务端换取身份。
+ */
+export function apiStorageLoginSpec(): LoginSpec {
+  return assertValidLoginSpec({
+    version: LOGIN_SPEC_VERSION,
+    template: 'api',
+    ops: [
+      { op: 'clear.cookies', range: 'all' },
+      { op: 'clear.storage', area: 'local', range: ['access_token'] },
+      { op: 'goto', url: '{origin}/login', waitForLoad: true },
+      {
+        op: 'http.execute',
+        url: '{origin}/api/token',
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: { json: { username: '{username}', password: '{password}' } },
+        parse: 'json',
+        expectStatus: '2xx',
+        as: 'token',
+      },
+      { op: 'auth.write' },
+      { op: 'goto', url: '{origin}/api-console', waitForLoad: true },
+    ],
+    success: [{ token: { from: 'token', path: 'data.accessToken' } }],
+    auth: {
+      mode: 'engine',
+      cookiesWrite: [],
+      localStorageWrite: [
+        { key: 'access_token', value: '$token.data.accessToken' },
+      ],
+    },
+    limits: { requestMs: 15000, stepMs: 5000, settleMs: 10000 },
+  });
+}
+
 function cloneAccounts(accounts: Account[]): Account[] {
   return accounts.map((account) => ({
     ...account,
