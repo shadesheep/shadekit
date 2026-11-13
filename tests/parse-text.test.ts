@@ -209,4 +209,14 @@ describe('parseLoginText — 边界与误判防护', () => {
     const result = parseLoginText('example.com', 'https://default.com');
     expect(result).toMatchObject({ hasUrl: false, url: 'https://default.com' });
   });
+
+  it('邮箱账号不把域名误判为 URL，仍使用默认域', () => {
+    const result = parseLoginText('tester@fixture.test', 'https://default.com');
+    expect(result).toMatchObject({
+      hasUrl: false,
+      url: 'https://default.com',
+      username: 'tester@fixture.test',
+      password: undefined,
+    });
+  });
 });

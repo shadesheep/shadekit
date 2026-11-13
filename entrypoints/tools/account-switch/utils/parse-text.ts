@@ -53,7 +53,9 @@ function tryExtractUrlFromEnd(text: string): { url: string; rest: string } | nul
   if (domain) {
     const url = domain[1];
     const rest = text.slice(0, text.length - url.length).trim();
-    if (rest) {
+    // `user@example.com` 是邮箱账号，不是「凭证 + 域名」：末尾域名的
+    // 前缀以 @ 结尾时保留整段作为凭证，交给后续解析。
+    if (rest && !rest.endsWith('@')) {
       return { url: `https://${url}`, rest };
     }
   }

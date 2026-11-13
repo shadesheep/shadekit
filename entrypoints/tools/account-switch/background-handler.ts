@@ -106,7 +106,7 @@ async function resolveSavedAccount(
 
   // 环境 key 可能带路径作用域或通配符：执行 origin 只取协议://host:port。
   let effectiveOrigin = normalizeDomain(environmentId);
-  if (sender.tab) {
+  if (sender.tab && !senderIsExtensionPage(sender)) {
     const tabUrl = sender.tab.url || sender.url || "";
     if (!tabUrl || !matchEnvironment(environmentId, environment, tabUrl)) {
       return { error: rejectedLogin("当前页面已离开账号绑定环境") };
@@ -189,6 +189,15 @@ async function getTabId(
 }
 
 /**
+ * options/popup 等扩展页发消息时 Chrome 同样会带 `sender.tab`，但其 URL 是
+ * `chrome-extension://`，不代表站点环境，不能参与环境 origin 匹配。
+ */
+function senderIsExtensionPage(sender: chrome.runtime.MessageSender): boolean {
+  const url = sender.tab?.url ?? sender.url ?? "";
+  return url.startsWith("chrome-extension://");
+}
+
+/**
  * 从 extension 页面（options/popup）发起登录时，找账号绑定环境的「可打开 URL」：
  * 1. 环境配置了 `entryUrl` 且是具体地址 → 直接打开（通配符环境靠它落地到真实入口）；
  * 2. 否则环境 key 本身是具体地址（非通配符）→ 用 key；
@@ -256,8 +265,8 @@ export async function handleSwitchAccount(
   }
   if ("error" in resolved) return resolved.error;
   const { account, password, environment } = resolved;
-  // options/popup 环境：sender.tab 缺省（非 content script 来源）
-  if (!sender.tab) {
+  // options/popup 环境：扩展页没有可登录的站点文档（sender.tab 指向扩展页自身）。
+  if (!sender.tab || senderIsExtensionPage(sender)) {
     const openableUrl = resolveOpenableUrl(environmentId, environment.entryUrl);
     if (openableUrl) {
       return handleQuickLoginInNewTab(
@@ -661,11 +670,15 @@ export async function handleQuickLogin(
 
   // 面板允许直接粘贴任意目标 URL。目标与当前页面不同源时，登录不能在本 tab
   // 执行：origin 防线会拒绝，且 cookie/localStorage 属于页面所在 origin，
-  // 继续执行只会把别的站点的会话写进当前页。与快捷键/右键菜单语义一致，
-  // 改为在目标 URL 的新标签页中登录。
+  // 继续执行只会把别的站点的会话写进当前页。debugRedirect 会把登录 origin
+  // 换成另一个站点，同样不能在当前 tab 上执行。这些情况统一改为在新 tab
+  // 中登录，让登录页与 origin 防线落在同一站点。
   const targetOrigin = normalizedOrigin(targetUrl);
   const currentOrigin = normalizedOrigin(sender.tab?.url || sender.url || "");
-  if (targetOrigin && currentOrigin && targetOrigin !== currentOrigin) {
+  if (
+    debugRedirect ||
+    (targetOrigin && currentOrigin && targetOrigin !== currentOrigin)
+  ) {
     return handleQuickLoginInNewTab(
       targetUrl,
       username,
