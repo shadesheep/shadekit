@@ -43,6 +43,9 @@ export type MakeAccountSwitchConfigOptions = {
   tags?: string[];
   matchPath?: string;
   entryUrl?: string;
+  defaultPassword?: string;
+  debugRedirect?: string;
+  debugRedirectEnabled?: boolean;
   tabOrder?: ('users' | 'quicklogin')[];
   envBadge?: Partial<EnvBadgeConfig>;
 };
@@ -54,6 +57,9 @@ export type FixtureEnvironment = {
   tags?: string[];
   matchPath?: string;
   entryUrl?: string;
+  defaultPassword?: string;
+  debugRedirect?: string;
+  debugRedirectEnabled?: boolean;
   spec: LoginSpec;
 };
 
@@ -304,6 +310,9 @@ function toDomainConfig(environment: {
   tags?: string[];
   matchPath?: string;
   entryUrl?: string;
+  defaultPassword?: string;
+  debugRedirect?: string;
+  debugRedirectEnabled?: boolean;
   spec: LoginSpec;
 }): DomainConfig {
   // 调用方可能传入手写声明；种子工厂统一在落盘前走校验器。
@@ -314,6 +323,15 @@ function toDomainConfig(environment: {
     loginMethod: 'generic',
     ...(environment.matchPath ? { matchPath: environment.matchPath } : {}),
     ...(environment.entryUrl ? { entryUrl: environment.entryUrl } : {}),
+    ...(environment.defaultPassword
+      ? { defaultPassword: environment.defaultPassword }
+      : {}),
+    ...(environment.debugRedirect
+      ? { debugRedirect: environment.debugRedirect }
+      : {}),
+    ...(environment.debugRedirectEnabled !== undefined
+      ? { debugRedirectEnabled: environment.debugRedirectEnabled }
+      : {}),
     strategyConfig: { spec: structuredClone(environment.spec) },
   };
 }
@@ -360,6 +378,47 @@ export function specWithFailure(
   return assertValidLoginSpec({ ...spec, ...overrides, failure });
 }
 
+/**
+ * 切换前清理认证态：只清声明列出的 Cookie 与 storage 键，
+ * 用于验证切换后旧账号会话被清除、无关存储保留。
+ */
+export function cleanupSpec(): LoginSpec {
+  return assertValidLoginSpec({
+    version: LOGIN_SPEC_VERSION,
+    template: 'generic',
+    ops: [
+      { op: 'clear.cookies', range: ['shadekit_session'] },
+      { op: 'goto', url: '{origin}/login', waitForLoad: true },
+      {
+        op: 'clear.storage',
+        area: 'local',
+        range: ['token', 'refreshToken', 'expireAt', 'userInfo'],
+      },
+      {
+        op: 'clear.storage',
+        area: 'session',
+        range: ['access_token'],
+      },
+      {
+        op: 'fill',
+        target: '#username',
+        value: '{username}',
+        clearFirst: true,
+      },
+      {
+        op: 'fill',
+        target: '#password',
+        value: '{password}',
+        clearFirst: true,
+      },
+      { op: 'click', target: '#submit-btn', onNotFound: 'fail' },
+      { op: 'auth.write' },
+    ],
+    success: [{ page: { type: 'formGone' } }],
+    auth: { mode: 'page' },
+  });
+}
+
 export function makeAccountSwitchConfig(
   options: MakeAccountSwitchConfigOptions,
 ): AccountSwitchConfig {
@@ -368,6 +427,9 @@ export function makeAccountSwitchConfig(
     tags: options.tags,
     matchPath: options.matchPath,
     entryUrl: options.entryUrl,
+    defaultPassword: options.defaultPassword,
+    debugRedirect: options.debugRedirect,
+    debugRedirectEnabled: options.debugRedirectEnabled,
     spec: options.spec,
   });
 

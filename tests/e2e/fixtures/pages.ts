@@ -50,13 +50,15 @@ async function tabIdFor(page: Page, worker: Worker): Promise<number> {
   return worker.evaluate(async (url) => {
     const tabs = await chrome.tabs.query({});
     const matches = tabs.filter((tab) => tab.url === url);
-    const tab = matches[0];
-    if (matches.length !== 1 || !tab || tab.id === undefined) {
-      throw new Error(
-        `expected exactly one tab for ${url}, found ${matches.length}`,
-      );
+    if (matches.length === 1 && matches[0]?.id !== undefined) {
+      return matches[0].id;
     }
-    return tab.id;
+    // 同 URL 多标签（同源共享 Cookie 场景）用前台标签消歧。
+    const active = tabs.find((tab) => tab.active);
+    if (active?.url === url && active.id !== undefined) return active.id;
+    throw new Error(
+      `could not identify tab for ${url}: ${matches.length} matches, active=${active?.url ?? 'none'}`,
+    );
   }, page.url());
 }
 
@@ -323,6 +325,70 @@ export async function expectMatchedEnvironment(
   }
 }
 
+/** 打开面板并切到快捷登录 Tab；纯账号场景下该 Tab 也会自动可见。 */
+export async function openQuickLogin(
+  page: Page,
+  worker: Worker,
+): Promise<void> {
+  await openSwitcher(page, worker);
+  const panel = page.locator(PANEL_HOST);
+  await panel
+    .locator('.as-tab-btn')
+    .filter({ hasText: '快捷登录' })
+    .click();
+  await expect(panel.locator('.as-ql-input')).toBeVisible();
+}
+
+/** 在面板快捷登录 Tab 粘贴文本并提交，结果由调用方等待。 */
+export async function submitQuickLogin(
+  page: Page,
+  worker: Worker,
+  text: string,
+  options: { debugRedirect?: boolean } = {},
+): Promise<void> {
+  await openQuickLogin(page, worker);
+  const panel = page.locator(PANEL_HOST);
+  await panel.locator('.as-ql-input').fill(text);
+  if (options.debugRedirect) {
+    const toggle = panel.getByRole('switch', { name: '登录后进入 Bug 页' });
+    await expect(toggle).toBeVisible();
+    // 环境可默认开启该开关；只在未开启时点击，避免把它关掉。
+    if ((await toggle.getAttribute('aria-checked')) !== 'true') {
+      await toggle.click();
+    }
+  }
+  await panel.getByRole('button', { name: '登录并跳转' }).click();
+}
+
+/** 页面认证存储快照：只保留认证相关键，用于证明越域/失败未写入。 */
+export async function authStorage(page: Page): Promise<{
+  local: Record<string, string | null>;
+  session: Record<string, string | null>;
+}> {
+  return page.evaluate((keys) => {
+    const pick = (store: Storage) =>
+      Object.fromEntries(keys.map((key) => [key, store.getItem(key)]));
+    return {
+      local: pick(window.localStorage),
+      session: pick(window.sessionStorage),
+    };
+  }, AUTH_STORAGE_KEYS);
+}
+
+/** 断言 origin 与页面存储均无认证残留。 */
+export async function expectNoAuthentication(
+  page: Page,
+  origin: string,
+): Promise<void> {
+  const cookies = await page.context().cookies(origin);
+  expect(
+    cookies.filter((cookie) => cookie.name === SESSION_COOKIE),
+  ).toEqual([]);
+  const storage = await authStorage(page);
+  expect(Object.values(storage.local).filter(Boolean)).toEqual([]);
+  expect(Object.values(storage.session).filter(Boolean)).toEqual([]);
+}
+
 export class LoginPage {
   constructor(private readonly page: Page) {}
 
@@ -412,5 +478,18 @@ export class OptionsPage {
 
   async expectAccount(name: string): Promise<void> {
     await expect(this.page.getByText(name, { exact: true }).first()).toBeVisible();
+  }
+
+  /** 从账号行「⋯ → 登录」发起已保存账号登录，返回后台新建的目标页。 */
+  async loginSavedAccount(name: string): Promise<Page> {
+    await this.expectAccount(name);
+    const row = this.page.locator('tr').filter({ hasText: name });
+    await expect(row).toHaveCount(1);
+    const newPage = this.page.context().waitForEvent('page');
+    await row
+      .getByRole('button', { name: `账号「${name}」的其他操作` })
+      .click();
+    await this.page.getByRole('menuitem', { name: '登录', exact: true }).click();
+    return newPage;
   }
 }
