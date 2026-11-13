@@ -9,7 +9,9 @@ import {
   LOGIN_SPEC_VERSION,
   type LoginFormTarget,
   type LoginSpec,
+  type SettleCondition,
   type SpecOp,
+  type SuccessSignal,
 } from '../../../entrypoints/tools/account-switch/spec/types';
 import { validateLoginSpec } from '../../../entrypoints/tools/account-switch/spec/validate';
 import { findExtensionWorker } from './extension';
@@ -335,6 +337,27 @@ export function fixtureAccounts(domains: string[]): Account[] {
       domains: [...domains],
     },
   ];
+}
+
+/**
+ * 以既有声明为底稿替换成功信号：用于 RESULT 矩阵逐项验证同一登录动作
+ * 在不同成功判定下的行为，不复制整份 ops。
+ */
+export function specWithSuccess(
+  spec: LoginSpec,
+  success: SuccessSignal[],
+  overrides: Partial<LoginSpec> = {},
+): LoginSpec {
+  return assertValidLoginSpec({ ...spec, ...overrides, success });
+}
+
+/** 以既有声明为底稿替换失败信号（登录被拒绝时提前中止）。 */
+export function specWithFailure(
+  spec: LoginSpec,
+  failure: SettleCondition[],
+  overrides: Partial<LoginSpec> = {},
+): LoginSpec {
+  return assertValidLoginSpec({ ...spec, ...overrides, failure });
 }
 
 export function makeAccountSwitchConfig(
