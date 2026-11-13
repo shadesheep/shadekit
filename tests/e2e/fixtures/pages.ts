@@ -169,11 +169,15 @@ export async function runAccount(
   await card.click();
 }
 
-/** 等待本次执行成功结束：成功时面板关闭（导航时面板随文档消失）。 */
+/**
+ * 等待本次执行成功结束：成功时面板关闭（导航时面板随文档消失），
+ * 并等待切换尾部刷新提交完成——否则紧接着的 page.evaluate 会撞上导航。
+ */
 export async function expectAccountSuccess(page: Page): Promise<void> {
   await expect(page.locator(PANEL_HOST)).toHaveCount(0, {
     timeout: LOGIN_TIMEOUT,
   });
+  await waitForDocumentSettled(page);
 }
 
 let navigationProbe = 0;

@@ -1,4 +1,10 @@
-import { randomBytes } from 'node:crypto';
+import {
+  constants,
+  createHash,
+  generateKeyPairSync,
+  privateDecrypt,
+  randomBytes,
+} from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type {
   IncomingHttpHeaders,
@@ -52,6 +58,8 @@ export type FixtureServer = {
   diagnostics(): FixtureServerDiagnostics;
   reset(): void;
   close(): Promise<void>;
+  /** 服务端生成的 RSA 公钥（PEM/spki），供 `crypto.encrypt` 夹具使用。 */
+  readonly rsaPublicKey: string;
 };
 
 export type CreateFixtureServerOptions = {
@@ -251,6 +259,32 @@ function renderConsole(template: string, identity: FixtureIdentity): string {
   );
 }
 
+/**
+ * PKCS#1 v1.5 解密。
+ *
+ * Node 20 / OpenSSL 3 已禁用 `RSA_PKCS1_PADDING` 私有解密（CVE-2023-46809），
+ * 因此用 `RSA_NO_PADDING` 取回原始块并按 RFC 8017 手动剥离填充；
+ * 仍然校验真实密文，不放宽 RSA 用例。
+ */
+function decryptPkcs1v15(privateKey: string, encrypted: Buffer): string {
+  const block = privateDecrypt(
+    { key: privateKey, padding: constants.RSA_NO_PADDING },
+    encrypted,
+  );
+  if (block.length < 11 || block[0] !== 0x00 || block[1] !== 0x02) {
+    throw new Error('invalid PKCS#1 v1.5 block header');
+  }
+  let separator = 2;
+  while (separator < block.length && block[separator] !== 0x00) {
+    separator += 1;
+  }
+  // PS 至少 8 字节：0x00 0x02 | PS | 0x00 | M
+  if (separator < 10 || separator === block.length) {
+    throw new Error('invalid PKCS#1 v1.5 padding');
+  }
+  return block.subarray(separator + 1).toString('utf8');
+}
+
 export async function createFixtureServer(
   options: CreateFixtureServerOptions = {},
 ): Promise<FixtureServer> {
@@ -277,6 +311,13 @@ export async function createFixtureServer(
     readFile(join(PUBLIC_DIR, 'form-multistep.html'), 'utf8'),
     readFile(join(PUBLIC_DIR, 'api-console.html'), 'utf8'),
   ]);
+
+  const { publicKey: rsaPublicKey, privateKey: rsaPrivateKey } =
+    generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
 
   const sessions = new Map<string, FixtureIdentity>();
   const requests: FixtureRequest[] = [];
@@ -406,6 +447,82 @@ export async function createFixtureServer(
     });
   };
 
+  /** `POST /api/digest-login`：口令按 sha256(hex) 提交，服务端重算比对。 */
+  const handleDigestLogin = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: string,
+  ) => {
+    const payload = parseRequestBody(body, request.headers['content-type']);
+    const username =
+      typeof payload.username === 'string' ? payload.username : '';
+    const password =
+      typeof payload.password === 'string' ? payload.password : '';
+    const account = FIXTURE_ACCOUNTS[username];
+    const expected = account
+      ? createHash('sha256').update(account.password).digest('hex')
+      : '';
+    if (!account || password !== expected) {
+      sendJson(response, 401, { error: 'invalid_credentials' });
+      return;
+    }
+    const identity: FixtureIdentity = {
+      username,
+      email: username,
+      name: account.name,
+      title: account.title,
+      scope: account.scope,
+      role: account.role,
+    };
+    const sessionTokenValue = randomBytes(32).toString('hex');
+    sessions.set(sessionTokenValue, identity);
+    sendJson(response, 200, {
+      sessionToken: sessionTokenValue,
+      role: account.role,
+    });
+  };
+
+  /** `POST /api/rsa-login`：口令为 RSA PKCS#1 v1.5 密文（base64）。 */
+  const handleRsaLogin = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    body: string,
+  ) => {
+    const payload = parseRequestBody(body, request.headers['content-type']);
+    const username =
+      typeof payload.username === 'string' ? payload.username : '';
+    const encrypted =
+      typeof payload.password === 'string' ? payload.password : '';
+    const account = FIXTURE_ACCOUNTS[username];
+    let password = '';
+    try {
+      password = decryptPkcs1v15(
+        rsaPrivateKey,
+        Buffer.from(encrypted, 'base64'),
+      );
+    } catch {
+      password = '';
+    }
+    if (!account || password !== account.password) {
+      sendJson(response, 401, { error: 'invalid_credentials' });
+      return;
+    }
+    const identity: FixtureIdentity = {
+      username,
+      email: username,
+      name: account.name,
+      title: account.title,
+      scope: account.scope,
+      role: account.role,
+    };
+    const sessionTokenValue = randomBytes(32).toString('hex');
+    sessions.set(sessionTokenValue, identity);
+    sendJson(response, 200, {
+      sessionToken: sessionTokenValue,
+      role: account.role,
+    });
+  };
+
   const server = createServer(async (request, response) => {
     const hostHeader = request.headers.host;
     const host = hostHeader ? normalizeHostname(hostHeader) : '';
@@ -458,6 +575,16 @@ export async function createFixtureServer(
 
     if (method === 'POST' && pathname === '/api/token') {
       handleTokenIssue(request, response, body);
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/digest-login') {
+      handleDigestLogin(request, response, body);
+      return;
+    }
+
+    if (method === 'POST' && pathname === '/api/rsa-login') {
+      handleRsaLogin(request, response, body);
       return;
     }
 
@@ -666,6 +793,7 @@ export async function createFixtureServer(
     origin: `http://127.0.0.1:${port}`,
     allowedHosts: ALLOWED_HOSTS,
     requests,
+    rsaPublicKey,
     get closed() {
       return closed;
     },

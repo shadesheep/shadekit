@@ -236,6 +236,59 @@ export function httpEchoSpec(): LoginSpec {
   });
 }
 
+/**
+ * Digest 登录：口令摘要进入 payload.build 对象，服务端重算 sha256 校验。
+ * 返回的 sessionToken 写成 HttpOnly Cookie 后导航到控制台。
+ */
+export function digestLoginSpec(): LoginSpec {
+  return assertValidLoginSpec({
+    version: LOGIN_SPEC_VERSION,
+    template: 'api',
+    ops: [
+      { op: 'clear.cookies', range: 'all' },
+      { op: 'goto', url: '{origin}/login', waitForLoad: true },
+      {
+        op: 'digest',
+        input: '{password}',
+        algorithm: 'sha256',
+        as: 'passwordDigest',
+      },
+      {
+        op: 'payload.build',
+        parts: [
+          { key: 'username', value: '{username}' },
+          { key: 'password', value: '$passwordDigest' },
+        ],
+        as: 'loginBody',
+      },
+      {
+        op: 'http.execute',
+        url: '{origin}/api/digest-login',
+        method: 'POST',
+        body: { ref: 'loginBody' },
+        parse: 'json',
+        expectStatus: '2xx',
+        as: 'digestLogin',
+      },
+      { op: 'auth.write' },
+      { op: 'goto', url: '{origin}/console', waitForLoad: true },
+    ],
+    success: [{ token: { from: 'digestLogin', path: 'sessionToken' } }],
+    auth: {
+      mode: 'engine',
+      cookiesWrite: [
+        {
+          name: 'shadekit_session',
+          value: '$digestLogin.sessionToken',
+          httpOnly: true,
+          sameSite: 'lax',
+        },
+      ],
+    },
+    limits: { requestMs: 15000, stepMs: 5000, settleMs: 10000 },
+  });
+}
+
 function cloneAccounts(accounts: Account[]): Account[] {
   return accounts.map((account) => ({
     ...account,
