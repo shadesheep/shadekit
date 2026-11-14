@@ -5,7 +5,14 @@
  * 相比 FeHelper 的固定勾选组合，这里的模板产出的是可继续编辑的字段行，
  * 用户可以在模板基础上改名、调参、增删字段。
  */
-import type { FieldConstraints } from "./types";
+import type {
+  DateCompareDirection,
+  DateComparePrecision,
+  FieldConstraints,
+  InputRule,
+  LengthRule,
+  NumericRule,
+} from "./types";
 
 export interface TemplateRow {
   key: string;
@@ -15,7 +22,18 @@ export interface TemplateRow {
   /** 缺省时启用。 */
   enabled?: boolean;
   params?: Record<string, unknown>;
+  /** 来源角色 → 同级字段 key；加载后重建为稳定的字段 ID。 */
+  sources?: Record<string, string>;
   constraints?: FieldConstraints;
+  numericRule?: NumericRule;
+  lengthRule?: LengthRule;
+  inputRule?: InputRule;
+  /** 日期比较规则；模板内以字段 key 引用同级字段。 */
+  dateRule?: {
+    fieldKey: string;
+    direction: DateCompareDirection;
+    precision: DateComparePrecision;
+  };
   children?: TemplateRow[];
 }
 
@@ -36,6 +54,11 @@ export const TEMPLATES: MockTemplate[] = [
       { key: "name", type: "name" },
       { key: "gender", type: "gender" },
       { key: "age", type: "age" },
+      {
+        key: "idCard",
+        type: "idCard",
+        sources: { age: "age", gender: "gender" },
+      },
       { key: "phone", type: "phone" },
       { key: "email", type: "email" },
       { key: "address", type: "address" },
@@ -75,39 +98,42 @@ export const TEMPLATES: MockTemplate[] = [
     hint: "招标公告/项目列表",
     rows: [
       { key: "projectCode", type: "projectCode" },
-      { key: "projectName", type: "projectName" },
+      {
+        key: "projectName",
+        type: "projectName",
+        sources: { region: "region" },
+      },
       { key: "sectionCode", type: "sectionCode" },
       { key: "sectionName", type: "sectionName" },
       { key: "tenderMethod", type: "tenderMethod" },
-      { key: "evalMethod", type: "evalMethod" },
       { key: "budget", type: "budget" },
       {
         key: "budgetCn",
         type: "derived",
         label: "预算金额（大写）",
-        params: { sourceKey: "budget", transform: "chineseCapital" },
+        params: { transform: "chineseCapital" },
+        sources: { source: "budget" },
       },
-      { key: "openBidTime", type: "openBidTime" },
-      { key: "region", type: "address", label: "地区" },
-    ],
-  },
-  {
-    id: "expert",
-    name: "评标专家",
-    hint: "专家库/抽取名单",
-    rows: [
-      { key: "name", type: "name" },
-      { key: "idCard", type: "idCard" },
+      { key: "registrationDeadline", type: "registrationDeadline" },
       {
-        key: "gender",
+        key: "openBidTime",
         type: "derived",
-        label: "性别",
-        params: { sourceKey: "idCard", transform: "idCardGender" },
+        label: "开标时间",
+        params: {
+          transform: "dateAfter",
+          amount: 7,
+          unit: "day",
+          format: "datetime",
+          timezone: "local",
+        },
+        sources: { source: "registrationDeadline" },
+        dateRule: {
+          fieldKey: "registrationDeadline",
+          direction: "after",
+          precision: "minute",
+        },
       },
-      { key: "age", type: "age", params: { min: 30, max: 65 } },
-      { key: "phone", type: "phone" },
-      { key: "company", type: "company", label: "工作单位" },
-      { key: "position", type: "position", label: "职称" },
+      { key: "region", type: "address", label: "地区" },
     ],
   },
   {

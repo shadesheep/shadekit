@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import DtSelect from "../../shared/components/DtSelect.vue";
+import { isDateComparable } from "../../tools/mock-data/lib/date-cases";
 import {
   CATEGORIES,
-  FIELD_TYPES,
   defaultParams,
+  FIELD_TYPES,
   getFieldType,
+  isNumericFieldType,
 } from "../../tools/mock-data/lib/generators";
 import type {
   FieldConstraints,
@@ -38,7 +40,7 @@ const scalarTypeOptions = FIELD_TYPES.filter(
 
 const paramsOf = computed(() =>
   (getFieldType(props.field.type)?.params ?? []).filter((param) => {
-    if (props.field.type === "derived" && param.name === "sourceKey") return false;
+    if (param.name === "sourceKey") return false;
     if (props.field.type === "array" && param.name === "itemType") return false;
     if (param.name === "mean" || param.name === "stdDev") {
       return props.field.params.distribution === "normal";
@@ -55,27 +57,40 @@ const paramsOf = computed(() =>
     return true;
   }),
 );
-const sourceOptions = computed(() =>
-  props.siblings
-    .filter(
-      (field) =>
-        field.id !== props.field.id &&
-        field.enabled !== false &&
-        field.key.trim(),
-    )
-    .map((field) => ({
-      value: field.id,
-      label: `${fieldDisplayName(field)} (${field.key})`,
-    })),
+const sourceSelections = computed(() =>
+  (getFieldType(props.field.type)?.sources ?? []).map((source) => {
+    const options = props.siblings
+      .filter(
+        (field) =>
+          field.id !== props.field.id &&
+          field.enabled !== false &&
+          field.key.trim() &&
+          (!source.types || source.types.includes(field.type)),
+      )
+      .map((field) => ({
+        value: field.id,
+        label: `${fieldDisplayName(field)} (${field.key})`,
+      }));
+    if (!source.required) {
+      options.unshift({ value: "", label: "不关联（随机生成）" });
+    }
+    const selected = props.field.sourceFieldIds?.[source.name] ?? "";
+    return {
+      source,
+      options,
+      selected: options.some((option) => option.value === selected)
+        ? selected
+        : "",
+    };
+  }),
 );
-const selectedSourceId = computed(() => {
-  const id = props.field.sourceFieldId;
-  return sourceOptions.value.some((option) => option.value === id) ? id ?? "" : "";
-});
 
-function selectSource(id: string) {
-  props.field.sourceFieldId = id;
-  delete props.field.params.sourceKey;
+function selectSource(role: string, id: string) {
+  const ids = { ...(props.field.sourceFieldIds ?? {}) };
+  if (id) ids[role] = id;
+  else delete ids[role];
+  if (Object.keys(ids).length) props.field.sourceFieldIds = ids;
+  else delete props.field.sourceFieldIds;
 }
 
 const isObject = computed(() => props.field.type === "object");
@@ -96,14 +111,16 @@ const errorText = computed(() => props.errors[props.field.id] ?? "");
 const errorId = computed(() => `${props.field.id}-error`);
 const showConstraints = ref(false);
 const hasCustomConstraints = computed(
-  () =>
-    props.field.constraints?.unique === true ||
-    Number(props.field.constraints?.nullRate ?? 0) > 0 ||
-    Number(props.field.constraints?.invalidRate ?? 0) > 0,
+  () => props.field.constraints?.unique === true,
 );
 
 function onTypeChange() {
-  delete props.field.sourceFieldId;
+  if (props.field.type !== "string" && props.field.type !== "array") {
+    delete props.field.lengthRule;
+  }
+  if (!isNumericFieldType(props.field.type)) delete props.field.numericRule;
+  if (!isDateComparable(props.field)) delete props.field.dateRule;
+  delete props.field.sourceFieldIds;
   const definition = getFieldType(props.field.type);
   if (definition) props.field.params = defaultParams(definition);
   if (props.field.type === "object") {
@@ -121,13 +138,6 @@ function onArrayItemTypeChange(value: string) {
   props.field.params.itemType = value;
   if (value === "object") props.field.children ??= [];
   else delete props.field.children;
-}
-
-function updateRate(name: "nullRate" | "invalidRate", event: Event) {
-  const value = (event.target as HTMLInputElement).valueAsNumber;
-  const constraints: FieldConstraints = props.field.constraints ?? {};
-  constraints[name] = Number.isNaN(value) ? undefined : value;
-  props.field.constraints = constraints;
 }
 
 function updateUnique(event: Event) {
@@ -189,9 +199,9 @@ function updateUnique(event: Event) {
       </DtSelect>
       <button
         type="button"
-        class="icon-btn"
+        class="icon-btn settings-btn"
         :class="{ 'constraint-active': hasCustomConstraints || showConstraints }"
-        title="空值、异常值和唯一性设置"
+        title="唯一性设置"
         aria-label="字段高级设置"
         :aria-expanded="showConstraints"
         @click="showConstraints = !showConstraints"
@@ -213,19 +223,31 @@ function updateUnique(event: Event) {
       {{ errorText }}
     </p>
 
-    <div v-if="paramsOf.length" class="row-params">
-      <label v-if="field.type === 'derived'" class="param-item">
-        <span class="param-label source-label">来源字段</span>
+    <div v-if="paramsOf.length || sourceSelections.length" class="row-params">
+      <label
+        v-for="selection in sourceSelections"
+        :key="selection.source.name"
+        class="param-item"
+      >
+        <span class="param-label source-label">
+          {{ selection.source.label }}
+        </span>
         <DtSelect
-          :model-value="selectedSourceId"
-          :options="sourceOptions"
-          placeholder="请选择来源字段"
-          aria-label="来源字段"
+          :model-value="selection.selected"
+          :options="selection.options"
+          :placeholder="
+            selection.source.required
+              ? `请选择${selection.source.label}`
+              : '不关联（随机生成）'
+          "
+          :aria-label="selection.source.label"
           :aria-invalid="Boolean(errorText)"
           :aria-describedby="errorText ? errorId : undefined"
           size="sm"
           class="param-select"
-          @update:model-value="selectSource"
+          @update:model-value="
+            (value) => selectSource(selection.source.name, value)
+          "
         />
       </label>
       <label v-for="param in paramsOf" :key="param.name" class="param-item">
@@ -256,6 +278,7 @@ function updateUnique(event: Event) {
       </label>
     </div>
 
+
     <div v-if="isArray" class="array-items">
       <label class="param-item">
         <span class="param-label">数组元素</span>
@@ -270,30 +293,6 @@ function updateUnique(event: Event) {
 
     <div v-if="showConstraints" class="advanced-settings">
       <div class="constraint-grid">
-        <label class="constraint-item">
-          <span>空值比例（0–1）</span>
-          <input
-            :value="field.constraints?.nullRate ?? 0"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            :aria-invalid="Boolean(errorText)"
-            @input="updateRate('nullRate', $event)"
-          />
-        </label>
-        <label class="constraint-item">
-          <span>异常值比例（0–1）</span>
-          <input
-            :value="field.constraints?.invalidRate ?? 0"
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            :aria-invalid="Boolean(errorText)"
-            @input="updateRate('invalidRate', $event)"
-          />
-        </label>
         <label class="unique-item">
           <input
             :checked="field.constraints?.unique ?? false"
@@ -370,6 +369,8 @@ function updateUnique(event: Event) {
 .key-input:focus-visible,
 .param-input:focus-visible,
 .constraint-item input:focus-visible,
+.rule-toggle:focus-visible,
+.rule-clear:focus-visible,
 summary:focus-visible {
   outline: 2px solid #818cf8;
   outline-offset: 2px;
@@ -403,9 +404,13 @@ summary:focus-visible {
 }
 
 .row-type {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 100px;
-  max-width: none;
+  max-width: 320px;
+}
+
+.settings-btn {
+  margin-left: auto;
 }
 
 .inline-error {
@@ -462,6 +467,130 @@ summary:focus-visible {
   max-width: 130px;
 }
 
+.numeric-rule,
+.input-rule {
+  margin: 6px 0 0 27px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.numeric-rule-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.numeric-rule-title span {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.numeric-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px 12px;
+  padding: 7px 0 2px;
+}
+
+.rule-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 18px;
+  padding: 7px 0 2px;
+}
+
+.rule-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px 12px;
+  padding: 2px 0;
+}
+
+.rule-fields > * {
+  min-width: 0;
+}
+
+.rule-fields :deep(.dt-select) {
+  width: 100%;
+  max-width: none;
+}
+
+.numeric-rule-grid > * {
+  min-width: 0;
+}
+
+.numeric-rule-grid :deep(.dt-select) {
+  width: 100%;
+  max-width: none;
+}
+
+.input-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.input-flag input {
+  accent-color: #6366f1;
+}
+
+.rule-clear {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #6366f1;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rule-clear:hover {
+  text-decoration: underline;
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule-toggle {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #64748b;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rule-toggle:hover {
+  color: #4f46e5;
+}
+
+.rule-toggle-hint {
+  overflow: hidden;
+  color: #94a3b8;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-toggle-chevron {
+  flex-shrink: 0;
+  color: #94a3b8;
+}
+
 .advanced-settings {
   margin: 6px 0 0 27px;
   color: #64748b;
@@ -490,6 +619,7 @@ summary:focus-visible {
 
 .constraint-item input {
   width: 100%;
+  box-sizing: border-box;
   padding: 3px 7px;
   border: 1px solid #e2e8f0;
   border-radius: 5px;
@@ -571,8 +701,23 @@ summary:focus-visible {
 }
 
 [data-dt-dark] .row-params,
-[data-dt-dark] .array-items {
+[data-dt-dark] .array-items,
+[data-dt-dark] .numeric-rule,
+[data-dt-dark] .input-rule {
   border-color: var(--dt-dark-border);
+}
+
+[data-dt-dark] .numeric-rule-title {
+  color: #8b949e;
+}
+[data-dt-dark] .rule-toggle,
+[data-dt-dark] .rule-toggle-hint,
+[data-dt-dark] .rule-toggle-chevron {
+  color: #8b949e;
+}
+
+[data-dt-dark] .rule-toggle:hover {
+  color: #a5b4fc;
 }
 
 [data-dt-dark] .param-label,
@@ -584,6 +729,12 @@ summary:focus-visible {
 [data-dt-dark] .children-editor {
   border-left-color: #4338ca;
   background: var(--dt-dark-surface-hover);
+}
+
+@media (max-width: 1000px) {
+  .numeric-rule-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {

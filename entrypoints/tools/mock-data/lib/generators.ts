@@ -2,25 +2,27 @@
  * 声明式字段注册表与批量生成入口。
  * 所有随机值均由 GenContext.rng 驱动；约束、场景和递归结构在统一包装层处理。
  */
+
+import type { IdCardDate } from "./data-pools";
 import {
   generateBankCard,
   generateIdCard,
   generateUscc,
+  idCardBirthDateForAge,
   toChineseCapital,
 } from "./data-pools";
 import {
-  EVAL_METHODS,
-  SECTION_NAMES,
-  TENDER_METHODS,
-  generateProjectName,
-} from "./domains/tender";
-import {
   DOMAIN_SUFFIXES,
   FILE_EXTENSIONS,
+  generateUrl,
   MIME_TYPES,
   USER_AGENTS,
-  generateUrl,
 } from "./domains/tech";
+import {
+  generateProjectName,
+  SECTION_NAMES,
+  TENDER_METHODS,
+} from "./domains/tender";
 import {
   generateAddress,
   generateCompany,
@@ -29,6 +31,7 @@ import {
   generatePhone,
   getLocaleData,
 } from "./locales";
+import type { RandomSource } from "./random";
 import {
   createRandom,
   defaultRandom,
@@ -37,22 +40,29 @@ import {
   randomInt,
   randomString,
 } from "./random";
-import type { RandomSource } from "./random";
 import type {
   CategoryDef,
+  DateCompareDirection,
+  DateComparePrecision,
+  DateComparisonRule,
   FieldParamDef,
   FieldTypeDef,
   GenContext,
   GenerateOptions,
+  InputFormat,
+  InputRule,
+  InputValueType,
+  LengthRule,
   LocaleId,
   MockField,
   MockScenario,
+  NumericRule,
 } from "./types";
 
 export { createRandom } from "./random";
 export const MAX_ROWS = 100000;
 const MAX_UNIQUE_ATTEMPTS = 100;
-const SEEDED_REFERENCE_TIME = Date.UTC(2024, 0, 1, 9, 0, 0);
+export const SEEDED_REFERENCE_TIME = Date.UTC(2024, 0, 1, 9, 0, 0);
 
 function num(value: unknown, fallback: number): number {
   if (value === undefined || value === null) return fallback;
@@ -125,7 +135,7 @@ function weightedEnum(
 }
 
 /** 支持 8、1,3,8-12 等长度集合，所有长度限制在 1..200。 */
-function parseLengths(raw: unknown): number[] {
+export function parseLengths(raw: unknown): number[] {
   const lengths: number[] = [];
   for (const token of String(raw ?? "8").split(/[,，、|]+/)) {
     const match = token.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
@@ -150,6 +160,42 @@ const CHARSETS: Record<string, string> = {
   hex: "0123456789abcdef",
   cn: "的一是不了我在人有他这中大来上个国和地说到为子时年得出就那要和会可也你对生能而子那好于心得着然没都成看只发当平地们道还实做作种开面总事",
 };
+
+const EMOJI_CHARS = [
+  "😀",
+  "😂",
+  "😊",
+  "😎",
+  "🤖",
+  "🚀",
+  "🌈",
+  "🍀",
+  "🎯",
+  "💡",
+  "📦",
+  "🔒",
+] as const;
+
+/** 按 Unicode 码点计数；中文与 emoji 均计 1，与生成时写入的字符数一致。 */
+export function charLength(value: string): number {
+  return Array.from(value).length;
+}
+
+function randomStringOfLength(
+  length: number,
+  charset: string,
+  rng: RandomSource,
+): string {
+  const size = Math.max(0, Math.trunc(length));
+  if (charset === "emoji") {
+    let out = "";
+    for (let index = 0; index < size; index += 1) {
+      out += pick(EMOJI_CHARS, rng);
+    }
+    return out;
+  }
+  return randomString(size, CHARSETS[charset] ?? CHARSETS.alnum, rng);
+}
 
 function numericParams(
   min: number,
@@ -206,7 +252,7 @@ function numericParams(
   return params;
 }
 
-interface NumericDefaults {
+export interface NumericDefaults {
   min: number;
   max: number;
   precision: number;
@@ -282,6 +328,146 @@ function validTimeZone(timeZone: string): boolean {
   }
 }
 
+/** 本机 IANA 时区；无法获取时回退到运行环境本地时间。 */
+export function localTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  } catch {
+    return "local";
+  }
+}
+
+/** 校验并归一化生成上下文时区，非法值回退到本机时区。 */
+export function normalizeTimeZone(raw?: string): string {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return value && validTimeZone(value) ? value : localTimeZone();
+}
+
+interface DateParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond: number;
+}
+
+function dateParts(date: Date, timeZone = "local"): DateParts {
+  if (timeZone === "local" || !validTimeZone(timeZone)) {
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      hour: date.getHours(),
+      minute: date.getMinutes(),
+      second: date.getSeconds(),
+      millisecond: date.getMilliseconds(),
+    };
+  }
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values: Record<string, number> = {};
+  for (const part of parts) {
+    if (part.type !== "literal") values[part.type] = Number(part.value);
+  }
+  return {
+    year: values.year,
+    month: values.month,
+    day: values.day,
+    hour: values.hour,
+    minute: values.minute,
+    second: values.second,
+    millisecond: date.getMilliseconds(),
+  };
+}
+
+/** 把指定时区的墙上时间换算为时间戳；跨 DST 时取换算后的稳定时区偏移。 */
+function epochFromParts(parts: DateParts, timeZone: string): number {
+  if (timeZone === "local" || !validTimeZone(timeZone)) {
+    return new Date(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+      parts.millisecond,
+    ).getTime();
+  }
+  const base = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second,
+    parts.millisecond,
+  );
+  const offsetAt = (instant: number) => {
+    const observed = dateParts(new Date(instant), timeZone);
+    const wholeSecond = instant - (((instant % 1000) + 1000) % 1000);
+    return (
+      Date.UTC(
+        observed.year,
+        observed.month - 1,
+        observed.day,
+        observed.hour,
+        observed.minute,
+        observed.second,
+      ) - wholeSecond
+    );
+  };
+  const firstOffset = offsetAt(base);
+  const epoch = base - firstOffset;
+  const offset = offsetAt(epoch);
+  return offset === firstOffset ? epoch : base - offset;
+}
+
+/** 解析日期文本；无时区后缀的文本按指定时区的墙上时间解释。 */
+export function parseDateTimeText(
+  text: string,
+  timeZone = "local",
+): number | undefined {
+  const source = text.trim();
+  const match = source.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/,
+  );
+  if (match) {
+    const parts: DateParts = {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4] ?? 0),
+      minute: Number(match[5] ?? 0),
+      second: Number(match[6] ?? 0),
+      millisecond: Number((match[7] ?? "0").padEnd(3, "0")),
+    };
+    if (
+      parts.month < 1 ||
+      parts.month > 12 ||
+      parts.day < 1 ||
+      parts.day > 31 ||
+      parts.hour > 23 ||
+      parts.minute > 59 ||
+      parts.second > 59
+    ) {
+      return undefined;
+    }
+    return epochFromParts(parts, timeZone);
+  }
+  const parsed = Date.parse(source);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 export function formatDateTime(
   date: Date,
   format: string,
@@ -289,38 +475,10 @@ export function formatDateTime(
 ): string | number {
   if (format === "timestamp") return date.getTime();
   if (format === "timestamp_s") return Math.floor(date.getTime() / 1000);
-  const zone = validTimeZone(timeZone) ? timeZone : "local";
-  let year = date.getFullYear();
-  let month = date.getMonth() + 1;
-  let day = date.getDate();
-  let hour = date.getHours();
-  let minute = date.getMinutes();
-  let second = date.getSeconds();
-  if (zone !== "local") {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: zone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(date);
-    const values: Record<string, number> = {};
-    for (const part of parts) {
-      if (part.type !== "literal") values[part.type] = Number(part.value);
-    }
-    year = values.year;
-    month = values.month;
-    day = values.day;
-    hour = values.hour;
-    minute = values.minute;
-    second = values.second;
-  }
-  const dateText = `${year}-${pad2(month)}-${pad2(day)}`;
+  const parts = dateParts(date, validTimeZone(timeZone) ? timeZone : "local");
+  const dateText = `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
   return format === "datetime"
-    ? `${dateText} ${pad2(hour)}:${pad2(minute)}:${pad2(second)}`
+    ? `${dateText} ${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`
     : dateText;
 }
 
@@ -353,29 +511,6 @@ function weekday(date: Date, timeZone: string): number {
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(text);
 }
 
-function addBusinessDays(
-  startMs: number,
-  days: number,
-  timeZone: string,
-): number {
-  let result = startMs;
-  while (
-    weekday(new Date(result), timeZone) === 0 ||
-    weekday(new Date(result), timeZone) === 6
-  ) {
-    result += 86400000;
-  }
-  const wholeWeeks = Math.floor(days / 5);
-  let remainder = days % 5;
-  result += wholeWeeks * 7 * 86400000;
-  while (remainder > 0) {
-    result += 86400000;
-    const day = weekday(new Date(result), timeZone);
-    if (day !== 0 && day !== 6) remainder -= 1;
-  }
-  return result;
-}
-
 const STEP_UNITS: Record<string, number> = {
   day: 86400000,
   hour: 3600000,
@@ -386,24 +521,6 @@ const STEP_UNITS: Record<string, number> = {
 function dateValue(params: Record<string, unknown>, ctx: GenContext): Date {
   const timeZone = str(params.timezone, "local");
   const workdays = str(params.workdays, "false") === "true";
-  if (ctx.scenario === "timeSeries") {
-    const start = dateParam(params.start, "2020-01-01");
-    const step = Math.max(1, Math.trunc(num(params.step, 1)));
-    const unit = str(params.stepUnit, "day");
-    const amount = step * ctx.index;
-    if (workdays && unit === "day")
-      return new Date(addBusinessDays(start, amount, timeZone));
-    let result = start + amount * (STEP_UNITS[unit] ?? STEP_UNITS.day);
-    if (workdays) {
-      while (
-        weekday(new Date(result), timeZone) === 0 ||
-        weekday(new Date(result), timeZone) === 6
-      ) {
-        result += 86400000;
-      }
-    }
-    return new Date(result);
-  }
   const date = randomDateBetween(
     params.start,
     params.end,
@@ -424,10 +541,12 @@ function derivedValue(
   params: Record<string, unknown>,
   ctx: GenContext,
 ): unknown {
-  const sourceKey = String(params.sourceKey ?? "");
+  const sourceKey = String(
+    (params.sourceKeys as Record<string, string> | undefined)?.source ?? "",
+  );
   if (!sourceKey || !Object.hasOwn(ctx.row, sourceKey)) {
     throw new Error(
-      `派生字段引用的 sourceKey「${sourceKey || "(空)"}」不存在或尚未生成`,
+      `派生字段引用的来源字段「${sourceKey || "(空)"}」不存在或尚未生成`,
     );
   }
   const source = ctx.row[sourceKey];
@@ -451,14 +570,20 @@ function derivedValue(
     return Number(idCard[16]) % 2 === 1 ? data.male : data.female;
   }
   if (transform === "dateAfter") {
-    const sourceDate =
-      source instanceof Date ? source : new Date(source as string | number);
-    if (Number.isNaN(sourceDate.getTime()))
+    const requestedZone = str(params.timezone, "local");
+    const timeZone = validTimeZone(requestedZone) ? requestedZone : "local";
+    const sourceInstant =
+      source instanceof Date
+        ? source.getTime()
+        : typeof source === "number"
+          ? source
+          : parseDateTimeText(String(source), timeZone);
+    if (sourceInstant === undefined || Number.isNaN(sourceInstant))
       throw new Error(`字段「${sourceKey}」不是有效日期`);
     const amount = num(params.amount, 1);
     const unit = str(params.unit, "day");
     const result = new Date(
-      sourceDate.getTime() + amount * (STEP_UNITS[unit] ?? STEP_UNITS.day),
+      sourceInstant + amount * (STEP_UNITS[unit] ?? STEP_UNITS.day),
     );
     const requestedFormat = str(params.format, "auto");
     const format =
@@ -469,11 +594,56 @@ function derivedValue(
             ? "date"
             : "datetime"
         : requestedFormat;
-    return formatDateTime(result, format, str(params.timezone, "local"));
+    return formatDateTime(result, format, timeZone);
   }
   if (typeof source === "object" && source !== null)
     return JSON.parse(JSON.stringify(source));
   return source;
+}
+
+/** 身份证按年龄来源反推出生日期、按性别来源决定顺序码奇偶，再补校验位。 */
+function idCardValue(params: Record<string, unknown>, ctx: GenContext): string {
+  const sourceKeys =
+    (params.sourceKeys as Record<string, string> | undefined) ?? {};
+  const rng = contextRng(ctx);
+  let birthDate: IdCardDate | undefined;
+  const ageKey = sourceKeys.age;
+  if (ageKey) {
+    const age = ctx.row[ageKey];
+    if (
+      typeof age !== "number" ||
+      !Number.isInteger(age) ||
+      age < 0 ||
+      age > 150
+    ) {
+      throw new Error(
+        `年龄来源「${ageKey}」的值「${String(age ?? "")}」无法生成身份证，需要 0 到 150 的整数`,
+      );
+    }
+    const [year, month, day] = formatDateTime(
+      new Date(ctx.now ?? Date.now()),
+      "date",
+      ctx.timeZone,
+    )
+      .toString()
+      .split("-")
+      .map(Number);
+    birthDate = idCardBirthDateForAge(age, { year, month, day }, rng);
+  }
+  const genderKey = sourceKeys.gender;
+  let male: boolean | undefined;
+  if (genderKey) {
+    const gender = ctx.row[genderKey];
+    const data = getLocaleData(contextLocale(ctx));
+    if (gender === data.male) male = true;
+    else if (gender === data.female) male = false;
+    else {
+      throw new Error(
+        `性别来源「${genderKey}」的值「${String(gender ?? "")}」无法生成身份证`,
+      );
+    }
+  }
+  return generateIdCard(rng, { birthDate, male });
 }
 
 export const CATEGORIES: CategoryDef[] = [
@@ -608,14 +778,15 @@ export const FIELD_TYPES: FieldTypeDef[] = [
           { value: "numeric", label: "纯数字" },
           { value: "hex", label: "十六进制" },
           { value: "cn", label: "中文" },
+          { value: "emoji", label: "Emoji" },
         ],
       },
     ],
     generate: (params, ctx) => {
       const rng = contextRng(ctx);
-      return randomString(
+      return randomStringOfLength(
         pick(parseLengths(params.length), rng),
-        CHARSETS[str(params.charset, "alnum")] ?? CHARSETS.alnum,
+        str(params.charset, "alnum"),
         rng,
       );
     },
@@ -747,6 +918,7 @@ export const FIELD_TYPES: FieldTypeDef[] = [
       },
       { name: "timezone", label: "时区", kind: "text", default: "local" },
     ],
+    sources: [{ name: "source", label: "来源字段", required: true }],
     generate: derivedValue,
   },
   {
@@ -838,7 +1010,11 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     category: "person",
     defaultKey: "idCard",
     params: [],
-    generate: (_params, ctx) => generateIdCard(contextRng(ctx)),
+    sources: [
+      { name: "age", label: "年龄来源", types: ["age", "int"] },
+      { name: "gender", label: "性别来源", types: ["gender", "enum"] },
+    ],
+    generate: idCardValue,
   },
   {
     id: "email",
@@ -944,8 +1120,19 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     category: "tender",
     defaultKey: "projectName",
     params: [],
-    generate: (_params, ctx) =>
-      generateProjectName(contextLocale(ctx), contextRng(ctx)),
+    sources: [{ name: "region", label: "地区来源", types: ["address"] }],
+    generate: (params, ctx) => {
+      const regionKey = (
+        params.sourceKeys as Record<string, string> | undefined
+      )?.region;
+      if (!regionKey)
+        return generateProjectName(contextLocale(ctx), contextRng(ctx));
+      const region = ctx.row[regionKey];
+      if (typeof region !== "string" || !region.trim()) {
+        throw new Error(`地区来源「${regionKey}」不是有效地址`);
+      }
+      return generateProjectName(contextLocale(ctx), contextRng(ctx), region);
+    },
   },
   {
     id: "projectCode",
@@ -990,14 +1177,6 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     defaultKey: "tenderMethod",
     params: [],
     generate: (_params, ctx) => pick(TENDER_METHODS, contextRng(ctx)),
-  },
-  {
-    id: "evalMethod",
-    label: "评标办法",
-    category: "tender",
-    defaultKey: "evalMethod",
-    params: [],
-    generate: (_params, ctx) => pick(EVAL_METHODS, contextRng(ctx)),
   },
   {
     id: "budget",
@@ -1075,16 +1254,62 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     generate: (params, ctx) => {
       const rng = contextRng(ctx);
       const days = Math.max(1, Math.trunc(num(params.days, 30)));
-      const offset =
-        ctx.scenario === "timeSeries" ? ctx.index : randomInt(1, days, rng);
+      const offset = randomInt(1, days, rng);
       const date = new Date((ctx.now ?? Date.now()) + offset * 86400000);
       date.setHours(
-        ctx.scenario === "timeSeries" ? 9 : pick([9, 10, 11, 14, 15, 16], rng),
-        ctx.scenario === "timeSeries" ? 0 : pick([0, 30], rng),
+        pick([9, 10, 11, 14, 15, 16], rng),
+        pick([0, 30], rng),
         0,
         0,
       );
       return formatDateTime(date, "datetime");
+    },
+  },
+  {
+    id: "registrationDeadline",
+    label: "报名截止时间",
+    category: "tender",
+    defaultKey: "registrationDeadline",
+    params: [
+      {
+        name: "days",
+        label: "未来天数",
+        kind: "number",
+        default: 30,
+        min: 1,
+        max: 365,
+      },
+      {
+        name: "timezone",
+        label: "时区",
+        kind: "text",
+        default: "local",
+        placeholder: "local / UTC / Asia/Shanghai",
+      },
+    ],
+    generate: (params, ctx) => {
+      const rng = contextRng(ctx);
+      const days = Math.max(1, Math.trunc(num(params.days, 30)));
+      const requestedZone = str(params.timezone, "local");
+      const timeZone = validTimeZone(requestedZone) ? requestedZone : "local";
+      const offset = randomInt(1, days, rng);
+      const wall = dateParts(
+        new Date((ctx.now ?? Date.now()) + offset * 86400000),
+        timeZone,
+      );
+      const date = new Date(
+        epochFromParts(
+          {
+            ...wall,
+            hour: pick([9, 10, 11, 14, 15, 16], rng),
+            minute: pick([0, 30], rng),
+            second: 0,
+            millisecond: 0,
+          },
+          timeZone,
+        ),
+      );
+      return formatDateTime(date, "datetime", timeZone);
     },
   },
   {
@@ -1270,7 +1495,7 @@ export function createField(
     key: nextKey(def.defaultKey, existingKeys),
     type: def.id,
     params: defaultParams(def),
-    constraints: { nullRate: 0, unique: false, invalidRate: 0 },
+    constraints: { unique: false },
   };
   if (def.id === "object") field.children = [];
   return field;
@@ -1301,6 +1526,15 @@ function sanitizeParams(
   const out: Record<string, unknown> = {};
   for (const param of def.params) {
     const value = source[param.name];
+    if (def.id === "enum" && param.name === "values" && Array.isArray(value)) {
+      out[param.name] = value.filter(
+        (item) =>
+          typeof item === "string" ||
+          typeof item === "number" ||
+          typeof item === "boolean",
+      );
+      continue;
+    }
     if (param.kind === "number") {
       let normalized = num(value, Number(param.default));
       if (param.min !== undefined) normalized = Math.max(param.min, normalized);
@@ -1334,7 +1568,9 @@ function sanitizeParams(
   }
   if (def.id === "string") out.length = parseLengths(out.length).join(",");
   if (
-    (def.id === "date" || def.id === "derived") &&
+    (def.id === "date" ||
+      def.id === "derived" ||
+      def.id === "registrationDeadline") &&
     !validTimeZone(String(out.timezone ?? "local"))
   ) {
     out.timezone = "local";
@@ -1342,9 +1578,121 @@ function sanitizeParams(
   return out;
 }
 
+/** 保留原始数值，语义校验（区间/精度）留给界面报错，不静默纠正。 */
+function sanitizeNumericRule(raw: unknown): NumericRule | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const rule: NumericRule = {};
+  for (const name of ["min", "max", "precision"] as const) {
+    const value = source[name];
+    if (value === undefined || value === null || value === "") continue;
+    const parsed =
+      typeof value === "number" ? value : Number(String(value).trim());
+    if (Number.isFinite(parsed)) rule[name] = parsed;
+  }
+  return Object.keys(rule).length ? rule : undefined;
+}
+
+/** 与数值规则同理：保留原始数字，语义校验交给界面报错。 */
+function sanitizeLengthRule(raw: unknown): LengthRule | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const rule: LengthRule = {};
+  for (const name of ["min", "max"] as const) {
+    const value = source[name];
+    if (value === undefined || value === null || value === "") continue;
+    const parsed =
+      typeof value === "number" ? value : Number(String(value).trim());
+    if (Number.isFinite(parsed)) rule[name] = parsed;
+  }
+  return Object.keys(rule).length ? rule : undefined;
+}
+
+const INPUT_TYPES: Record<InputValueType, true> = {
+  string: true,
+  number: true,
+  integer: true,
+  boolean: true,
+  object: true,
+  array: true,
+};
+const INPUT_FORMATS: Record<InputFormat, true> = { email: true };
+
+/** 布尔规则保留显式 false（关闭必填/不允许 null 等），避免被当成未配置。 */
+function sanitizeInputRule(raw: unknown): InputRule | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const rule: InputRule = {};
+  for (const name of ["required", "nullable", "nonEmpty"] as const) {
+    if (typeof source[name] === "boolean") rule[name] = source[name];
+  }
+  if (
+    typeof source.type === "string" &&
+    INPUT_TYPES[source.type as InputValueType]
+  ) {
+    rule.type = source.type as InputValueType;
+  }
+  if (
+    typeof source.format === "string" &&
+    INPUT_FORMATS[source.format as InputFormat]
+  ) {
+    rule.format = source.format as InputFormat;
+  }
+  if (Array.isArray(source.enumValues) && source.enumValues.length) {
+    try {
+      rule.enumValues = JSON.parse(JSON.stringify(source.enumValues));
+    } catch {
+      // 非 JSON 值无法随模板持久化，忽略该规则。
+    }
+  }
+  return Object.keys(rule).length ? rule : undefined;
+}
+
+const DATE_DIRECTIONS: Record<DateCompareDirection, true> = {
+  after: true,
+  before: true,
+  notBefore: true,
+  notAfter: true,
+};
+const DATE_PRECISIONS: Record<DateComparePrecision, true> = {
+  day: true,
+  hour: true,
+  minute: true,
+  second: true,
+};
+
+function sanitizeDateRule(
+  raw: unknown,
+  byId: ReadonlyMap<string, MockField>,
+  byKey: ReadonlyMap<string, MockField | undefined>,
+): DateComparisonRule | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const fieldId =
+    typeof source.fieldId === "string" && source.fieldId
+      ? source.fieldId
+      : byKey.get(String(source.fieldKey ?? "").trim())?.id;
+  if (!fieldId || !byId.has(fieldId)) return undefined;
+  const direction = String(source.direction ?? "");
+  const precision = String(source.precision ?? "");
+  if (
+    !DATE_DIRECTIONS[direction as DateCompareDirection] ||
+    !DATE_PRECISIONS[precision as DateComparePrecision]
+  ) {
+    return undefined;
+  }
+  return {
+    fieldId,
+    direction: direction as DateCompareDirection,
+    precision: precision as DateComparePrecision,
+  };
+}
+
 function sanitizeFieldList(raw: unknown): MockField[] {
   if (!Array.isArray(raw)) return [];
   const out: MockField[] = [];
+  const sourceKeysByField = new Map<string, Record<string, string>>();
+  const rawDateRules = new Map<string, unknown>();
   const seenKeys = new Set<string>();
   for (const item of raw) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
@@ -1368,32 +1716,66 @@ function sanitizeFieldList(raw: unknown): MockField[] {
       type: def.id,
       params: sanitizeParams(def, source.params),
       constraints: {
-        nullRate: Math.min(Math.max(num(rawConstraints.nullRate, 0), 0), 1),
         unique:
           rawConstraints.unique === true ||
           rawConstraints.unique === "true" ||
           rawConstraints.unique === 1,
-        invalidRate: Math.min(
-          Math.max(num(rawConstraints.invalidRate, 0), 0),
-          1,
-        ),
       },
     };
+    const numericRule = sanitizeNumericRule(source.numericRule);
+    const lengthRule = sanitizeLengthRule(source.lengthRule);
+    if (lengthRule) field.lengthRule = lengthRule;
+    if (numericRule) field.numericRule = numericRule;
+    const inputRule = sanitizeInputRule(source.inputRule);
+    if (inputRule) field.inputRule = inputRule;
+    if (source.dateRule !== undefined) {
+      rawDateRules.set(field.id, source.dateRule);
+    }
     if (typeof source.label === "string" && source.label.trim()) {
       field.label = source.label.trim();
     }
     if (typeof source.enabled === "boolean") field.enabled = source.enabled;
+    const explicitSourceIds = source.sourceFieldIds;
     if (
-      def.id === "derived" &&
-      typeof source.sourceFieldId === "string" &&
-      source.sourceFieldId
+      explicitSourceIds &&
+      typeof explicitSourceIds === "object" &&
+      !Array.isArray(explicitSourceIds)
     ) {
-      field.sourceFieldId = source.sourceFieldId;
+      const ids: Record<string, string> = {};
+      for (const [role, value] of Object.entries(explicitSourceIds)) {
+        if (typeof value === "string" && value) ids[role] = value;
+      }
+      if (Object.keys(ids).length) field.sourceFieldIds = ids;
+    }
+    if (typeof source.sourceFieldId === "string" && source.sourceFieldId) {
+      field.sourceFieldIds = {
+        ...field.sourceFieldIds,
+        source: source.sourceFieldId,
+      };
     }
     const rawParams =
       source.params && typeof source.params === "object"
         ? (source.params as Record<string, unknown>)
         : {};
+    const keyMap: Record<string, string> = {};
+    const rawSources = source.sources;
+    if (
+      rawSources &&
+      typeof rawSources === "object" &&
+      !Array.isArray(rawSources)
+    ) {
+      for (const [role, value] of Object.entries(rawSources)) {
+        if (typeof value === "string" && value.trim()) {
+          keyMap[role] = value.trim();
+        }
+      }
+    }
+    if (def.id === "derived" && str(rawParams.sourceKey, "")) {
+      keyMap.source = str(rawParams.sourceKey, "");
+    }
+    if (Object.keys(keyMap).length) {
+      sourceKeysByField.set(field.id, keyMap);
+    }
     const children = source.children ?? source.fields ?? rawParams.children;
     if (
       def.id === "object" ||
@@ -1410,11 +1792,25 @@ function sanitizeFieldList(raw: unknown): MockField[] {
     out.push(field);
   }
   const byKey = indexFieldsByKey(out);
+  const byId = new Map(out.map((field) => [field.id, field]));
   for (const field of out) {
-    if (field.type !== "derived") continue;
-    field.sourceFieldId ??= byKey.get(str(field.params.sourceKey, ""))?.id;
+    const declared = getFieldType(field.type)?.sources ?? [];
+    const keys = sourceKeysByField.get(field.id) ?? {};
+    const resolved: Record<string, string> = {};
+    for (const sourceDef of declared) {
+      const explicit = field.sourceFieldIds?.[sourceDef.name];
+      const bound = explicit ?? byKey.get(keys[sourceDef.name] ?? "")?.id;
+      if (bound) resolved[sourceDef.name] = bound;
+    }
+    if (Object.keys(resolved).length) field.sourceFieldIds = resolved;
+    else delete field.sourceFieldIds;
     // 旧 key 只用于载入时迁移，无法绑定的来源由用户重新选择。
     delete field.params.sourceKey;
+  }
+  for (const [fieldId, rawRule] of rawDateRules) {
+    const field = byId.get(fieldId);
+    const rule = sanitizeDateRule(rawRule, byId, byKey);
+    if (field && rule) field.dateRule = rule;
   }
   return out;
 }
@@ -1436,6 +1832,16 @@ const NUMERIC_DEFAULTS: Record<string, NumericDefaults> = {
   score: { min: 60, max: 100, precision: 1, integer: false },
 };
 
+/** 字段类型是否支持数值生成与校验规则。 */
+export function isNumericFieldType(typeId: string): boolean {
+  return Object.hasOwn(NUMERIC_DEFAULTS, typeId);
+}
+
+/** 数值类型的取样默认值（整数标记与缺省精度）。 */
+export function numericDefaults(typeId: string): NumericDefaults | undefined {
+  return NUMERIC_DEFAULTS[typeId];
+}
+
 function invalidValue(field: MockField, ctx: GenContext): unknown {
   const invalid: Record<string, unknown> = {
     increment: "not-a-number",
@@ -1453,6 +1859,7 @@ function invalidValue(field: MockField, ctx: GenContext): unknown {
     string: "\u0000invalid",
     date: "not-a-date",
     openBidTime: "not-a-date",
+    registrationDeadline: "not-a-date",
     derived: "invalid-derived",
     object: "invalid-object",
     array: "invalid-array",
@@ -1502,9 +1909,11 @@ function boundaryValue(field: MockField, ctx: GenContext): unknown {
     // 但内容用随机字符填充，避免所有行输出同一静止串（如 aaaaaaaa）。
     const length =
       ctx.index % 2 === 0 ? Math.min(...lengths) : Math.max(...lengths);
-    const charset =
-      CHARSETS[str(field.params.charset, "alnum")] ?? CHARSETS.alnum;
-    return randomString(length, charset, ctx.rng ?? defaultRandom);
+    return randomStringOfLength(
+      length,
+      str(field.params.charset, "alnum"),
+      ctx.rng ?? defaultRandom,
+    );
   }
   if (field.type === "date") {
     const useStart = ctx.index % 2 === 0;
@@ -1546,7 +1955,11 @@ interface GenerationState {
   locale: LocaleId;
   scenario: MockScenario;
   now: number;
+  timeZone: string;
   uniqueValues: Map<string, Set<string>>;
+  overrides?: Record<string, unknown>;
+  omitFieldIds?: ReadonlySet<string>;
+  lengthOverrides?: Record<string, number>;
 }
 
 interface PlannedField extends MockField {
@@ -1610,25 +2023,47 @@ function planFields(
 
     visiting.add(field);
     let params = field.params;
-    if (field.type === "derived") {
-      const legacyKey = str(params.sourceKey, "");
-      const source = field.sourceFieldId
-        ? byId.get(field.sourceFieldId)
-        : byKey.get(legacyKey);
-      if (!source?.key.trim() || !getFieldType(source.type)) {
-        const message =
-          field.sourceFieldId || legacyKey
-            ? "来源字段不存在或字段名无效，请重新选择"
-            : "请选择来源字段";
-        report(field, message);
-      } else if (source === field) {
-        report(field, "来源字段不能引用自身");
-      } else if (source.enabled === false) {
-        report(field, `来源字段「${source.key}」已禁用`);
-      } else {
+    const declaredSources = getFieldType(field.type)?.sources ?? [];
+    if (declaredSources.length) {
+      const resolved: Record<string, string> = {};
+      for (const sourceDef of declaredSources) {
+        const explicitId = field.sourceFieldIds?.[sourceDef.name];
+        const legacyKey =
+          sourceDef.name === "source" ? str(params.sourceKey, "") : "";
+        const source = explicitId ? byId.get(explicitId) : byKey.get(legacyKey);
+        if (!source?.key.trim() || !getFieldType(source.type)) {
+          if (sourceDef.required || explicitId || legacyKey) {
+            report(
+              field,
+              explicitId || legacyKey
+                ? `${sourceDef.label}不存在或字段名无效，请重新选择`
+                : `请选择${sourceDef.label}`,
+            );
+          }
+          continue;
+        }
+        if (source === field) {
+          report(field, `${sourceDef.label}不能引用自身`);
+          continue;
+        }
+        if (source.enabled === false) {
+          report(field, `${sourceDef.label}「${source.key}」已禁用`);
+          continue;
+        }
+        if (sourceDef.types && !sourceDef.types.includes(source.type)) {
+          const types = sourceDef.types
+            .map((typeId) => getFieldType(typeId)?.label ?? typeId)
+            .join(" / ");
+          report(
+            field,
+            `${sourceDef.label}「${source.key}」类型不兼容（需要 ${types}）`,
+          );
+          continue;
+        }
+        resolved[sourceDef.name] = source.key;
         visit(source);
-        params = { ...params, sourceKey: source.key };
       }
+      params = { ...params, sourceKeys: resolved };
     }
     const childPlan =
       (field.type === "object" || field.type === "array") && field.children
@@ -1641,7 +2076,9 @@ function planFields(
 
   for (const field of enabled) visit(field);
   const keys = [...new Set(enabled.map((field) => field.key))];
-  const objectKeys = Object.keys(Object.fromEntries(keys.map((key) => [key, null])));
+  const objectKeys = Object.keys(
+    Object.fromEntries(keys.map((key) => [key, null])),
+  );
   return {
     keys,
     ordered,
@@ -1677,24 +2114,59 @@ function generateObject(
 ): Record<string, unknown> {
   const values: Record<string, unknown> = Object.create(null);
   const localCtx = { ...ctx, row: values };
+  const emitted = new Set<string>();
   for (const field of plan.ordered) {
+    if (state.omitFieldIds?.has(field.id)) continue;
     values[field.key] = generateConstrained(
       field,
       localCtx,
       state,
       prefix + field.key,
     );
+    emitted.add(field.key);
   }
-  const row = Object.fromEntries(plan.keys.map((key) => [key, values[key]]));
+  const keys = plan.keys.filter((key) => emitted.has(key));
+  const row = Object.fromEntries(keys.map((key) => [key, values[key]]));
   if (!plan.preserveKeyOrder) return row;
 
   // 普通对象会把整数索引键提前并按数值排序。
   return new Proxy(row, {
     ownKeys(target) {
       const remaining = new Set(Reflect.ownKeys(target));
-      return [...plan.keys.filter((key) => remaining.delete(key)), ...remaining];
+      return [...keys.filter((key) => remaining.delete(key)), ...remaining];
     },
   });
+}
+
+/** 按指定个数生成数组；对象元素执行子字段及其依赖，空数组返回 []。 */
+function generateArray(
+  field: PlannedField,
+  length: number,
+  ctx: GenContext,
+  state: GenerationState,
+  path: string,
+): unknown[] {
+  const size = Math.max(0, Math.trunc(length));
+  const array: unknown[] = [];
+  for (let itemIndex = 0; itemIndex < size; itemIndex += 1) {
+    const itemPath = `${path}[${itemIndex}]`;
+    if (field.childPlan) {
+      array.push(generateObject(field.childPlan, ctx, state, `${itemPath}.`));
+    } else {
+      const itemType = getFieldType(str(field.params.itemType, "string"));
+      const itemField: MockField = {
+        id: `${field.id}_item`,
+        key: field.key,
+        type:
+          itemType && !["object", "array", "derived"].includes(itemType.id)
+            ? itemType.id
+            : "string",
+        params: {},
+      };
+      array.push(generateConstrained(itemField, ctx, state, itemPath));
+    }
+  }
+  return array;
 }
 
 function generateRaw(
@@ -1712,31 +2184,14 @@ function generateRaw(
     const min = Math.max(0, Math.trunc(num(field.params.minItems, 1)));
     const max = Math.max(min, Math.trunc(num(field.params.maxItems, 3)));
     const length =
-      ctx.scenario === "boundary"
-        ? ctx.index % 2 === 0
-          ? min
-          : max
-        : randomInt(min, max, state.rng);
-    const array: unknown[] = [];
-    for (let itemIndex = 0; itemIndex < length; itemIndex += 1) {
-      const itemPath = `${path}[${itemIndex}]`;
-      if (field.childPlan) {
-        array.push(generateObject(field.childPlan, ctx, state, `${itemPath}.`));
-      } else {
-        const itemType = getFieldType(str(field.params.itemType, "string"));
-        const itemField: MockField = {
-          id: `${field.id}_item`,
-          key: field.key,
-          type:
-            itemType && !["object", "array", "derived"].includes(itemType.id)
-              ? itemType.id
-              : "string",
-          params: {},
-        };
-        array.push(generateConstrained(itemField, ctx, state, itemPath));
-      }
-    }
-    return array;
+      state.lengthOverrides && Object.hasOwn(state.lengthOverrides, field.id)
+        ? state.lengthOverrides[field.id]
+        : ctx.scenario === "boundary"
+          ? ctx.index % 2 === 0
+            ? min
+            : max
+          : randomInt(min, max, state.rng);
+    return generateArray(field, length, ctx, state, path);
   }
   const def = getFieldType(field.type);
   return def ? def.generate(field.params, ctx) : undefined;
@@ -1748,15 +2203,22 @@ function generateConstrained(
   state: GenerationState,
   path: string,
 ): unknown {
-  const nullRate = Math.min(
-    Math.max(num(field.constraints?.nullRate, 0), 0),
-    1,
-  );
-  if (nullRate > 0 && state.rng() < nullRate) return null;
-  const invalidRate = Math.min(
-    Math.max(num(field.constraints?.invalidRate, 0), 0),
-    1,
-  );
+  if (state.overrides && Object.hasOwn(state.overrides, field.id)) {
+    return state.overrides[field.id];
+  }
+  if (state.lengthOverrides && Object.hasOwn(state.lengthOverrides, field.id)) {
+    const length = state.lengthOverrides[field.id];
+    if (field.type === "string") {
+      return randomStringOfLength(
+        length,
+        str(field.params.charset, "alnum"),
+        state.rng,
+      );
+    }
+    if (field.type === "array") {
+      return generateArray(field, length, ctx, state, path);
+    }
+  }
   const unique = field.constraints?.unique === true;
   const uniqueScope = field.id ? `id:${field.id}` : path;
   let seen = unique ? state.uniqueValues.get(uniqueScope) : undefined;
@@ -1766,19 +2228,23 @@ function generateConstrained(
   }
   for (let attempt = 0; attempt < MAX_UNIQUE_ATTEMPTS; attempt += 1) {
     let value: unknown;
-    if (
-      state.scenario === "invalid" ||
-      (invalidRate > 0 && state.rng() < invalidRate)
-    ) {
-      value = invalidValue(field, ctx);
-    } else if (
-      state.scenario === "boundary" &&
-      field.type !== "object" &&
-      field.type !== "array"
-    ) {
-      value = boundaryValue(field, ctx);
-    } else {
-      value = generateRaw(field, ctx, state, path);
+    try {
+      if (state.scenario === "invalid") {
+        value = invalidValue(field, ctx);
+      } else if (
+        state.scenario === "boundary" &&
+        field.type !== "object" &&
+        field.type !== "array"
+      ) {
+        value = boundaryValue(field, ctx);
+      } else {
+        value = generateRaw(field, ctx, state, path);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw message.startsWith("字段「")
+        ? error
+        : new Error(`字段「${path}」：${message}`);
     }
     if (!unique || value === null) return value;
     const key = uniqueKey(value);
@@ -1807,17 +2273,26 @@ function normalizedStartIndex(startIndex: number | undefined): number {
   return Math.max(0, Math.trunc(valid));
 }
 
+/** seed 生成使用固定基准时刻，未指定 seed 时取当前时间。 */
+export function generationReferenceTime(seed?: string): number {
+  return seed === undefined ? Date.now() : SEEDED_REFERENCE_TIME;
+}
+
 function createState(options: GenerateOptions): GenerationState {
   return {
     rng: createRandom(options.seed),
     locale: options.locale === "en-US" ? "en-US" : "zh-CN",
-    scenario: ["normal", "boundary", "invalid", "timeSeries"].includes(
-      options.scenario ?? "",
-    )
+    scenario: ["normal", "boundary", "invalid"].includes(options.scenario ?? "")
       ? (options.scenario as MockScenario)
       : "normal",
-    now: options.seed === undefined ? Date.now() : SEEDED_REFERENCE_TIME,
     uniqueValues: new Map(),
+    now: generationReferenceTime(options.seed),
+    timeZone: normalizeTimeZone(options.timeZone),
+    overrides: options.overrides,
+    omitFieldIds: options.omitFieldIds
+      ? new Set(options.omitFieldIds)
+      : undefined,
+    lengthOverrides: options.lengthOverrides,
   };
 }
 
@@ -1835,6 +2310,7 @@ function generateOneRow(
     locale: state.locale,
     scenario: state.scenario,
     now: state.now,
+    timeZone: state.timeZone,
   };
   return generateObject(plan, ctx, state, "");
 }

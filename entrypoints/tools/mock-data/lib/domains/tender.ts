@@ -63,16 +63,48 @@ const PROJECT_SUBJECTS_EN = [
   "Energy Efficiency Modernization",
 ] as const;
 
+/** 从地址中提取项目名称使用的地区前缀，无法识别时返回空串。 */
+export function regionFromAddress(
+  address: string,
+  locale: LocaleId = "zh-CN",
+): string {
+  const data = getLocaleData(locale);
+  if (locale === "en-US") {
+    const parts = address.split(",").map((part) => part.trim());
+    const city = parts[1] ?? "";
+    const state = parts[2]?.split(/\s+/)[0] ?? "";
+    if (!city) return "";
+    return state ? `${city}, ${state}` : city;
+  }
+  for (const province of Object.keys(data.provinceCities)) {
+    if (!address.startsWith(province)) continue;
+    const city = data.provinceCities[province].find(
+      (name) => name !== province && address.startsWith(province + name),
+    );
+    return city ?? province;
+  }
+  return "";
+}
+
 export function generateProjectName(
   locale: LocaleId = "zh-CN",
   rng: RandomSource = defaultRandom,
+  region?: string,
 ): string {
-  if (locale === "en-US") return pick(PROJECT_SUBJECTS_EN, rng);
+  const source = region?.trim();
+  if (locale === "en-US") {
+    const subject = pick(PROJECT_SUBJECTS_EN, rng);
+    const city = source
+      ? regionFromAddress(source, locale).split(",")[0]?.trim()
+      : "";
+    return city ? `${city} ${subject}` : subject;
+  }
   const data = getLocaleData(locale);
-  const province = pick(Object.keys(data.provinceCities), rng);
-  return `${pick(data.provinceCities[province], rng)}${pick(PROJECT_SUBJECTS, rng)}`;
+  const prefix =
+    (source && regionFromAddress(source, locale)) ||
+    pick(data.provinceCities[pick(Object.keys(data.provinceCities), rng)], rng);
+  return `${prefix}${pick(PROJECT_SUBJECTS, rng)}`;
 }
-
 export const SECTION_NAMES = [
   "施工一标段",
   "施工二标段",
@@ -105,18 +137,6 @@ export const TENDER_METHODS = [
   "竞争性磋商",
   "单一来源采购",
   "询价",
-] as const;
-
-export const EVAL_METHODS = [
-  "综合评估法",
-  "综合评估法",
-  "经评审的最低投标价法",
-  "合理低价法",
-  "最低评标价法",
-  "综合评分法",
-  "性价比法",
-  "经评审的合理低价法",
-  "技术评分最低标价法",
 ] as const;
 
 export const QUALIFICATION_LEVELS = [

@@ -14,7 +14,6 @@
  * 「用户看到的容器里有没有一个带内容的编辑器」。
  */
 import { EditorView } from "@codemirror/view";
-import { createApp, nextTick, type App as VueApp } from "vue";
 import {
   afterEach,
   beforeAll,
@@ -24,6 +23,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { createApp, nextTick, type App as VueApp } from "vue";
 import App from "../entrypoints/mock-data/App.vue";
 import { setupCodemirrorJsdom } from "./helpers/codemirror-jsdom";
 
@@ -142,8 +142,8 @@ describe("mock-data 源码视图", () => {
 
   it("首次打开默认用户场景即可生成源码", async () => {
     await mountApp();
-    // 用户信息场景整组 6 个字段
-    expect(root.querySelectorAll(".selected-chip")).toHaveLength(6);
+    // 用户信息场景整组 7 个字段
+    expect(root.querySelectorAll(".selected-chip")).toHaveLength(7);
 
     await clickButton("源码");
     expect(codeEditorDoc()).toContain('"name"');
@@ -154,9 +154,7 @@ describe("mock-data 源码视图", () => {
     // 勾选清单字段默认折叠：先点击行头展开 age 所在行，再行内联编辑。
     const ageItem = Array.from(
       root.querySelectorAll<HTMLElement>(".check-item"),
-    ).find(
-      (item) => item.querySelector(".check-key")?.textContent === "age",
-    )!;
+    ).find((item) => item.querySelector(".check-key")?.textContent === "age")!;
     ageItem.querySelector<HTMLElement>(".check-head")!.click();
     await flush();
 
@@ -201,6 +199,6 @@ describe("mock-data 源码视图", () => {
     settingsButton!.click();
     await flush();
     expect(settingsButton!.getAttribute("aria-expanded")).toBe("true");
-    expect(expandedRow?.textContent).toContain("空值比例");
+    expect(expandedRow?.textContent).toContain("所有记录保持唯一");
   });
 });

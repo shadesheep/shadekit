@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, nextTick, type App as VueApp } from "vue";
+
 import {
   afterEach,
   beforeAll,
@@ -9,9 +9,10 @@ import {
   it,
   vi,
 } from "vitest";
+import { createApp, nextTick, type App as VueApp } from "vue";
 import App from "../entrypoints/mock-data/App.vue";
-import { serializeTemplateFile } from "../entrypoints/tools/mock-data/lib/template-files";
 import { dismissToast, useToast } from "../entrypoints/shared/use-toast";
+import { serializeTemplateFile } from "../entrypoints/tools/mock-data/lib/template-files";
 import { setupCodemirrorJsdom } from "./helpers/codemirror-jsdom";
 
 let store: Record<string, unknown>;
@@ -114,9 +115,7 @@ function selectedTitles(): string[] {
 }
 
 function activeTabText(): string {
-  return (
-    root.querySelector(".scenario-tab.active")?.textContent?.trim() ?? ""
-  );
+  return root.querySelector(".scenario-tab.active")?.textContent?.trim() ?? "";
 }
 
 /** 交互 ConfirmDialog：confirm=true 用「继续」，false 用「取消」。 */
@@ -148,13 +147,14 @@ function toastMessages(): string[] {
 }
 
 describe("mock-data 页面编排", () => {
-  it("首次打开默认用户信息场景、整组 6 字段勾选并生成预览", async () => {
+  it("首次打开默认用户信息场景、整组 7 字段勾选并生成预览", async () => {
     await mountApp();
 
     expect(selectedChips().map((chip) => chip.textContent?.trim())).toEqual([
       "姓名",
       "性别",
       "年龄",
+      "身份证号",
       "手机号",
       "邮箱",
       "地址",
@@ -212,13 +212,33 @@ describe("mock-data 页面编排", () => {
         chip.textContent?.trim(),
       );
     expect(quickLabels()).toContain("标段编号");
-    const hiddenLabels = ["评标办法", "开标时间", "评审得分"];
-    for (const label of hiddenLabels) expect(quickLabels()).not.toContain(label);
+    const hiddenLabels = ["开标时间", "评审得分"];
+    for (const label of hiddenLabels)
+      expect(quickLabels()).not.toContain(label);
     for (const label of hiddenLabels) {
       typeInto(".type-search", label);
       await flush();
       expect(quickLabels()).toEqual([]);
     }
+  });
+
+  it("快速取数的身份证无需来源即可生成", async () => {
+    await mountApp();
+    await clickButton("快速取数");
+    await clickButton("人员");
+    const chip = Array.from(
+      root.querySelectorAll<HTMLButtonElement>(".type-chip"),
+    ).find((item) => item.textContent?.trim() === "身份证号");
+    expect(chip).toBeTruthy();
+    chip!.click();
+    await flush();
+
+    const values = Array.from(
+      root.querySelectorAll<HTMLElement>(".quick-value .qv-text"),
+      (item) => item.textContent?.trim() ?? "",
+    );
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) expect(value).toMatch(/^\d{17}[\dX]$/);
   });
 
   it("点场景标签替换为整组勾选字段；全选/全不选批量开关", async () => {
@@ -231,9 +251,9 @@ describe("mock-data 页面编排", () => {
       "sectionCode",
       "sectionName",
       "tenderMethod",
-      "evalMethod",
       "budget",
       "budgetCn",
+      "registrationDeadline",
       "openBidTime",
       "region",
     ];
@@ -294,9 +314,9 @@ describe("mock-data 页面编排", () => {
     select(budget.value);
     typeInto(".type-search", "");
     await flush();
-    fieldRow("budgetCn").querySelector<HTMLButtonElement>(
-      '[aria-label="上移字段"]',
-    )!.click();
+    fieldRow("budgetCn")
+      .querySelector<HTMLButtonElement>('[aria-label="上移字段"]')!
+      .click();
     await expand("budget");
     const keyInput = fieldRow("budget").querySelector<HTMLInputElement>(
       'input[aria-label="字段名"]',
@@ -305,22 +325,30 @@ describe("mock-data 页面编排", () => {
     keyInput.dispatchEvent(new Event("input", { bubbles: true }));
     await flush();
     expect(source.selectedOptions[0]?.textContent).toContain("(amount)");
-    expect(selectedTitles().indexOf("budgetCn")).toBeLessThan(selectedTitles().indexOf("amount"));
-    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    expect(selectedTitles().indexOf("budgetCn")).toBeLessThan(
+      selectedTitles().indexOf("amount"),
+    );
+    root
+      .querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!
+      .click();
     await flush();
     expect(root.querySelector(".record-fields")?.textContent).toMatch(/圆/);
 
     await expand("budgetCn");
-    fieldRow("amount").querySelector<HTMLInputElement>(".field-checkbox")!.click();
+    fieldRow("amount")
+      .querySelector<HTMLInputElement>(".field-checkbox")!
+      .click();
     await flush();
-    expect(fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent)
-      .toContain("已禁用");
-    fieldRow("amount").querySelector<HTMLButtonElement>(
-      '[aria-label="删除字段"]',
-    )!.click();
+    expect(
+      fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent,
+    ).toContain("已禁用");
+    fieldRow("amount")
+      .querySelector<HTMLButtonElement>('[aria-label="删除字段"]')!
+      .click();
     await flush();
-    expect(fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent)
-      .toContain("不存在");
+    expect(
+      fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent,
+    ).toContain("不存在");
     await expand("budgetCn");
     const newSource = fieldRow("budgetCn").querySelector<HTMLSelectElement>(
       'select[aria-label="来源字段"]',
@@ -329,9 +357,47 @@ describe("mock-data 页面编排", () => {
     newSource.dispatchEvent(new Event("change", { bubbles: true }));
     await flush();
     expect(fieldRow("budgetCn").querySelector('[role="alert"]')).toBeNull();
-    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    root
+      .querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!
+      .click();
     await flush();
-    expect(root.querySelector(".record-fields")?.textContent).toContain("budgetCn");
+    expect(root.querySelector(".record-fields")?.textContent).toContain(
+      "budgetCn",
+    );
+  });
+
+  it("用户信息的身份证可选择年龄与性别来源", async () => {
+    await mountApp();
+    await clickTab("用户信息");
+    const idCard = Array.from(
+      root.querySelectorAll<HTMLElement>(".check-item"),
+    ).find(
+      (item) => item.querySelector(".check-key")?.textContent === "idCard",
+    )!;
+    idCard.querySelector<HTMLElement>(".check-head")!.click();
+    await flush();
+
+    const ageSource = idCard.querySelector<HTMLSelectElement>(
+      'select[aria-label="年龄来源"]',
+    )!;
+    const genderSource = idCard.querySelector<HTMLSelectElement>(
+      'select[aria-label="性别来源"]',
+    )!;
+    expect(ageSource).toBeTruthy();
+    expect(genderSource).toBeTruthy();
+    expect(ageSource.selectedOptions[0]?.textContent).toContain("(age)");
+    expect(genderSource.selectedOptions[0]?.textContent).toContain("(gender)");
+    expect(
+      Array.from(ageSource.options).some((option) =>
+        option.textContent?.includes("(name)"),
+      ),
+    ).toBe(false);
+
+    genderSource.value = "";
+    genderSource.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(genderSource.value).toBe("");
+    expect(idCard.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("标出循环中的字段与自引用，选择有效来源后恢复生成", async () => {
@@ -346,9 +412,11 @@ describe("mock-data 页面编排", () => {
     await mountApp();
 
     const rows = Array.from(root.querySelectorAll<HTMLElement>(".check-item"));
-    expect(rows.slice(0, 3).map((row) =>
-      row.querySelector('[role="alert"]')?.textContent?.trim(),
-    )).toEqual([
+    expect(
+      rows
+        .slice(0, 3)
+        .map((row) => row.querySelector('[role="alert"]')?.textContent?.trim()),
+    ).toEqual([
       expect.stringContaining("循环引用"),
       expect.stringContaining("循环引用"),
       expect.stringContaining("不能引用自身"),
@@ -358,7 +426,9 @@ describe("mock-data 页面编排", () => {
     for (const row of [rows[1], rows[2]]) {
       row.querySelector<HTMLElement>(".check-head")!.click();
       await flush();
-      const source = row.querySelector<HTMLSelectElement>('select[aria-label="来源字段"]')!;
+      const source = row.querySelector<HTMLSelectElement>(
+        'select[aria-label="来源字段"]',
+      )!;
       const valid = Array.from(source.options).find((option) =>
         option.textContent?.includes("(input)"),
       )!;
@@ -368,11 +438,15 @@ describe("mock-data 页面编排", () => {
     }
 
     expect(root.querySelector(".checklist [role='alert']")).toBeNull();
-    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    root
+      .querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!
+      .click();
     await flush();
-    expect(Array.from(root.querySelectorAll(".rf-value"), (item) =>
-      item.textContent?.trim(),
-    )).toEqual(["42", "42", "42", "42"]);
+    expect(
+      Array.from(root.querySelectorAll(".rf-value"), (item) =>
+        item.textContent?.trim(),
+      ),
+    ).toEqual(["42", "42", "42", "42"]);
   });
 
   it("搜索覆盖场景……搜索字段类型不显示场景筛选", async () => {
@@ -391,9 +465,9 @@ describe("mock-data 页面编排", () => {
   it("更多设置只显示数据用途与当前格式导出项（语言已移至顶栏）", async () => {
     await mountApp();
 
-    expect(root.querySelector<HTMLElement>(".settings-panel")?.style.display).toBe(
-      "none",
-    );
+    expect(
+      root.querySelector<HTMLElement>(".settings-panel")?.style.display,
+    ).toBe("none");
     await clickButton("更多设置（可选）");
     const panelText = root.querySelector(".settings-panel")?.textContent ?? "";
     expect(panelText).not.toContain("语言");
@@ -477,9 +551,15 @@ describe("mock-data 页面编排", () => {
 
     expect(activeTabText()).toBe("用户信息");
     // 回退时整组加载用户场景字段（不再残留已删除场景的字段）
-    expect(selectedTitles()).toEqual(
-      ["name", "gender", "age", "phone", "email", "address"],
-    );
+    expect(selectedTitles()).toEqual([
+      "name",
+      "gender",
+      "age",
+      "idCard",
+      "phone",
+      "email",
+      "address",
+    ]);
   });
 
   it("管理场景保存当前字段后切换场景且字段不变", async () => {
@@ -496,9 +576,11 @@ describe("mock-data 页面编排", () => {
 
     expect(root.querySelector(".scenario-name")).toBeNull();
     expect(activeTabText()).toBe("我的场景");
-    expect(toastMessages().some((text) => text.includes("已保存并切换到「我的场景」"))).toBe(
-      true,
-    );
+    expect(
+      toastMessages().some((text) =>
+        text.includes("已保存并切换到「我的场景」"),
+      ),
+    ).toBe(true);
     expect(selectedTitles()).toEqual(before);
   });
 
@@ -523,9 +605,15 @@ describe("mock-data 页面编排", () => {
 
     expect(activeTabText()).toBe("用户信息");
     // 删除激活场景后整组回到用户场景字段（不留已删除场景的字段/空态）
-    expect(selectedTitles()).toEqual(
-      ["name", "gender", "age", "phone", "email", "address"],
-    );
+    expect(selectedTitles()).toEqual([
+      "name",
+      "gender",
+      "age",
+      "idCard",
+      "phone",
+      "email",
+      "address",
+    ]);
     expect(
       Array.from(root.querySelectorAll(".scenario-tab")).some(
         (tab) => tab.textContent?.trim() === "旧场景",
@@ -539,7 +627,8 @@ describe("mock-data 页面编排", () => {
     await clickButton("从 JSON 导入");
     typeInto(".import-text", '{"foo":"bar"}');
     await flush();
-    await clickButton("导入并替换字段");
+    await clickButton("解析并预览");
+    await clickButton("确认导入并替换字段");
 
     expect(root.querySelector(".import-text")).toBeNull();
     expect(activeTabText()).toBe("用户信息");
@@ -548,7 +637,7 @@ describe("mock-data 页面编排", () => {
     await clickButton("从 JSON 导入");
     typeInto(".import-text", "{");
     await flush();
-    await clickButton("导入并替换字段");
+    await clickButton("解析并预览");
 
     expect(root.querySelector(".import-error")).toBeTruthy();
     expect(selectedTitles()).toEqual(["foo"]);
@@ -559,7 +648,8 @@ describe("mock-data 页面编排", () => {
     await clickButton("从 JSON 导入");
     typeInto(".import-text", '{"a":1,"b":2,"c":3}');
     await flush();
-    await clickButton("导入并替换字段");
+    await clickButton("解析并预览");
+    await clickButton("确认导入并替换字段");
     expect(
       Array.from(
         root.querySelectorAll<HTMLInputElement>(".field-checkbox"),
@@ -676,9 +766,9 @@ describe("mock-data 页面编排", () => {
 });
 
 describe("A 方向：场景预勾与勾选清单", () => {
-  it("首次打开默认用户信息场景、整组 6 字段勾选", async () => {
+  it("首次打开默认用户信息场景、整组 7 字段勾选", async () => {
     await mountApp();
-    expect(selectedChips()).toHaveLength(6);
+    expect(selectedChips()).toHaveLength(7);
     expect(activeTabText()).toBe("用户信息");
   });
 
@@ -697,18 +787,14 @@ describe("A 方向：场景预勾与勾选清单", () => {
     );
     expect(checkboxes).toHaveLength(2);
 
-    expect(root.querySelector(".selected-count")?.textContent).toContain(
-      "2",
-    );
+    expect(root.querySelector(".selected-count")?.textContent).toContain("2");
 
     // 关掉第二个勾选框（age）—— 渲染与勾选计数应实时更新；
     // enabled=false 的字段保留配置，但跳过生成。
     checkboxes[1]!.click();
     await flush();
 
-    expect(root.querySelector(".selected-count")?.textContent).toContain(
-      "1",
-    );
+    expect(root.querySelector(".selected-count")?.textContent).toContain("1");
     // 生成结果不再包含被勾掉的字段（age 中文名带「龄」）
     expect(
       root.querySelector(".result-panel .record-fields")?.textContent,
@@ -726,12 +812,17 @@ describe("A 方向：场景预勾与勾选清单", () => {
     await clickTab("投标人信息");
     const titles = selectedTitles();
     expect(titles).toEqual(
-      expect.arrayContaining(["companyName", "contactName", "uscc", "bankCard"]),
+      expect.arrayContaining([
+        "companyName",
+        "contactName",
+        "uscc",
+        "bankCard",
+      ]),
     );
     expect(titles).not.toEqual(before); // 整组替换
     expect(root.querySelector(".confirm-dialog")).toBeNull(); // 无确认弹窗
-    expect(root.querySelector(".result-panel .count-badge")?.textContent).toMatch(
-      /条/,
-    );
+    expect(
+      root.querySelector(".result-panel .count-badge")?.textContent,
+    ).toMatch(/条/);
   });
 });

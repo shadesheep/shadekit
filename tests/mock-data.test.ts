@@ -18,11 +18,14 @@ import {
 import {
   createField,
   generateRows,
+  getFieldType,
   nextKey,
   parseEnumValues,
   sanitizeFields,
 } from "../entrypoints/tools/mock-data/lib/generators";
+import { regionFromAddress } from "../entrypoints/tools/mock-data/lib/domains/tender";
 import { TEMPLATES } from "../entrypoints/tools/mock-data/lib/templates";
+import { templateToFields } from "../entrypoints/tools/mock-data/lib/template-files";
 
 // ─── 身份证校验位（GB 11643） ───────────────────────────────
 
@@ -275,17 +278,44 @@ describe("预设模板", () => {
 
   it("模板可直接生成数据", () => {
     for (const tpl of TEMPLATES) {
-      const keys = new Set<string>();
-      const fields = tpl.rows.map((r) => {
-        const f = createField(r.type, keys)!;
-        f.key = r.key;
-        keys.add(r.key);
-        if (r.params) f.params = { ...f.params, ...r.params };
-        return f;
-      });
-      const rows = generateRows(fields, 3);
+      const rows = generateRows(templateToFields(tpl), 3);
       expect(rows).toHaveLength(3);
       expect(Object.keys(rows[0])).toEqual(tpl.rows.map((r) => r.key));
     }
+  });
+});
+
+// ─── 模板字段关系 ───────────────────────────────────────────
+
+describe("预设模板关系", () => {
+  it("招标项目名称中的地区与地区地址一致", () => {
+    const project = TEMPLATES.find((template) => template.id === "project")!;
+    const rows = generateRows(templateToFields(project), 20, {
+      seed: "project-region",
+    });
+    for (const row of rows) {
+      const region = regionFromAddress(String(row.region));
+      expect(region).not.toBe("");
+      expect(String(row.projectName).startsWith(region)).toBe(true);
+    }
+  });
+
+  it("用户信息身份证关联年龄性别，评标专家与评标办法已移除", () => {
+    expect(TEMPLATES.some((template) => template.id === "expert")).toBe(false);
+    expect(getFieldType("evalMethod")).toBeUndefined();
+    const project = TEMPLATES.find((template) => template.id === "project")!;
+    expect(project.rows.some((row) => row.key === "evalMethod")).toBe(false);
+
+    const user = TEMPLATES.find((template) => template.id === "user")!;
+    const fields = templateToFields(user);
+    const idCard = fields.find((field) => field.key === "idCard")!;
+    const age = fields.find((field) => field.key === "age")!;
+    const gender = fields.find((field) => field.key === "gender")!;
+    expect(idCard.sourceFieldIds).toMatchObject({
+      age: age.id,
+      gender: gender.id,
+    });
+    const [row] = generateRows(fields, 1, { seed: "user-card" });
+    expect(String(row.idCard)).toMatch(/^\d{17}[\dX]$/);
   });
 });

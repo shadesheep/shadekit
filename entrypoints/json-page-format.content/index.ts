@@ -1,6 +1,7 @@
 /**
  * JSON 页面自动格式化 Content Script
- * 当浏览器直接访问返回 JSON 的 API URL 时，自动将原始 JSON 文本格式化为可折叠的 HTML 树
+ * 当浏览器直接访问返回 JSON 的 API URL 或本地 JSON 文件（file://）时，
+ * 自动将原始 JSON 文本格式化为可折叠的 HTML 树
  * 参考 FeHelper 的实现原理，UI 风格与现有项目保持一致
  */
 import { defineContentScript } from 'wxt/utils/define-content-script';
@@ -13,7 +14,9 @@ import { getConfig } from '../shared/tool-config';
 export default defineContentScript({
   matches: [
     'http://*/*',
-    'https://*/*'
+    'https://*/*',
+    // Chrome 下还需在扩展详情页开启「允许访问文件网址」才会注入
+    'file:///*',
   ],
   runAt: 'document_idle',
   async main() {

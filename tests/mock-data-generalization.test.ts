@@ -66,18 +66,7 @@ describe("可复现与分批生成", () => {
     expect(batches.flat()).toEqual(expected);
   });
 
-  it("空值策略与全批唯一约束对所有字段统一生效", () => {
-    const nullable = generateRows(
-      [field("value", "int", {}, { constraints: { nullRate: 1 } })],
-      3,
-      { seed: "nullable" },
-    );
-    expect(nullable).toEqual([
-      { value: null },
-      { value: null },
-      { value: null },
-    ]);
-
+  it("全批唯一约束对所有字段统一生效", () => {
     expect(() =>
       generateRows(
         [
@@ -143,17 +132,24 @@ describe("派生与递归结构", () => {
 
   it("按编辑顺序序列化数字字段名和嵌套字段", async () => {
     const fields = [
-      field("object", "object", {}, {
-        children: [
-          field("10", "derived", { sourceKey: "2" }),
-          field("2", "fixed", { value: 7 }),
-        ],
-      }),
+      field(
+        "object",
+        "object",
+        {},
+        {
+          children: [
+            field("10", "derived", { sourceKey: "2" }),
+            field("2", "fixed", { value: 7 }),
+          ],
+        },
+      ),
       field("10", "fixed", { value: 1 }),
       field("2", "fixed", { value: 2 }),
     ];
     const [preview] = generateRows(fields, 1);
-    expect(JSON.stringify(preview)).toBe('{"object":{"10":7,"2":7},"10":1,"2":2}');
+    expect(JSON.stringify(preview)).toBe(
+      '{"object":{"10":7,"2":7},"10":1,"2":2}',
+    );
     const file = await collectChunks(generateRowBatches(fields, 1), "jsonl");
     expect(file.trim()).toBe(JSON.stringify(preview));
   });
@@ -217,9 +213,13 @@ describe("Schema 与模板复用", () => {
     );
     const [schemaRow] = generateRows(schemaFields, 1, { seed: "schema" });
     expect(schemaRow.id).toBe(7);
-    expect(
-      schemaFields.find((item) => item.key === "email")?.constraints?.nullRate,
-    ).toBeGreaterThan(0);
+    const emailField = schemaFields.find((item) => item.key === "email");
+    expect(emailField?.type).toBe("email");
+    expect(emailField?.inputRule).toMatchObject({
+      nullable: true,
+      type: "string",
+      format: "email",
+    });
   });
 
   it("版本化模板递归往返且派生配置不丢失", () => {

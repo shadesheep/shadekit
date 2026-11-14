@@ -34,7 +34,6 @@ export {
 } from "./domains/tech";
 export {
   CONTRACT_TYPES,
-  EVAL_METHODS,
   FUND_SOURCES,
   QUALIFICATION_LEVELS,
   QUALIFICATION_TYPES,
@@ -181,12 +180,56 @@ const ID_AREA_CODES = [
   "320115",
 ] as const;
 
-export function generateIdCard(rng: RandomSource = defaultRandom): string {
+export interface IdCardDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+export interface IdCardOptions {
+  /** 固定出生日期；缺省时随机选取 1965–2003 年。 */
+  birthDate?: IdCardDate;
+  /** true 为男性（顺序码末位奇数），false 为女性；缺省时随机。 */
+  male?: boolean;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * 按参考日期的周岁反推出生日期：生日未到时回溯一年，保证参考日期当天
+ * 恰好满 `age` 周岁（生日当天与生日前一天均适用）。
+ */
+export function idCardBirthDateForAge(
+  age: number,
+  base: IdCardDate,
+  rng: RandomSource = defaultRandom,
+): IdCardDate {
+  const month = randomInt(1, 12, rng);
+  let day = randomInt(1, daysInMonth(2000, month), rng);
+  let year = base.year - age;
+  if (month > base.month || (month === base.month && day > base.day)) {
+    year -= 1;
+  }
+  day = Math.min(day, daysInMonth(year, month));
+  return { year, month, day };
+}
+
+export function generateIdCard(
+  rng: RandomSource = defaultRandom,
+  options: IdCardOptions = {},
+): string {
   const area = pick(ID_AREA_CODES, rng);
-  const year = randomInt(1965, 2003, rng);
-  const month = String(randomInt(1, 12, rng)).padStart(2, "0");
-  const day = String(randomInt(1, 28, rng)).padStart(2, "0");
-  const seq = randomDigits(3, rng);
+  const birth = options.birthDate;
+  const year = birth?.year ?? randomInt(1965, 2003, rng);
+  const month = String(birth?.month ?? randomInt(1, 12, rng)).padStart(2, "0");
+  const day = String(birth?.day ?? randomInt(1, 28, rng)).padStart(2, "0");
+  const male = options.male ?? rng() < 0.5;
+  const seq = String(randomInt(0, 499, rng) * 2 + (male ? 1 : 0)).padStart(
+    3,
+    "0",
+  );
   const first17 = `${area}${year}${month}${day}${seq}`;
   return first17 + idCardCheckCode(first17);
 }

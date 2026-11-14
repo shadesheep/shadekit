@@ -78,7 +78,10 @@ describe("货架条目与分组", () => {
       (group) => group.id === "scenario",
     );
     expect(contact?.entries).toContainEqual(
-      expect.objectContaining({ key: "contactName", scenarioName: "投标人信息" }),
+      expect.objectContaining({
+        key: "contactName",
+        scenarioName: "投标人信息",
+      }),
     );
     expect(
       searchShelf("contactName", TEMPLATES).some(
@@ -155,9 +158,9 @@ describe("按 key 增删", () => {
       { key: "renamed", type: "name", params: {} },
     ]);
     const selected = selectScenario(existing, user);
-    expect(selected.fields.filter((field) => field.key === "name")).toHaveLength(
-      1,
-    );
+    expect(
+      selected.fields.filter((field) => field.key === "name"),
+    ).toHaveLength(1);
     expect(selected.added).toBe(user.rows.length - 1);
 
     const removed = deselectScenario(selected.fields, user);
@@ -179,9 +182,7 @@ describe("字段显示名与默认字段", () => {
     const [labelled] = sanitizeFields([
       { key: "contactName", type: "name", label: "联系人", params: {} },
     ]);
-    const [plain] = sanitizeFields([
-      { key: "name", type: "name", params: {} },
-    ]);
+    const [plain] = sanitizeFields([{ key: "name", type: "name", params: {} }]);
     const unknown: MockField = {
       id: "x",
       key: "mystery",
@@ -209,9 +210,9 @@ describe("A 方向：场景预勾与勾选计数", () => {
       { id: "1", key: "name", type: "name", params: {}, enabled: true },
     ];
     const { fields, added } = preloadScenario(start, user);
-    expect(added).toBe(5); // user 场景 6 字段，name 已启用 → 补 5
-    expect(fields.filter((f) => f.enabled !== false)).toHaveLength(6);
-    expect(countEnabled(fields)).toBe(6);
+    expect(added).toBe(6); // user 场景 7 字段，name 已启用 → 补 6
+    expect(fields.filter((f) => f.enabled !== false)).toHaveLength(7);
+    expect(countEnabled(fields)).toBe(7);
   });
 
   it("resolveFallbackScenarioId 失效 id 回退到 user", () => {

@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, type App as VueApp } from "vue";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp, h, nextTick, type App as VueApp } from "vue";
 import JsonImportDrawer from "../entrypoints/mock-data/components/JsonImportDrawer.vue";
 import ScenarioManagerDrawer from "../entrypoints/mock-data/components/ScenarioManagerDrawer.vue";
+import { sanitizeFields } from "../entrypoints/tools/mock-data/lib/generators";
 import { serializeTemplateFile } from "../entrypoints/tools/mock-data/lib/template-files";
 import {
-  TEMPLATES,
   type MockTemplate,
+  TEMPLATES,
 } from "../entrypoints/tools/mock-data/lib/templates";
-import { sanitizeFields } from "../entrypoints/tools/mock-data/lib/generators";
 import type { MockField } from "../entrypoints/tools/mock-data/lib/types";
 
 let app: VueApp<Element> | null = null;
@@ -50,8 +51,7 @@ async function mountScenarioDrawer(options: ScenarioOptions = {}) {
         hasFieldErrors: options.hasFieldErrors ?? false,
         onClose: () => events.push(["close", null]),
         onSave: (template: MockTemplate) => events.push(["save", template]),
-        onImport: (template: MockTemplate) =>
-          events.push(["import", template]),
+        onImport: (template: MockTemplate) => events.push(["import", template]),
         onDelete: (id: string) => events.push(["delete", id]),
       }),
   });
@@ -197,11 +197,11 @@ describe("ScenarioManagerDrawer", () => {
       revokeObjectURL: () => {},
     });
     let downloaded = "";
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
-      function (this: HTMLAnchorElement) {
-        downloaded = this.download;
-      },
-    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloaded = this.download;
+    });
 
     await mountScenarioDrawer({ customTemplates: [customTemplate] });
 
@@ -217,12 +217,21 @@ describe("ScenarioManagerDrawer", () => {
 });
 
 describe("JsonImportDrawer", () => {
-  it("有效 JSON 示例导入字段", async () => {
+  it("预览 JSON 示例后确认导入字段", async () => {
     await mountJsonDrawer();
 
     typeInto(".import-text", '{"foo":"bar"}');
     await flush();
-    buttonByText("导入并替换字段").click();
+    buttonByText("解析并预览").click();
+    await flush();
+
+    expect(root.querySelector(".preview-summary")?.textContent).toContain(
+      "JSON 示例",
+    );
+    expect(root.querySelector(".preview-path")?.textContent).toBe("foo");
+    expect(events.some(([name]) => name === "import")).toBe(false);
+
+    buttonByText("确认导入并替换字段").click();
     await flush();
 
     const imported = events.find(([name]) => name === "import")?.[1] as
@@ -231,12 +240,46 @@ describe("JsonImportDrawer", () => {
     expect(imported?.map((field) => field.key)).toEqual(["foo"]);
   });
 
+  it("预览 JSON Schema 时标明已识别规则与待处理关键词", async () => {
+    await mountJsonDrawer();
+
+    typeInto(
+      ".import-text",
+      JSON.stringify({
+        type: "object",
+        required: ["nickname"],
+        properties: {
+          nickname: {
+            type: "string",
+            minLength: 2,
+            maxLength: 20,
+            pattern: "^[a-z]+$",
+          },
+        },
+      }),
+    );
+    await flush();
+    buttonByText("解析并预览").click();
+    await flush();
+
+    expect(root.querySelector(".preview-summary")?.textContent).toContain(
+      "JSON Schema",
+    );
+    expect(root.textContent).toContain("字符数：2–20");
+    expect(root.querySelector(".pending-item")?.textContent).toContain(
+      "pattern",
+    );
+    expect(root.querySelector(".pending-item")?.textContent).toContain(
+      "nickname",
+    );
+  });
+
   it("无效 JSON 保留抽屉并显示错误", async () => {
     await mountJsonDrawer();
 
     typeInto(".import-text", "{");
     await flush();
-    buttonByText("导入并替换字段").click();
+    buttonByText("解析并预览").click();
     await flush();
 
     expect(events.some(([name]) => name === "import")).toBe(false);

@@ -28,12 +28,12 @@ A browser toolbox for development, testing, and delivery: **one-click switching 
 |------|-------------|-------------|
 | Environments & Accounts | One-click switching across multiple environments and accounts, with automatic logout → login → redirect; Universal Login supports custom integration with common form-based systems | Floating panel / Popup / `Alt+Shift+A` |
 | Environment Indicator | A persistent, translucent label in a page corner identifies the current environment (local/test/production); all four corner positions are configurable | Automatically injected |
-| JSON Page Formatting | Automatically renders a collapsible tree when a JSON API URL is opened directly in the browser | Automatically injected |
+| JSON Page Formatting | Automatically renders a collapsible tree when a JSON API URL or local `.json` file is opened directly in the browser | Automatically injected |
 | JSON Formatter | Format, minify, sort, and validate JSON; run JSONPath queries and parse nested escaped JSON | Standalone tab |
 | JSON Diff | Compare two JSON documents side by side, with differences highlighted according to RFC 6902 | Standalone tab |
 | Image Base64 | Convert between images and Base64; supports upload, paste, drag and drop, and URLs | Standalone tab |
 | Code Beautifier | Beautify JS/CSS/HTML/XML/SQL with automatic format detection | Standalone tab |
-| Mock Data | Generate Chinese test data in bulk (people/companies/bidding and tendering), with JSON/CSV/SQL export | Standalone tab |
+| Mock Data | Generate reproducible schema data with nested objects/arrays, derived fields, custom templates, and JSON Schema import; export JSON/CSV/SQL/XML in batches | Standalone tab |
 
 ## Installation
 
@@ -97,7 +97,7 @@ Enable it under **Options → Environments & Accounts → Settings → Environme
 
 ![JSON Formatter, JSON Diff, and Chinese mock data](docs/images/dev-tools.webp)
 
-Click a tool in the Popup, or open its standalone tab through **Tools Overview** on the Options page. When you open a URL that returns JSON directly in the browser, it is automatically formatted as a collapsible tree. This behavior can be disabled in the **JSON Formatter** configuration.
+Click a tool in the Popup, or open its standalone tab through **Tools Overview** on the Options page. When you open a URL that returns JSON, or a local `.json` file, directly in the browser, it is automatically formatted as a collapsible tree. This behavior can be disabled in the **JSON Formatter** configuration. In Chrome or Edge, enable **Allow access to file URLs** on the extension details page to inject into local files.
 
 ## Local Data and Privacy
 

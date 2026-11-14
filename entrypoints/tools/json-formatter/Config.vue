@@ -69,7 +69,7 @@ const INDENT_OPTIONS = [
 
     <DtConfigItem
       label="页面自动解析 JSON"
-      hint="访问返回 JSON 的 API URL 时,自动格式化为可折叠树"
+      hint="访问返回 JSON 的接口或本地 .json 文件时自动格式化;Chrome/Edge 需在扩展详情中开启「允许访问文件网址」"
     >
       <DtToggle v-model="config.autoParseJson" />
     </DtConfigItem>

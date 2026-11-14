@@ -1,39 +1,61 @@
 <script setup lang="ts">
 import { json } from "@codemirror/lang-json";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { copyToClipboard } from "../shared/clipboard";
 import DtButton from "../shared/components/DtButton.vue";
 import DtEmptyState from "../shared/components/DtEmptyState.vue";
 import DtPanel from "../shared/components/DtPanel.vue";
 import DtSelect from "../shared/components/DtSelect.vue";
 import DtSegmented from "../shared/config/DtSegmented.vue";
-import ToastContainer from "../shared/ToastContainer.vue";
-import { copyToClipboard } from "../shared/clipboard";
 import { buildDownloadName, downloadBlobAsFile } from "../shared/download";
 import { getModEnterHint } from "../shared/format-shortcut";
 import {
   type CodeEditor,
   createCodeEditor,
 } from "../shared/lib/codemirror-editor";
+import ToastContainer from "../shared/ToastContainer.vue";
 import { getConfig, updateConfig } from "../shared/tool-config";
 import { showToast } from "../shared/use-toast";
+import { validateDateRule } from "../tools/mock-data/lib/date-cases";
 import {
-  FORMAT_META,
   exportData,
   exportDataChunks,
+  FORMAT_META,
   formatSize,
 } from "../tools/mock-data/lib/exporters";
 import {
   CATEGORIES,
-  FIELD_TYPES,
-  MAX_ROWS,
   createField,
+  FIELD_TYPES,
   fieldDependencyErrors,
   generateRowBatches,
   generateRows,
   getFieldType,
+  localTimeZone,
+  MAX_ROWS,
   sanitizeFields,
 } from "../tools/mock-data/lib/generators";
-import { TEMPLATES, type MockTemplate } from "../tools/mock-data/lib/templates";
+import { validateInputRule } from "../tools/mock-data/lib/invalid-cases";
+import { validateLengthRule } from "../tools/mock-data/lib/length-cases";
+import { validateNumericRule } from "../tools/mock-data/lib/numeric-cases";
+import {
+  BID_FIELD_LABELS,
+  DATASET_DEFAULT_BIDS_PER_PROJECT,
+  DATASET_DEFAULT_PROJECTS,
+  DATASET_MAX_BIDS_PER_PROJECT,
+  DATASET_MAX_PROJECTS,
+  generateProjectBidDataset,
+  type ProjectBidDataset,
+  projectBidCountIssues,
+  projectBidIssues,
+  serializeProjectBidDataset,
+} from "../tools/mock-data/lib/project-bid-dataset";
+import { templateToFields } from "../tools/mock-data/lib/template-files";
+import { type MockTemplate, TEMPLATES } from "../tools/mock-data/lib/templates";
+import {
+  generateTestCases,
+  type TestCaseSet,
+} from "../tools/mock-data/lib/test-cases";
 import type {
   CategoryId,
   ExportOptions,
@@ -44,18 +66,19 @@ import type {
   MockField,
   MockScenario,
   OutputFormat,
+  ProjectBidDatasetConfig,
 } from "../tools/mock-data/lib/types";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import FieldShelf from "./components/FieldShelf.vue";
 import JsonImportDrawer from "./components/JsonImportDrawer.vue";
 import ScenarioManagerDrawer from "./components/ScenarioManagerDrawer.vue";
+import TestCaseDrawer from "./components/TestCaseDrawer.vue";
 import {
   DEFAULT_SCENARIO_ID,
   enabledFields,
   fieldDisplayName,
   resolveFallbackScenarioId,
 } from "./lib/field-shelf";
-import { templateToFields } from "../tools/mock-data/lib/template-files";
 
 const DEFAULT_EXPORT_OPTIONS: Required<ExportOptions> = {
   sqlDialect: "mysql",
@@ -68,8 +91,14 @@ const PREVIEW_HARD_LIMIT = 1000;
 const TABLE_PREVIEW_LIMIT_DEFAULT = 200;
 const QUICK_COUNT_DEFAULT = 6;
 const COUNT_PRESETS = [1, 10, 50, 100, 1000];
+const DATASET_PREVIEW_PROJECTS = 20;
+const DATASET_PREVIEW_BIDS = 20;
+/** 测试用例入口暂未开放；功能完善后改为 true。 */
+const TEST_CASES_VISIBLE = false;
+/** 项目 → 投标关联数据集入口暂未开放；功能完善后改为 true。 */
+const PROJECT_BID_DATASET_VISIBLE = false;
 const QUICK_FIELD_TYPES = FIELD_TYPES.filter(
-  (type) => !["evalMethod", "openBidTime", "score"].includes(type.id),
+  (type) => !["openBidTime", "score"].includes(type.id),
 );
 
 function makeSeed(): string {
@@ -120,10 +149,7 @@ const exportOptions = ref<Required<ExportOptions>>({
 const batchSize = ref(250);
 const customTemplates = ref<MockTemplate[]>([]);
 const activeScenarioId = ref(DEFAULT_SCENARIO_ID);
-const allTemplates = computed(() => [
-  ...TEMPLATES,
-  ...customTemplates.value,
-]);
+const allTemplates = computed(() => [...TEMPLATES, ...customTemplates.value]);
 const shelfSearch = ref("");
 const settingsOpen = ref(false);
 const scenarioDrawerOpen = ref(false);
@@ -147,6 +173,14 @@ const configLoaded = ref(false);
 const downloading = ref(false);
 const downloadedRows = ref(0);
 const downloadTotal = ref(0);
+const testCaseSet = ref<TestCaseSet | null>(null);
+const testCasesOpen = ref(false);
+
+const datasetEnabled = ref(false);
+const datasetProjectCount = ref(DATASET_DEFAULT_PROJECTS);
+const datasetBidsPerProject = ref(DATASET_DEFAULT_BIDS_PER_PROJECT);
+const datasetPreview = ref<ProjectBidDataset | null>(null);
+const datasetProjectIndex = ref(0);
 
 const outputEditorRef = ref<HTMLDivElement>();
 
@@ -170,7 +204,6 @@ const SCENARIO_OPTIONS: Array<{ value: MockScenario; label: string }> = [
   { value: "normal", label: "日常联调" },
   { value: "boundary", label: "测试边界" },
   { value: "invalid", label: "测试异常" },
-  { value: "timeSeries", label: "时间递增" },
 ];
 const SQL_DIALECT_OPTIONS: Array<{
   value: "mysql" | "postgres" | "sqlite";
@@ -209,6 +242,54 @@ const previewLimit = computed(() =>
   ),
 );
 
+const normalizedDatasetProjectCount = computed(() =>
+  clampInteger(
+    datasetProjectCount.value,
+    DATASET_DEFAULT_PROJECTS,
+    1,
+    DATASET_MAX_PROJECTS,
+  ),
+);
+const normalizedDatasetBidsPerProject = computed(() =>
+  clampInteger(
+    datasetBidsPerProject.value,
+    DATASET_DEFAULT_BIDS_PER_PROJECT,
+    1,
+    DATASET_MAX_BIDS_PER_PROJECT,
+  ),
+);
+const datasetConfig = computed<ProjectBidDatasetConfig>(() => ({
+  enabled: datasetEnabled.value,
+  projectCount: normalizedDatasetProjectCount.value,
+  bidsPerProject: normalizedDatasetBidsPerProject.value,
+}));
+const datasetTotalBids = computed(
+  () =>
+    normalizedDatasetProjectCount.value * normalizedDatasetBidsPerProject.value,
+);
+const datasetIssues = computed(() =>
+  datasetEnabled.value
+    ? [
+        ...projectBidIssues(fields.value),
+        ...projectBidCountIssues(datasetConfig.value),
+      ]
+    : [],
+);
+const selectedDatasetGroup = computed(
+  () => datasetPreview.value?.groups[datasetProjectIndex.value] ?? null,
+);
+const datasetBidColumns = computed(() =>
+  selectedDatasetGroup.value
+    ? Object.keys(selectedDatasetGroup.value.bids[0] ?? {})
+    : [],
+);
+const datasetPreviewProjectCount = computed(
+  () => datasetPreview.value?.projects.length ?? 0,
+);
+const datasetPreviewBidCount = computed(
+  () => datasetPreview.value?.bids.length ?? 0,
+);
+
 /** 每一级字段分别检查空键、重复键与约束范围，嵌套字段也参与生成前校验。 */
 const fieldErrors = computed(() => {
   const dependencyErrors = fieldDependencyErrors(fields.value);
@@ -229,15 +310,11 @@ const fieldErrors = computed(() => {
       if (!key) messages.push("字段名不能为空");
       else if ((keyCounts.get(key) ?? 0) > 1)
         messages.push("同级字段名不能重复");
-      for (const name of ["nullRate", "invalidRate"] as const) {
-        const value = field.constraints?.[name];
-        if (
-          value !== undefined &&
-          (!Number.isFinite(value) || value < 0 || value > 1)
-        ) {
-          messages.push(`${name} 必须在 0 到 1 之间`);
-        }
-      }
+      for (const message of validateNumericRule(field)) messages.push(message);
+      for (const message of validateLengthRule(field)) messages.push(message);
+      for (const message of validateInputRule(field)) messages.push(message);
+      for (const message of validateDateRule(field, list))
+        messages.push(message);
       if (messages.length) errors[field.id] = messages.join("；");
       if (field.children?.length) visit(field.children);
     }
@@ -248,7 +325,13 @@ const fieldErrors = computed(() => {
 const hasFieldErrors = computed(
   () => Object.keys(fieldErrors.value).length > 0,
 );
-const hasOutput = computed(() => records.value.length > 0);
+const hasDatasetOutput = computed(
+  () =>
+    datasetEnabled.value && (datasetPreview.value?.projects.length ?? 0) > 0,
+);
+const hasOutput = computed(
+  () => records.value.length > 0 || hasDatasetOutput.value,
+);
 
 // ─── 结果视图（卡片 / 表格 / 源码） ──────────────────────────
 
@@ -400,17 +483,17 @@ function promoteQuickToFields() {
 }
 
 const resultTitle = computed(() => {
-  if (leftMode.value === "batch") return "生成结果";
+  if (leftMode.value === "batch") {
+    return datasetEnabled.value ? "项目 → 投标记录" : "生成结果";
+  }
   return quickType.value ? `候选值 · ${quickType.value.label}` : "候选值";
 });
-
-// ─── 预览、复制与分批下载 ───────────────────────────────────
-
 function generationOptions() {
   return {
     seed: seed.value.trim() || undefined,
     locale: locale.value,
     scenario: scenario.value,
+    timeZone: localTimeZone(),
   };
 }
 
@@ -424,6 +507,8 @@ function clearOutput() {
   outputSize.value = "";
   records.value = [];
   cardIndex.value = 0;
+  datasetPreview.value = null;
+  datasetProjectIndex.value = 0;
   editor?.setText("");
 }
 
@@ -432,7 +517,8 @@ function ensureCodeOutput() {
   if (
     viewMode.value !== "code" ||
     leftMode.value !== "batch" ||
-    !records.value.length
+    !records.value.length ||
+    datasetEnabled.value
   ) {
     return;
   }
@@ -469,6 +555,49 @@ function doGenerate(options: { silent?: boolean } = {}) {
     if (!options.silent) showToast("请先修正字段中的错误", "error");
     return;
   }
+  if (datasetEnabled.value) {
+    if (datasetIssues.value.length) {
+      clearOutput();
+      if (!options.silent) showToast(datasetIssues.value.join("；"), "error");
+      return;
+    }
+    try {
+      const preview = generateProjectBidDataset(fields.value, {
+        ...generationOptions(),
+        projectCount: Math.min(
+          normalizedDatasetProjectCount.value,
+          DATASET_PREVIEW_PROJECTS,
+        ),
+        bidsPerProject: Math.min(
+          normalizedDatasetBidsPerProject.value,
+          DATASET_PREVIEW_BIDS,
+        ),
+      });
+      if (!seed.value.trim()) seed.value = preview.seed;
+      datasetPreview.value = preview;
+      datasetProjectIndex.value = Math.min(
+        datasetProjectIndex.value,
+        preview.projects.length - 1,
+      );
+      records.value = [];
+      rowCount.value = datasetTotalBids.value;
+      cardIndex.value = 0;
+      rawOutput.value = "";
+      outputSize.value = "";
+      editor?.setText("");
+      if (!options.silent) {
+        showToast(
+          `已生成 ${preview.projects.length} 个项目预览（共 ${normalizedDatasetProjectCount.value} 个）`,
+          "success",
+        );
+      }
+    } catch (error) {
+      clearOutput();
+      showToast(`生成失败：${errorMessage(error)}`, "error");
+    }
+    return;
+  }
+  datasetPreview.value = null;
   let rows: Record<string, unknown>[];
   try {
     rows = generateRows(fields.value, previewLimit.value, generationOptions());
@@ -493,6 +622,20 @@ function doGenerate(options: { silent?: boolean } = {}) {
 }
 
 async function copyResult() {
+  if (datasetEnabled.value) {
+    const group = selectedDatasetGroup.value;
+    if (!group) return;
+    const ok = await copyToClipboard(
+      JSON.stringify({ project: group.project, bids: group.bids }, null, 2),
+    );
+    showToast(
+      ok
+        ? `已复制项目 ${group.projectCode} 及其 ${group.bids.length} 条投标记录`
+        : "复制失败",
+      ok ? "success" : "error",
+    );
+    return;
+  }
   if (!records.value.length) return;
   const text =
     viewMode.value === "code" && rawOutput.value
@@ -513,6 +656,11 @@ async function copyResult() {
 }
 
 async function downloadResult() {
+  if (datasetEnabled.value) {
+    await downloadDataset();
+    return;
+  }
+  if (!records.value.length || downloading.value) return;
   if (!records.value.length || downloading.value) return;
   if (hasFieldErrors.value) {
     showToast("请先修正字段中的错误", "error");
@@ -567,6 +715,45 @@ async function downloadResult() {
   }
 }
 
+/** 预览与下载使用同一数据集生成逻辑；批次大小不影响数据集内容。 */
+async function downloadDataset() {
+  if (downloading.value) return;
+  if (hasFieldErrors.value) {
+    showToast("请先修正字段中的错误", "error");
+    return;
+  }
+  if (datasetIssues.value.length) {
+    showToast(datasetIssues.value.join("；"), "error");
+    return;
+  }
+  downloading.value = true;
+  const total = datasetTotalBids.value;
+  downloadTotal.value = total;
+  downloadedRows.value = 0;
+  try {
+    const dataset = generateProjectBidDataset(fields.value, {
+      ...generationOptions(),
+      projectCount: normalizedDatasetProjectCount.value,
+      bidsPerProject: normalizedDatasetBidsPerProject.value,
+    });
+    if (!seed.value.trim()) seed.value = dataset.seed;
+    downloadedRows.value = dataset.bids.length;
+    downloadBlobAsFile(
+      [serializeProjectBidDataset(dataset)],
+      buildDownloadName("mock-data-project-bids", "json", new Date()),
+      "application/json",
+    );
+    showToast(
+      `已下载 ${dataset.projects.length} 个项目、${dataset.bids.length} 条投标记录`,
+      "success",
+    );
+  } catch (error) {
+    showToast(`下载失败：${errorMessage(error)}`, "error");
+  } finally {
+    downloading.value = false;
+  }
+}
+
 function clearAll() {
   if (leftMode.value === "quick") {
     quickType.value = null;
@@ -579,6 +766,22 @@ function clearAll() {
   showToast("已清空字段与结果", "info");
 }
 
+function openTestCases() {
+  const template = allTemplates.value.find(
+    (item) => item.id === activeScenarioId.value,
+  );
+  const set = generateTestCases(fields.value, {
+    seed: seed.value,
+    locale: locale.value,
+    timeZone: localTimeZone(),
+    templateId: activeScenarioId.value,
+    templateName: template?.name,
+    inferFromSampling: true,
+  });
+  if (!seed.value.trim()) seed.value = set.seed;
+  testCaseSet.value = set;
+  testCasesOpen.value = true;
+}
 // ─── 字段货架、场景管理与 JSON 导入 ─────────────────────────
 
 function nextCustomTemplateId(): string {
@@ -596,7 +799,10 @@ function shuffleBatch() {
 }
 
 /** 把场景替换为整组字段（覆盖式）。 */
-function loadScenarioNow(template: MockTemplate, options: { silent?: boolean } = {}) {
+function loadScenarioNow(
+  template: MockTemplate,
+  options: { silent?: boolean } = {},
+) {
   fields.value = templateToFields(template);
   activeScenarioId.value = template.id;
   shelfSearch.value = "";
@@ -690,6 +896,7 @@ function persistConfig() {
     customTemplates: clone(customTemplates.value),
     exportOptions: { ...exportOptions.value },
     batchSize: normalizedBatchSize.value,
+    projectBid: { ...datasetConfig.value },
   });
 }
 
@@ -718,7 +925,16 @@ function scheduleGenerate() {
 }
 
 watch(
-  [fields, count, seed, locale, scenario],
+  [
+    fields,
+    count,
+    seed,
+    locale,
+    scenario,
+    datasetEnabled,
+    datasetProjectCount,
+    datasetBidsPerProject,
+  ],
   () => {
     if (!configLoaded.value) return;
     scheduleSave();
@@ -811,8 +1027,7 @@ onMounted(async () => {
     if (
       saved.scenario === "normal" ||
       saved.scenario === "boundary" ||
-      saved.scenario === "invalid" ||
-      saved.scenario === "timeSeries"
+      saved.scenario === "invalid"
     ) {
       scenario.value = saved.scenario;
     }
@@ -824,6 +1039,8 @@ onMounted(async () => {
       ...(saved.exportOptions ?? {}),
     };
     batchSize.value = clampInteger(saved.batchSize, 250, 1, 10000);
+    // 关联数据集入口暂时隐藏：忽略历史配置，避免旧配置继续启用。
+    datasetEnabled.value = false;
   }
 
   const storedId = saved?.activeScenarioId;
@@ -834,19 +1051,19 @@ onMounted(async () => {
   // 有保存字段：恢复（透传 enabled）；首次/选项页清空：默认用户场景整组勾选。
   if (savedFields) {
     // 若存储的 activeScenarioId 指向已删除场景，回退到 user 并整组加载其字段（不留残留）。
-    if (resolvedId === DEFAULT_SCENARIO_ID && storedId && storedId !== resolvedId) {
+    if (
+      resolvedId === DEFAULT_SCENARIO_ID &&
+      storedId &&
+      storedId !== resolvedId
+    ) {
       const userTemplate = TEMPLATES.find((t) => t.id === DEFAULT_SCENARIO_ID);
-      fields.value = userTemplate
-        ? templateToFields(userTemplate)
-        : [];
+      fields.value = userTemplate ? templateToFields(userTemplate) : [];
     } else {
       fields.value = savedFields;
     }
   } else {
     const userTemplate = TEMPLATES.find((t) => t.id === DEFAULT_SCENARIO_ID);
-    fields.value = userTemplate
-      ? templateToFields(userTemplate)
-      : [];
+    fields.value = userTemplate ? templateToFields(userTemplate) : [];
   }
   activeScenarioId.value = resolvedId;
 
@@ -906,40 +1123,64 @@ onUnmounted(() => {
           <kbd class="mod-key">{{ modEnterHint }}</kbd>
         </DtButton>
         <span class="divider" />
-        <span class="toolbar-label">{{ leftMode === 'batch' ? '条数' : '候选' }}</span>
-        <input
-          v-if="leftMode === 'batch'"
-          v-model.number="count"
-          class="num-input"
-          type="number"
-          min="1"
-          :max="MAX_ROWS"
-          :title="`生成总条数（1-${MAX_ROWS}），预览最多 1000 条`"
-          @change="count = normalizedCount"
-        />
-        <input
-          v-else
-          v-model.number="quickCount"
-          class="num-input"
-          type="number"
-          min="1"
-          max="20"
-          title="候选条数（1-20）"
-        />
-        <span v-if="leftMode === 'batch'" class="count-presets" title="快速设置条数">
-          <button
-            v-for="preset in COUNT_PRESETS"
-            :key="preset"
-            type="button"
-            class="preset-btn"
-            :class="{ active: count === preset }"
-            @click="count = preset"
-          >
-            {{ preset }}
-          </button>
-        </span>
+        <template v-if="leftMode === 'batch' && datasetEnabled">
+          <span class="toolbar-label">项目数</span>
+          <input
+            v-model.number="datasetProjectCount"
+            class="num-input"
+            type="number"
+            min="1"
+            :max="DATASET_MAX_PROJECTS"
+            title="父记录（项目）数量"
+            @change="datasetProjectCount = normalizedDatasetProjectCount"
+          />
+          <span class="toolbar-label">每项目投标</span>
+          <input
+            v-model.number="datasetBidsPerProject"
+            class="num-input"
+            type="number"
+            min="1"
+            :max="DATASET_MAX_BIDS_PER_PROJECT"
+            title="每个项目生成的投标记录数"
+            @change="datasetBidsPerProject = normalizedDatasetBidsPerProject"
+          />
+        </template>
+        <template v-else>
+          <span class="toolbar-label">{{ leftMode === 'batch' ? '条数' : '候选' }}</span>
+          <input
+            v-if="leftMode === 'batch'"
+            v-model.number="count"
+            class="num-input"
+            type="number"
+            min="1"
+            :max="MAX_ROWS"
+            :title="`生成总条数（1-${MAX_ROWS}），预览最多 1000 条`"
+            @change="count = normalizedCount"
+          />
+          <input
+            v-else
+            v-model.number="quickCount"
+            class="num-input"
+            type="number"
+            min="1"
+            max="20"
+            title="候选条数（1-20）"
+          />
+          <span v-if="leftMode === 'batch'" class="count-presets" title="快速设置条数">
+            <button
+              v-for="preset in COUNT_PRESETS"
+              :key="preset"
+              type="button"
+              class="preset-btn"
+              :class="{ active: count === preset }"
+              @click="count = preset"
+            >
+              {{ preset }}
+            </button>
+          </span>
+        </template>
         <DtSegmented
-          v-if="leftMode === 'batch'"
+          v-if="leftMode === 'batch' && !datasetEnabled"
           v-model="format"
           :options="FORMATS"
           title="输出格式"
@@ -1082,6 +1323,23 @@ onUnmounted(() => {
             v-show="settingsOpen"
             class="settings-panel"
           >
+            <section
+              v-show="PROJECT_BID_DATASET_VISIBLE"
+              class="settings-section"
+            >
+              <h4>关联数据集 · 项目 → 投标</h4>
+              <label class="checkbox-setting">
+                <input v-model="datasetEnabled" type="checkbox" />
+                <span>生成项目与投标父子记录</span>
+              </label>
+              <small class="setting-hint"
+                >投标记录通过「项目编号」关联项目，并共享项目名称与预算；预览与下载共用同一数据集</small
+              >
+              <p v-if="datasetIssues.length" class="settings-note">
+                {{ datasetIssues.join("；") }}
+              </p>
+            </section>
+
             <section class="settings-section">
               <h4>数据内容</h4>
               <label class="setting-item">
@@ -1092,7 +1350,7 @@ onUnmounted(() => {
                   size="sm"
                 />
                 <small class="setting-hint"
-                  >决定输出偏日常、偏边界还是偏异常；不确定就选「日常联调」</small
+                  >决定输出偏日常、偏边界还是偏异常；不确定就选「日常联调」。「测试边界」按字段类型的取样上下限取值（数值、日期、定长字符串、数组、手机号、邮箱、UUID/IP 等），姓名/地址/公司等文本池字段与日常联调相同；该选项与字段校验规则相互独立。</small
                 >
               </label>
             </section>
@@ -1173,13 +1431,18 @@ onUnmounted(() => {
         <template #header-extra>
           <template v-if="leftMode === 'batch'">
             <DtSegmented
+              v-if="!datasetEnabled"
               v-model="viewMode"
               :options="VIEW_MODES"
               size="sm"
               class="view-switch"
               title="结果展示方式"
             />
-            <span v-if="hasOutput" class="count-badge">
+            <span v-if="datasetEnabled && hasDatasetOutput" class="count-badge">
+              预览 {{ datasetPreviewProjectCount }} / {{ normalizedDatasetProjectCount }} 个项目 ·
+              {{ datasetPreviewBidCount }} / {{ datasetTotalBids }} 条投标
+            </span>
+            <span v-else-if="!datasetEnabled && hasOutput" class="count-badge">
               仅预览 {{ records.length }} / {{ rowCount }} 条
               <template v-if="viewMode === 'code' && outputSize"> · {{ outputSize }}</template>
             </span>
@@ -1194,8 +1457,18 @@ onUnmounted(() => {
               正在导出 {{ downloadedRows }} / {{ downloadTotal }} 条
             </span>
             <DtButton
+              v-show="TEST_CASES_VISIBLE"
               size="sm"
-              :title="`仅复制当前预览 ${records.length} 条`"
+              title="按校验规则生成测试用例；未配置规则时按字段取样范围与类型推导"
+              :disabled="!fields.length"
+              @click="openTestCases"
+            >
+              <div class="i-lucide-flask-conical w-3 h-3" />
+              生成测试用例
+            </DtButton>
+            <DtButton
+              size="sm"
+              :title="datasetEnabled ? '复制当前项目的项目与投标记录 JSON' : `仅复制当前预览 ${records.length} 条`"
               :disabled="!hasOutput || hasFieldErrors"
               @click="copyResult"
             >
@@ -1203,8 +1476,8 @@ onUnmounted(() => {
             </DtButton>
             <DtButton
               size="sm"
-              :title="`从 Seed 起点分批下载完整 ${rowCount} 条数据`"
-              :disabled="!hasOutput || hasFieldErrors || downloading"
+              :title="datasetEnabled ? '从相同 Seed 下载整套项目与投标记录 JSON' : `从 Seed 起点分批下载完整 ${rowCount} 条数据`"
+              :disabled="!hasOutput || hasFieldErrors || datasetIssues.length > 0 || downloading"
               :aria-busy="downloading"
               @click="downloadResult"
             >
@@ -1229,9 +1502,115 @@ onUnmounted(() => {
         </template>
 
         <div v-show="leftMode === 'batch'" class="output-body">
-          <div v-show="viewMode === 'code'" ref="outputEditorRef" class="code-editor" />
+          <div v-if="datasetEnabled" class="data-view dataset-view">
+            <template v-if="selectedDatasetGroup">
+              <div v-if="datasetPreviewProjectCount > 1" class="record-nav">
+                <button
+                  type="button"
+                  class="nav-btn"
+                  title="上一个项目"
+                  :disabled="datasetProjectIndex === 0"
+                  @click="datasetProjectIndex--"
+                >
+                  <div class="i-lucide-chevron-left w-3.5 h-3.5" />
+                </button>
+                <span class="nav-text">
+                  第 {{ datasetProjectIndex + 1 }} / {{ datasetPreviewProjectCount }} 个项目 ·
+                  {{ selectedDatasetGroup.projectCode }}
+                </span>
+                <button
+                  type="button"
+                  class="nav-btn"
+                  title="下一个项目"
+                  :disabled="datasetProjectIndex >= datasetPreviewProjectCount - 1"
+                  @click="datasetProjectIndex++"
+                >
+                  <div class="i-lucide-chevron-right w-3.5 h-3.5" />
+                </button>
+              </div>
+              <div class="dataset-section-title">
+                项目
+                <span class="rf-key">{{ selectedDatasetGroup.projectCode }}</span>
+              </div>
+              <div class="record-fields">
+                <button
+                  v-for="column in columns"
+                  :key="column"
+                  type="button"
+                  class="rf-row"
+                  title="点击复制该值"
+                  @click="copyCell(column, selectedDatasetGroup.project[column])"
+                >
+                  <span class="rf-label">
+                    {{ columnLabel(column) }}
+                    <span class="rf-key">{{ column }}</span>
+                  </span>
+                  <span class="rf-value">{{ cellText(selectedDatasetGroup.project[column]) }}</span>
+                  <div class="i-lucide-copy w-3 h-3 rf-icon" />
+                </button>
+              </div>
+              <div class="dataset-section-title">
+                投标记录
+                <span class="rf-key">{{ selectedDatasetGroup.bids.length }} 条</span>
+              </div>
+              <div class="table-wrap dataset-bids">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th class="idx-col">#</th>
+                      <th v-for="column in datasetBidColumns" :key="column">
+                        <div class="th-label">{{ BID_FIELD_LABELS[column] ?? column }}</div>
+                        <div class="th-key">{{ column }}</div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(bid, bidIndex) in selectedDatasetGroup.bids"
+                      :key="bidIndex"
+                    >
+                      <td class="idx-col">{{ bidIndex + 1 }}</td>
+                      <td
+                        v-for="column in datasetBidColumns"
+                        :key="column"
+                        class="data-cell"
+                        title="点击复制该值"
+                        @click="copyCell(column, bid[column])"
+                      >
+                        {{ cellText(bid[column]) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-limit-hint">
+                <template
+                  v-if="
+                    datasetPreviewProjectCount < normalizedDatasetProjectCount ||
+                    selectedDatasetGroup.bids.length <
+                      normalizedDatasetBidsPerProject
+                  "
+                >
+                  预览最多显示 {{ DATASET_PREVIEW_PROJECTS }} 个项目、每项目
+                  {{ DATASET_PREVIEW_BIDS }} 条投标；下载生成完整数据集
+                </template>
+                <template v-else>
+                  下载使用相同 Seed 与生成逻辑，得到同样的项目与投标记录
+                </template>
+              </div>
+            </template>
+            <DtEmptyState v-else overlay>
+              <template #icon><div class="i-lucide-gavel w-8 h-8" /></template>
+              <template v-if="datasetIssues.length">
+                {{ datasetIssues.join("；") }}
+              </template>
+              <template v-else>点击「生成」创建项目与投标记录预览</template>
+            </DtEmptyState>
+          </div>
 
-          <div v-if="viewMode === 'card' && hasOutput" class="data-view">
+          <div v-if="!datasetEnabled" v-show="viewMode === 'code'" ref="outputEditorRef" class="code-editor" />
+
+          <div v-if="viewMode === 'card' && hasOutput && !datasetEnabled" class="data-view">
             <div v-if="records.length > 1" class="record-nav">
               <button type="button" class="nav-btn" title="上一条" :disabled="cardIndex === 0" @click="cardIndex--">
                 <div class="i-lucide-chevron-left w-3.5 h-3.5" />
@@ -1272,7 +1651,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-else-if="viewMode === 'table' && hasOutput" class="data-view table-wrap">
+          <div v-else-if="viewMode === 'table' && hasOutput && !datasetEnabled" class="data-view table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
@@ -1303,7 +1682,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <DtEmptyState v-if="!hasOutput" overlay>
+          <DtEmptyState v-if="!datasetEnabled && !hasOutput" overlay>
             <template #icon><div class="i-lucide-dices w-8 h-8" /></template>
             从左侧字段货架勾选字段，或按 {{ modEnterHint }} 手动生成
           </DtEmptyState>
@@ -1331,6 +1710,11 @@ onUnmounted(() => {
       </DtPanel>
     </div>
 
+    <TestCaseDrawer
+      :show="testCasesOpen"
+      :case-set="testCaseSet"
+      @close="testCasesOpen = false"
+    />
     <ScenarioManagerDrawer
       :show="scenarioDrawerOpen"
       :templates="TEMPLATES"
@@ -1401,6 +1785,7 @@ onUnmounted(() => {
 
 .fields-panel {
   flex: 0 0 47%;
+  max-width: 840px;
   min-width: 400px;
 }
 
@@ -1922,6 +2307,28 @@ onUnmounted(() => {
   text-align: center;
 }
 
+.dataset-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dataset-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dataset-bids {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
 .quick-view {
   display: flex;
   flex-direction: column;
@@ -2056,6 +2463,14 @@ onUnmounted(() => {
 }
 
 [data-dt-dark] .data-table tbody td {
+  border-color: var(--dt-dark-border);
+}
+
+[data-dt-dark] .dataset-section-title {
+  color: #c9d1d9;
+}
+
+[data-dt-dark] .dataset-bids {
   border-color: var(--dt-dark-border);
 }
 

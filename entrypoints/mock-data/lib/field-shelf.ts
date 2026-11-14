@@ -5,8 +5,8 @@
  */
 import {
   CATEGORIES,
-  FIELD_TYPES,
   createField,
+  FIELD_TYPES,
   getFieldType,
   sanitizeFields,
 } from "../../tools/mock-data/lib/generators";
@@ -55,6 +55,7 @@ const CHARSET_LABELS: Record<string, string> = {
   numeric: "纯数字",
   hex: "十六进制",
   cn: "中文",
+  emoji: "Emoji",
 };
 
 function toNum(value: unknown): number | undefined {
@@ -103,7 +104,8 @@ export function fieldRangeSummary(field: MockField): string {
     }
     case "string": {
       const length = toText(params.length) || "8";
-      const charset = CHARSET_LABELS[toText(params.charset)] ?? toText(params.charset);
+      const charset =
+        CHARSET_LABELS[toText(params.charset)] ?? toText(params.charset);
       chunks.push(`长度${length}${charset ? `·${charset}` : ""}`);
       break;
     }
@@ -112,13 +114,16 @@ export function fieldRangeSummary(field: MockField): string {
       const end = toText(params.end);
       chunks.push(`日期 ${start} ~ ${end || "当前"}`);
       if (toNum(params.step) && toNum(params.step)! > 1)
-        chunks.push(`步长 ${fmtNumber(toNum(params.step)!)}${toText(params.stepUnit) || "天"}`);
+        chunks.push(
+          `步长 ${fmtNumber(toNum(params.step)!)}${toText(params.stepUnit) || "天"}`,
+        );
       break;
     }
     case "derived": {
       const transform = toText(params.transform) || "copy";
       const transformLabel =
-        definition.params.find((param) => param.name === "transform")
+        definition.params
+          .find((param) => param.name === "transform")
           ?.options?.find((option) => option.value === transform)?.label ??
         transform;
       chunks.push(transformLabel);
@@ -150,13 +155,8 @@ export function fieldRangeSummary(field: MockField): string {
     }
   }
 
-  // 约束提示：唯一 / 空值 / 异常值。
-  const constraint = field.constraints;
-  if (constraint?.unique === true) chunks.push("唯一");
-  const nullRate = Number(constraint?.nullRate ?? 0);
-  if (nullRate > 0) chunks.push(`空值 ${Math.round(nullRate * 100)}%`);
-  const invalidRate = Number(constraint?.invalidRate ?? 0);
-  if (invalidRate > 0) chunks.push(`异常 ${Math.round(invalidRate * 100)}%`);
+  // 约束提示：唯一。
+  if (field.constraints?.unique === true) chunks.push("唯一");
 
   return chunks.join(" · ");
 }
@@ -295,9 +295,7 @@ export function searchShelf(
   if (!needle) return [];
 
   const groups: ShelfGroup[] = [];
-  const types = genericEntries().filter((entry) =>
-    matchesQuery(entry, needle),
-  );
+  const types = genericEntries().filter((entry) => matchesQuery(entry, needle));
   if (types.length) {
     groups.push({ id: "types", label: "字段类型", entries: types });
   }
@@ -336,7 +334,10 @@ export function addShelfEntry(
   return { fields: [...fields, field], added: true };
 }
 
-export function removeShelfEntry(fields: MockField[], key: string): MockField[] {
+export function removeShelfEntry(
+  fields: MockField[],
+  key: string,
+): MockField[] {
   return fields.filter((field) => field.key !== key);
 }
 
