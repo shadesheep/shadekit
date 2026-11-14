@@ -11,10 +11,12 @@ import type {
   FieldConstraints,
   MockField,
 } from "../../tools/mock-data/lib/types";
+import { fieldDisplayName } from "../lib/field-shelf";
 import MockFieldEditor from "./MockFieldEditor.vue";
 
 const props = defineProps<{
   field: MockField;
+  siblings: MockField[];
   index: number;
   total: number;
   errors: Record<string, string>;
@@ -36,6 +38,7 @@ const scalarTypeOptions = FIELD_TYPES.filter(
 
 const paramsOf = computed(() =>
   (getFieldType(props.field.type)?.params ?? []).filter((param) => {
+    if (props.field.type === "derived" && param.name === "sourceKey") return false;
     if (props.field.type === "array" && param.name === "itemType") return false;
     if (param.name === "mean" || param.name === "stdDev") {
       return props.field.params.distribution === "normal";
@@ -52,6 +55,29 @@ const paramsOf = computed(() =>
     return true;
   }),
 );
+const sourceOptions = computed(() =>
+  props.siblings
+    .filter(
+      (field) =>
+        field.id !== props.field.id &&
+        field.enabled !== false &&
+        field.key.trim(),
+    )
+    .map((field) => ({
+      value: field.id,
+      label: `${fieldDisplayName(field)} (${field.key})`,
+    })),
+);
+const selectedSourceId = computed(() => {
+  const id = props.field.sourceFieldId;
+  return sourceOptions.value.some((option) => option.value === id) ? id ?? "" : "";
+});
+
+function selectSource(id: string) {
+  props.field.sourceFieldId = id;
+  delete props.field.params.sourceKey;
+}
+
 const isObject = computed(() => props.field.type === "object");
 const isArray = computed(() => props.field.type === "array");
 const arrayItemType = computed(() => {
@@ -77,6 +103,7 @@ const hasCustomConstraints = computed(
 );
 
 function onTypeChange() {
+  delete props.field.sourceFieldId;
   const definition = getFieldType(props.field.type);
   if (definition) props.field.params = defaultParams(definition);
   if (props.field.type === "object") {
@@ -136,7 +163,7 @@ function updateUnique(event: Event) {
         </button>
       </span>
       <input
-        v-model="field.key"
+        v-model.trim="field.key"
         class="key-input"
         :class="{ invalid: errorText }"
         type="text"
@@ -187,6 +214,20 @@ function updateUnique(event: Event) {
     </p>
 
     <div v-if="paramsOf.length" class="row-params">
+      <label v-if="field.type === 'derived'" class="param-item">
+        <span class="param-label source-label">来源字段</span>
+        <DtSelect
+          :model-value="selectedSourceId"
+          :options="sourceOptions"
+          placeholder="请选择来源字段"
+          aria-label="来源字段"
+          :aria-invalid="Boolean(errorText)"
+          :aria-describedby="errorText ? errorId : undefined"
+          size="sm"
+          class="param-select"
+          @update:model-value="selectSource"
+        />
+      </label>
       <label v-for="param in paramsOf" :key="param.name" class="param-item">
         <span class="param-label">{{ param.label }}</span>
         <input
@@ -395,6 +436,10 @@ summary:focus-visible {
   color: #94a3b8;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.source-label {
+  color: var(--text-secondary, #64748b);
 }
 
 .param-input {

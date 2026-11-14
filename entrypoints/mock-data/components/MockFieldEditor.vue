@@ -52,6 +52,7 @@ function addChildField() {
       v-for="(field, index) in modelValue"
       :key="field.id"
       :field="field"
+      :siblings="modelValue"
       :index="index"
       :total="modelValue.length"
       :errors="errors"

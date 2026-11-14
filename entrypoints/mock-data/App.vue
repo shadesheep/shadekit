@@ -27,6 +27,7 @@ import {
   FIELD_TYPES,
   MAX_ROWS,
   createField,
+  fieldDependencyErrors,
   generateRowBatches,
   generateRows,
   getFieldType,
@@ -67,6 +68,9 @@ const PREVIEW_HARD_LIMIT = 1000;
 const TABLE_PREVIEW_LIMIT_DEFAULT = 200;
 const QUICK_COUNT_DEFAULT = 6;
 const COUNT_PRESETS = [1, 10, 50, 100, 1000];
+const QUICK_FIELD_TYPES = FIELD_TYPES.filter(
+  (type) => !["evalMethod", "openBidTime", "score"].includes(type.id),
+);
 
 function makeSeed(): string {
   const values = new Uint32Array(4);
@@ -180,13 +184,15 @@ const SQL_DIALECT_OPTIONS: Array<{
 const paletteTypes = computed(() => {
   const query = typeSearch.value.trim().toLowerCase();
   if (query) {
-    return FIELD_TYPES.filter(
+    return QUICK_FIELD_TYPES.filter(
       (type) =>
         type.label.toLowerCase().includes(query) ||
         type.id.toLowerCase().includes(query),
     );
   }
-  return FIELD_TYPES.filter((type) => type.category === activeCategory.value);
+  return QUICK_FIELD_TYPES.filter(
+    (type) => type.category === activeCategory.value,
+  );
 });
 
 const normalizedCount = computed(() =>
@@ -205,7 +211,8 @@ const previewLimit = computed(() =>
 
 /** 每一级字段分别检查空键、重复键与约束范围，嵌套字段也参与生成前校验。 */
 const fieldErrors = computed(() => {
-  const errors: Record<string, string> = {};
+  const dependencyErrors = fieldDependencyErrors(fields.value);
+  const errors: Record<string, string> = Object.create(null);
   const visit = (list: MockField[]) => {
     const keyCounts = new Map<string, number>();
     for (const field of list) {
@@ -216,6 +223,8 @@ const fieldErrors = computed(() => {
     for (const field of list) {
       if (field.enabled === false) continue;
       const messages: string[] = [];
+      const dependencyError = dependencyErrors.get(field.id);
+      if (dependencyError) messages.push(dependencyError.message);
       const key = field.key.trim();
       if (!key) messages.push("字段名不能为空");
       else if ((keyCounts.get(key) ?? 0) > 1)
@@ -456,12 +465,13 @@ function doGenerate(options: { silent?: boolean } = {}) {
     return;
   }
   if (hasFieldErrors.value) {
-    if (!options.silent) showToast("请先修正字段名或高级约束中的错误", "error");
+    clearOutput();
+    if (!options.silent) showToast("请先修正字段中的错误", "error");
     return;
   }
   let rows: Record<string, unknown>[];
   try {
-    rows = generateRows(activeFields, previewLimit.value, generationOptions());
+    rows = generateRows(fields.value, previewLimit.value, generationOptions());
   } catch (error) {
     clearOutput();
     showToast(`生成失败：${errorMessage(error)}`, "error");
@@ -505,14 +515,14 @@ async function copyResult() {
 async function downloadResult() {
   if (!records.value.length || downloading.value) return;
   if (hasFieldErrors.value) {
-    showToast("请先修正字段名或高级约束中的错误", "error");
+    showToast("请先修正字段中的错误", "error");
     return;
   }
   downloading.value = true;
   downloadedRows.value = 0;
   const total = normalizedCount.value;
   downloadTotal.value = total;
-  const fieldsSnapshot = clone(enabledFields(fields.value));
+  const fieldsSnapshot = clone(fields.value);
   const optionsSnapshot = generationOptions();
   const exportOptionsSnapshot = { ...exportOptions.value };
   const formatSnapshot = format.value;
@@ -585,9 +595,9 @@ function shuffleBatch() {
   doGenerate();
 }
 
-/** 一键预勾：把场景替换为整组字段（覆盖式）。 */
+/** 把场景替换为整组字段（覆盖式）。 */
 function loadScenarioNow(template: MockTemplate, options: { silent?: boolean } = {}) {
-  fields.value = templateToFields(template).map((f) => ({ ...f, enabled: true }));
+  fields.value = templateToFields(template);
   activeScenarioId.value = template.id;
   shelfSearch.value = "";
   doGenerate(options);
@@ -604,24 +614,17 @@ function onSaveScenario(template: MockTemplate) {
   customTemplates.value.push(template);
   scenarioDrawerOpen.value = false;
   // 刚保存属已知切换，跳过确认，直接载入。
-  fields.value = templateToFields(template).map((f) => ({ ...f, enabled: true }));
-  activeScenarioId.value = template.id;
-  shelfSearch.value = "";
-  doGenerate({ silent: true });
+  loadScenarioNow(template, { silent: true });
   showToast(`已保存并切换到「${template.name}」`, "success");
 }
 
 function onImportScenario(template: MockTemplate) {
   template.id = nextCustomTemplateId();
-  const usable = sanitizeFields(template.rows).length;
   customTemplates.value.push(template);
   scenarioDrawerOpen.value = false;
-  fields.value = templateToFields(template).map((f) => ({ ...f, enabled: true }));
-  activeScenarioId.value = template.id;
-  shelfSearch.value = "";
-  doGenerate({ silent: true });
+  loadScenarioNow(template, { silent: true });
   showToast(
-    `已导入并切换到「${template.name}」，${usable} 个可用字段`,
+    `已导入并切换到「${template.name}」，${fields.value.length} 个可用字段`,
     "success",
   );
 }
@@ -834,7 +837,7 @@ onMounted(async () => {
     if (resolvedId === DEFAULT_SCENARIO_ID && storedId && storedId !== resolvedId) {
       const userTemplate = TEMPLATES.find((t) => t.id === DEFAULT_SCENARIO_ID);
       fields.value = userTemplate
-        ? templateToFields(userTemplate).map((f) => ({ ...f, enabled: true }))
+        ? templateToFields(userTemplate)
         : [];
     } else {
       fields.value = savedFields;
@@ -842,7 +845,7 @@ onMounted(async () => {
   } else {
     const userTemplate = TEMPLATES.find((t) => t.id === DEFAULT_SCENARIO_ID);
     fields.value = userTemplate
-      ? templateToFields(userTemplate).map((f) => ({ ...f, enabled: true }))
+      ? templateToFields(userTemplate)
       : [];
   }
   activeScenarioId.value = resolvedId;
@@ -1193,7 +1196,7 @@ onUnmounted(() => {
             <DtButton
               size="sm"
               :title="`仅复制当前预览 ${records.length} 条`"
-              :disabled="!hasOutput"
+              :disabled="!hasOutput || hasFieldErrors"
               @click="copyResult"
             >
               <div class="i-lucide-copy w-3 h-3" />
@@ -1201,7 +1204,7 @@ onUnmounted(() => {
             <DtButton
               size="sm"
               :title="`从 Seed 起点分批下载完整 ${rowCount} 条数据`"
-              :disabled="!hasOutput || downloading"
+              :disabled="!hasOutput || hasFieldErrors || downloading"
               :aria-busy="downloading"
               @click="downloadResult"
             >

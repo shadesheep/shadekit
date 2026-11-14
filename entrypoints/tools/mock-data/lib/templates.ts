@@ -12,6 +12,8 @@ export interface TemplateRow {
   type: string;
   /** 业务显示名；模板未提供时回退到类型名。 */
   label?: string;
+  /** 缺省时启用。 */
+  enabled?: boolean;
   params?: Record<string, unknown>;
   constraints?: FieldConstraints;
   children?: TemplateRow[];
@@ -74,6 +76,8 @@ export const TEMPLATES: MockTemplate[] = [
     rows: [
       { key: "projectCode", type: "projectCode" },
       { key: "projectName", type: "projectName" },
+      { key: "sectionCode", type: "sectionCode" },
+      { key: "sectionName", type: "sectionName" },
       { key: "tenderMethod", type: "tenderMethod" },
       { key: "evalMethod", type: "evalMethod" },
       { key: "budget", type: "budget" },

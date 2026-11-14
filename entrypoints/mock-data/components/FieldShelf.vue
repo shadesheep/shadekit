@@ -88,22 +88,28 @@ function scrollAddIntoView() {
 const searchableFields = computed(() => {
   const query = props.search.trim().toLowerCase();
   if (!query) return props.fields;
-  const matches = (list: MockField[]): MockField[] => {
-    const result: MockField[] = [];
-    for (const field of list) {
-      const own =
-        field.label?.toLowerCase().includes(query) ||
-        field.key.trim().toLowerCase().includes(query) ||
-        getFieldType(field.type)?.label.toLowerCase().includes(query);
-      const childrenMatch = field.children ? matches(field.children) : [];
-      if (own || childrenMatch.length) {
-        result.push({ ...field, children: childrenMatch.length ? childrenMatch : field.children });
-      }
-    }
-    return result;
-  };
-  return matches(props.fields);
+  const matches = (field: MockField): boolean =>
+    Boolean(
+      field.label?.toLowerCase().includes(query) ||
+      field.key.trim().toLowerCase().includes(query) ||
+      getFieldType(field.type)?.label.toLowerCase().includes(query) ||
+      field.children?.some(matches),
+    );
+  return props.fields.filter(matches);
 });
+
+function findFieldError(field: MockField): string | undefined {
+  const own = props.errors[field.id];
+  if (own) return own;
+  for (const child of field.children ?? []) {
+    const message = findFieldError(child);
+    if (message) return `${child.key}：${message}`;
+  }
+}
+
+const rowErrors = computed(() =>
+  new Map(searchableFields.value.map((field) => [field.id, findFieldError(field)])),
+);
 
 /** 「＋ 添加其他字段」面板：按分类分组 + 搜索过滤。 */
 const addGroups = computed(() => {
@@ -252,13 +258,14 @@ function addGenericType(type: string) {
 
       <!-- 勾选清单：每行一个勾选框 + 行内编辑（默认收缩，点击展开编辑） -->
       <div v-if="searchableFields.length" class="checklist">
-        <div v-for="(field, index) in searchableFields" :key="field.id" class="check-item" :data-row-id="field.id">
+        <div v-for="field in searchableFields" :key="field.id" class="check-item" :data-row-id="field.id">
           <div
             class="check-head"
             role="button"
             tabindex="0"
             :aria-expanded="isExpanded(field)"
             aria-label="点击展开或收起字段编辑"
+            :aria-describedby="!isExpanded(field) && rowErrors.get(field.id) ? `${field.id}-collapsed-error` : undefined"
             @click="rowClicked(field, $event)"
             @keydown.enter.prevent="toggleExpanded(field.id)"
             @keydown.space.prevent="toggleExpanded(field.id)"
@@ -280,12 +287,21 @@ function addGenericType(type: string) {
           <MockFieldRow
             v-if="isExpanded(field)"
             :field="field"
-            :index="index"
+            :siblings="fields"
+            :index="fields.indexOf(field)"
             :total="fields.length"
             :errors="errors"
             @remove="removeFieldById(field.id)"
             @move="moveField(field.id, $event)"
           />
+          <p
+            v-else-if="rowErrors.get(field.id)"
+            :id="`${field.id}-collapsed-error`"
+            class="check-error"
+            role="alert"
+          >
+            {{ rowErrors.get(field.id) }}
+          </p>
         </div>
       </div>
 
@@ -506,6 +522,14 @@ function addGenericType(type: string) {
   outline-offset: -2px;
 }
 
+.check-error {
+  margin: 0;
+  padding: 0 8px 6px 28px;
+  color: var(--error, #dc2626);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .field-checkbox {
   accent-color: var(--primary-start, #6366f1);
   cursor: pointer;
@@ -723,6 +747,10 @@ function addGenericType(type: string) {
 
 [data-dt-dark] .check-item {
   background: var(--dt-dark-surface-1, #161b22);
+}
+
+[data-dt-dark] .check-error {
+  color: var(--error-dark, #f87171);
 }
 
 [data-dt-dark] .check-head:hover {

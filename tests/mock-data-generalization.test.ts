@@ -96,6 +96,37 @@ describe("可复现与分批生成", () => {
 });
 
 describe("派生与递归结构", () => {
+  it("旧模板的派生来源改名和移位后仍可生成，并按编辑顺序预览和分批导出", async () => {
+    const fields = templateToFields({
+      id: "legacy",
+      name: "金额",
+      hint: "",
+      rows: [
+        { key: "amount", type: "increment", params: { start: 10, step: 10 } },
+        {
+          key: "amountCn",
+          type: "derived",
+          params: { sourceKey: "amount", transform: "chineseCapital" },
+        },
+      ],
+    });
+    fields[0].key = "budget";
+    fields.reverse();
+
+    const options = { seed: "budget" };
+    const preview = generateRows(fields, 2, options);
+    const downloaded = JSON.parse(
+      await collectChunks(generateRowBatches(fields, 3, options, 1), "json"),
+    );
+    expect(preview).toEqual([
+      { amountCn: "壹拾圆整", budget: 10 },
+      { amountCn: "贰拾圆整", budget: 20 },
+    ]);
+    expect(downloaded.slice(0, 2)).toEqual(preview);
+    expect(Object.keys(preview[0])).toEqual(["amountCn", "budget"]);
+    expect(Object.keys(downloaded[2])).toEqual(["amountCn", "budget"]);
+  });
+
   it("派生字段读取当前行来源值", () => {
     const [row] = generateRows(
       [
@@ -108,6 +139,23 @@ describe("派生与递归结构", () => {
       1,
     );
     expect(row.amountCn).toBe("壹仟零贰圆零壹分");
+  });
+
+  it("按编辑顺序序列化数字字段名和嵌套字段", async () => {
+    const fields = [
+      field("object", "object", {}, {
+        children: [
+          field("10", "derived", { sourceKey: "2" }),
+          field("2", "fixed", { value: 7 }),
+        ],
+      }),
+      field("10", "fixed", { value: 1 }),
+      field("2", "fixed", { value: 2 }),
+    ];
+    const [preview] = generateRows(fields, 1);
+    expect(JSON.stringify(preview)).toBe('{"object":{"10":7,"2":7},"10":1,"2":2}');
+    const file = await collectChunks(generateRowBatches(fields, 1), "jsonl");
+    expect(file.trim()).toBe(JSON.stringify(preview));
   });
 
   it("对象和对象数组保留递归结构", () => {
@@ -184,10 +232,65 @@ describe("Schema 与模板复用", () => {
     ];
     const template = fieldsToTemplate(source, "金额");
     const restored = parseTemplateFile(serializeTemplateFile(template));
-    expect(templateToFields(restored)[1].params).toMatchObject(
-      source[1].params,
-    );
+    expect(generateRows(templateToFields(restored), 1)).toEqual([
+      { amount: 10, amountCn: "壹拾圆整" },
+    ]);
     expect(restored.name).toBe("金额");
+  });
+
+  it("自定义模板保存、导出和导入后，嵌套派生跟随已改名的同级字段", () => {
+    const fields = templateToFields({
+      id: "nested",
+      name: "嵌套金额",
+      hint: "",
+      rows: ["object", "array"].map((type) => ({
+        key: type,
+        type,
+        params: { minItems: 2, maxItems: 2 },
+        children: [
+          {
+            key: "uppercase",
+            type: "derived",
+            params: { sourceKey: "name", transform: "uppercase" },
+          },
+          { key: "name", type: "fixed", params: { value: type } },
+        ],
+      })),
+    });
+    for (const field of fields) field.children![1].key = "label";
+
+    const file = serializeTemplateFile(fieldsToTemplate(fields, "嵌套金额"));
+    const restored = templateToFields(parseTemplateFile(file));
+    for (const field of restored) field.children![1].key = "displayName";
+
+    expect(generateRows(restored, 1, { seed: "nested" })).toEqual([
+      {
+        object: { uppercase: "OBJECT", displayName: "object" },
+        array: [
+          { uppercase: "ARRAY", displayName: "array" },
+          { uppercase: "ARRAY", displayName: "array" },
+        ],
+      },
+    ]);
+  });
+
+  it("旧配置优先绑定启用的同名来源，模板往返后仍可生成", () => {
+    const fields = templateToFields({
+      id: "legacy",
+      name: "金额",
+      hint: "",
+      rows: [
+        { key: "amount", type: "fixed", params: { value: 10 } },
+        { key: "amount", type: "fixed", params: { value: 99 }, enabled: false },
+        { key: "copy", type: "derived", params: { sourceKey: "amount" } },
+      ],
+    });
+    fields[0].key = "expected";
+    fields[1].key = "expected";
+
+    const file = serializeTemplateFile(fieldsToTemplate(fields, "金额"));
+    const restored = templateToFields(parseTemplateFile(file));
+    expect(generateRows(restored, 1)).toEqual([{ expected: 10, copy: 10 }]);
   });
 });
 describe("通用与分块导出", () => {

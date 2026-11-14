@@ -202,21 +202,49 @@ describe("mock-data 页面编排", () => {
     expect(root.querySelector(".th-key")?.textContent).toBe("contactName");
   });
 
+  it("快速取数的招投标分类和搜索都隐藏指定字段", async () => {
+    await mountApp();
+    await clickButton("快速取数");
+    await clickButton("招投标");
+
+    const quickLabels = () =>
+      Array.from(root.querySelectorAll(".type-chip"), (chip) =>
+        chip.textContent?.trim(),
+      );
+    expect(quickLabels()).toContain("标段编号");
+    const hiddenLabels = ["评标办法", "开标时间", "评审得分"];
+    for (const label of hiddenLabels) expect(quickLabels()).not.toContain(label);
+    for (const label of hiddenLabels) {
+      typeInto(".type-search", label);
+      await flush();
+      expect(quickLabels()).toEqual([]);
+    }
+  });
+
   it("点场景标签替换为整组勾选字段；全选/全不选批量开关", async () => {
     await mountApp();
 
     await clickTab("招标项目");
-    const projectTitles = selectedTitles().sort();
-    expect(projectTitles).toEqual(
-      ["projectCode", "projectName", "tenderMethod", "evalMethod", "budget", "budgetCn", "openBidTime", "region"].sort(),
-    );
+    const projectTitles = [
+      "projectCode",
+      "projectName",
+      "sectionCode",
+      "sectionName",
+      "tenderMethod",
+      "evalMethod",
+      "budget",
+      "budgetCn",
+      "openBidTime",
+      "region",
+    ];
+    expect(selectedTitles()).toEqual(projectTitles);
 
     // 全不选：所有勾选置为未勾选
     await clickButton("全不选");
-    expect(selectedChips()).toHaveLength(8);
+    expect(selectedChips()).toHaveLength(projectTitles.length);
     expect(
       Array.from(root.querySelectorAll<HTMLInputElement>(".field-checkbox")),
-    ).toHaveLength(8);
+    ).toHaveLength(projectTitles.length);
     expect(
       Array.from(
         root.querySelectorAll<HTMLInputElement>(".field-checkbox"),
@@ -230,6 +258,121 @@ describe("mock-data 页面编排", () => {
         root.querySelectorAll<HTMLInputElement>(".field-checkbox"),
       ).every((cb) => cb.checked),
     ).toBe(true);
+  });
+
+  it("从下拉选择预算后，改名和移位仍能生成，禁用或删除预算时可修正来源", async () => {
+    await mountApp();
+    await clickTab("招标项目");
+    const fieldRow = (key: string) =>
+      Array.from(root.querySelectorAll<HTMLElement>(".check-item")).find(
+        (item) => item.querySelector(".check-key")?.textContent === key,
+      )!;
+    async function expand(key: string) {
+      fieldRow(key).querySelector<HTMLElement>(".check-head")!.click();
+      await flush();
+    }
+
+    typeInto(".type-search", "大写");
+    await flush();
+    await expand("budgetCn");
+    const source = fieldRow("budgetCn").querySelector<HTMLSelectElement>(
+      'select[aria-label="来源字段"]',
+    )!;
+    const budget = Array.from(source.options).find((item) =>
+      item.textContent?.includes("预算金额 (budget)"),
+    )!;
+    expect(source.value).toBe(budget.value);
+    const projectCode = Array.from(source.options).find((item) =>
+      item.textContent?.includes("(projectCode)"),
+    )!;
+    function select(value: string) {
+      source.value = value;
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    select(projectCode.value);
+    await flush();
+    select(budget.value);
+    typeInto(".type-search", "");
+    await flush();
+    fieldRow("budgetCn").querySelector<HTMLButtonElement>(
+      '[aria-label="上移字段"]',
+    )!.click();
+    await expand("budget");
+    const keyInput = fieldRow("budget").querySelector<HTMLInputElement>(
+      'input[aria-label="字段名"]',
+    )!;
+    keyInput.value = " amount ";
+    keyInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    expect(source.selectedOptions[0]?.textContent).toContain("(amount)");
+    expect(selectedTitles().indexOf("budgetCn")).toBeLessThan(selectedTitles().indexOf("amount"));
+    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    await flush();
+    expect(root.querySelector(".record-fields")?.textContent).toMatch(/圆/);
+
+    await expand("budgetCn");
+    fieldRow("amount").querySelector<HTMLInputElement>(".field-checkbox")!.click();
+    await flush();
+    expect(fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent)
+      .toContain("已禁用");
+    fieldRow("amount").querySelector<HTMLButtonElement>(
+      '[aria-label="删除字段"]',
+    )!.click();
+    await flush();
+    expect(fieldRow("budgetCn").querySelector('[role="alert"]')?.textContent)
+      .toContain("不存在");
+    await expand("budgetCn");
+    const newSource = fieldRow("budgetCn").querySelector<HTMLSelectElement>(
+      'select[aria-label="来源字段"]',
+    )!;
+    newSource.value = projectCode.value;
+    newSource.dispatchEvent(new Event("change", { bubbles: true }));
+    await flush();
+    expect(fieldRow("budgetCn").querySelector('[role="alert"]')).toBeNull();
+    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    await flush();
+    expect(root.querySelector(".record-fields")?.textContent).toContain("budgetCn");
+  });
+
+  it("标出循环中的字段与自引用，选择有效来源后恢复生成", async () => {
+    store["devtools-mock-data"] = {
+      fields: [
+        { key: "a", type: "derived", params: { sourceKey: "b" } },
+        { key: "b", type: "derived", params: { sourceKey: "a" } },
+        { key: "c", type: "derived", params: { sourceKey: "c" } },
+        { key: "input", type: "fixed", params: { value: "42" } },
+      ],
+    };
+    await mountApp();
+
+    const rows = Array.from(root.querySelectorAll<HTMLElement>(".check-item"));
+    expect(rows.slice(0, 3).map((row) =>
+      row.querySelector('[role="alert"]')?.textContent?.trim(),
+    )).toEqual([
+      expect.stringContaining("循环引用"),
+      expect.stringContaining("循环引用"),
+      expect.stringContaining("不能引用自身"),
+    ]);
+    expect(root.querySelector(".record-fields")).toBeNull();
+
+    for (const row of [rows[1], rows[2]]) {
+      row.querySelector<HTMLElement>(".check-head")!.click();
+      await flush();
+      const source = row.querySelector<HTMLSelectElement>('select[aria-label="来源字段"]')!;
+      const valid = Array.from(source.options).find((option) =>
+        option.textContent?.includes("(input)"),
+      )!;
+      source.value = valid.value;
+      source.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+    }
+
+    expect(root.querySelector(".checklist [role='alert']")).toBeNull();
+    root.querySelector<HTMLButtonElement>(".toolbar-actions .dt-button")!.click();
+    await flush();
+    expect(Array.from(root.querySelectorAll(".rf-value"), (item) =>
+      item.textContent?.trim(),
+    )).toEqual(["42", "42", "42", "42"]);
   });
 
   it("搜索覆盖场景……搜索字段类型不显示场景筛选", async () => {
@@ -559,7 +702,7 @@ describe("A 方向：场景预勾与勾选清单", () => {
     );
 
     // 关掉第二个勾选框（age）—— 渲染与勾选计数应实时更新；
-    // enabled=false 不参与生成的过滤由 doGenerate 用 enabledFields 处理。
+    // enabled=false 的字段保留配置，但跳过生成。
     checkboxes[1]!.click();
     await flush();
 

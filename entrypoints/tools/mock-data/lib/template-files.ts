@@ -29,6 +29,7 @@ interface TemplateRowShape {
   key?: unknown;
   type?: unknown;
   label?: unknown;
+  enabled?: unknown;
   params?: unknown;
   constraints?: unknown;
   children?: unknown;
@@ -48,9 +49,33 @@ function toTemplateRow(field: MockField | TemplateRow): TemplateRow {
   if (typeof field.label === "string" && field.label.trim()) {
     row.label = field.label.trim();
   }
+  if (field.enabled === false) row.enabled = false;
   if (field.constraints) row.constraints = { ...field.constraints };
-  if (field.children) row.children = field.children.map(toTemplateRow);
   return row;
+}
+
+function copyTemplateRows(rows: TemplateRow[]): TemplateRow[] {
+  return rows.map((source) => {
+    const row = toTemplateRow(source);
+    if (source.children) row.children = copyTemplateRows(source.children);
+    return row;
+  });
+}
+
+/** 用来源的当前 key 保存引用，加载时重新绑定到新行 ID。 */
+function fieldsToTemplateRows(fields: MockField[]): TemplateRow[] {
+  const byId = new Map(fields.map((field) => [field.id, field]));
+  return fields.map((field) => {
+    const row = toTemplateRow(field);
+    if (field.type === "derived" && field.sourceFieldId) {
+      row.params = {
+        ...row.params,
+        sourceKey: byId.get(field.sourceFieldId)?.key.trim() ?? "",
+      };
+    }
+    if (field.children) row.children = fieldsToTemplateRows(field.children);
+    return row;
+  });
 }
 
 /** 将当前字段树转换为可保存的模板，递归剥离所有行 id。 */
@@ -63,7 +88,7 @@ export function fieldsToTemplate(
     id: nextCustomTemplateId(),
     name: name.trim() || "自定义模板",
     hint: hint.trim(),
-    rows: fields.map(toTemplateRow),
+    rows: fieldsToTemplateRows(fields),
   };
 }
 
@@ -81,7 +106,7 @@ export function serializeTemplateFile(template: MockTemplate): string {
       id: template.id,
       name: template.name,
       hint: template.hint,
-      rows: template.rows.map(toTemplateRow),
+      rows: copyTemplateRows(template.rows),
     },
   };
   return `${JSON.stringify(file, null, 2)}\n`;
@@ -104,6 +129,9 @@ function parseRows(value: unknown, path: string): TemplateRow[] {
     }
     if (source.label !== undefined && typeof source.label !== "string") {
       throw new Error(`${rowPath}.label 必须是字符串`);
+    }
+    if (source.enabled !== undefined && typeof source.enabled !== "boolean") {
+      throw new Error(`${rowPath}.enabled 必须是布尔值`);
     }
     if (
       source.params !== undefined &&
@@ -133,6 +161,7 @@ function parseRows(value: unknown, path: string): TemplateRow[] {
     if (typeof source.label === "string" && source.label.trim()) {
       row.label = source.label.trim();
     }
+    if (source.enabled === false) row.enabled = false;
     if (source.constraints) {
       row.constraints = {
         ...(source.constraints as TemplateRow["constraints"]),

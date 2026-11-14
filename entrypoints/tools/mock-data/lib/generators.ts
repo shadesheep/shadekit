@@ -424,7 +424,7 @@ function derivedValue(
   params: Record<string, unknown>,
   ctx: GenContext,
 ): unknown {
-  const sourceKey = str(params.sourceKey, "");
+  const sourceKey = String(params.sourceKey ?? "");
   if (!sourceKey || !Object.hasOwn(ctx.row, sourceKey)) {
     throw new Error(
       `派生字段引用的 sourceKey「${sourceKey || "(空)"}」不存在或尚未生成`,
@@ -702,7 +702,7 @@ export const FIELD_TYPES: FieldTypeDef[] = [
     category: "basic",
     defaultKey: "derived",
     params: [
-      { name: "sourceKey", label: "来源字段 key", kind: "text", default: "" },
+      { name: "sourceKey", label: "来源字段", kind: "text", default: "" },
       {
         name: "transform",
         label: "转换",
@@ -1383,6 +1383,13 @@ function sanitizeFieldList(raw: unknown): MockField[] {
       field.label = source.label.trim();
     }
     if (typeof source.enabled === "boolean") field.enabled = source.enabled;
+    if (
+      def.id === "derived" &&
+      typeof source.sourceFieldId === "string" &&
+      source.sourceFieldId
+    ) {
+      field.sourceFieldId = source.sourceFieldId;
+    }
     const rawParams =
       source.params && typeof source.params === "object"
         ? (source.params as Record<string, unknown>)
@@ -1401,6 +1408,13 @@ function sanitizeFieldList(raw: unknown): MockField[] {
       });
     }
     out.push(field);
+  }
+  const byKey = indexFieldsByKey(out);
+  for (const field of out) {
+    if (field.type !== "derived") continue;
+    field.sourceFieldId ??= byKey.get(str(field.params.sourceKey, ""))?.id;
+    // 旧 key 只用于载入时迁移，无法绑定的来源由用户重新选择。
+    delete field.params.sourceKey;
   }
   return out;
 }
@@ -1535,29 +1549,164 @@ interface GenerationState {
   uniqueValues: Map<string, Set<string>>;
 }
 
+interface PlannedField extends MockField {
+  childPlan?: FieldPlan;
+}
+
+interface FieldPlan {
+  keys: string[];
+  ordered: PlannedField[];
+  preserveKeyOrder: boolean;
+}
+
+interface DependencyError {
+  path: string;
+  message: string;
+}
+
+function indexFieldsByKey(fields: readonly MockField[]) {
+  const enabled = new Map<string, MockField | undefined>();
+  const disabled = new Map<string, MockField | undefined>();
+  for (const field of fields) {
+    const key = field.key.trim();
+    if (!key) continue;
+    const index = field.enabled === false ? disabled : enabled;
+    index.set(key, index.has(key) ? undefined : field);
+  }
+  for (const [key, field] of disabled) {
+    if (!enabled.has(key)) enabled.set(key, field);
+  }
+  return enabled;
+}
+
+/** 每个对象独立解析同级依赖，预先保存计算顺序和输出顺序。 */
+function planFields(
+  fields: readonly MockField[],
+  errors: Map<string, DependencyError>,
+  prefix = "",
+): FieldPlan {
+  const enabled = fields.filter(
+    (field) => field.enabled !== false && field.key && getFieldType(field.type),
+  );
+  const byId = new Map(fields.map((field) => [field.id, field]));
+  const byKey = indexFieldsByKey(fields);
+  const ordered: PlannedField[] = [];
+  const done = new Set<MockField>();
+  const visiting = new Set<MockField>();
+  const report = (field: MockField, message: string) =>
+    errors.set(field.id, { path: prefix + field.key, message });
+
+  function visit(field: MockField) {
+    if (done.has(field)) return;
+    if (visiting.has(field)) {
+      const path = [...visiting];
+      const cycle = path.slice(path.indexOf(field));
+      const names = [...cycle, field].map((item) => item.key).join(" → ");
+      for (const item of cycle) {
+        report(item, `来源字段存在循环引用（${names}）`);
+      }
+      return;
+    }
+
+    visiting.add(field);
+    let params = field.params;
+    if (field.type === "derived") {
+      const legacyKey = str(params.sourceKey, "");
+      const source = field.sourceFieldId
+        ? byId.get(field.sourceFieldId)
+        : byKey.get(legacyKey);
+      if (!source?.key.trim() || !getFieldType(source.type)) {
+        const message =
+          field.sourceFieldId || legacyKey
+            ? "来源字段不存在或字段名无效，请重新选择"
+            : "请选择来源字段";
+        report(field, message);
+      } else if (source === field) {
+        report(field, "来源字段不能引用自身");
+      } else if (source.enabled === false) {
+        report(field, `来源字段「${source.key}」已禁用`);
+      } else {
+        visit(source);
+        params = { ...params, sourceKey: source.key };
+      }
+    }
+    const childPlan =
+      (field.type === "object" || field.type === "array") && field.children
+        ? planFields(field.children, errors, `${prefix}${field.key}.`)
+        : undefined;
+    ordered.push({ ...field, params, childPlan });
+    visiting.delete(field);
+    done.add(field);
+  }
+
+  for (const field of enabled) visit(field);
+  const keys = [...new Set(enabled.map((field) => field.key))];
+  const objectKeys = Object.keys(Object.fromEntries(keys.map((key) => [key, null])));
+  return {
+    keys,
+    ordered,
+    preserveKeyOrder: keys.some((key, index) => key !== objectKeys[index]),
+  };
+}
+
+export function fieldDependencyErrors(
+  fields: readonly MockField[],
+): ReadonlyMap<string, DependencyError> {
+  const errors = new Map<string, DependencyError>();
+  planFields(fields, errors);
+  return errors;
+}
+
+function prepareGeneration(fields: readonly MockField[]): FieldPlan {
+  const errors = new Map<string, DependencyError>();
+  const plan = planFields(fields, errors);
+  const error = errors.values().next().value;
+  if (error) throw new Error(`字段「${error.path}」：${error.message}`);
+  return plan;
+}
+
 function uniqueKey(value: unknown): string {
   return `${typeof value}:${JSON.stringify(value) ?? String(value)}`;
 }
 
+function generateObject(
+  plan: FieldPlan,
+  ctx: GenContext,
+  state: GenerationState,
+  prefix: string,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = Object.create(null);
+  const localCtx = { ...ctx, row: values };
+  for (const field of plan.ordered) {
+    values[field.key] = generateConstrained(
+      field,
+      localCtx,
+      state,
+      prefix + field.key,
+    );
+  }
+  const row = Object.fromEntries(plan.keys.map((key) => [key, values[key]]));
+  if (!plan.preserveKeyOrder) return row;
+
+  // 普通对象会把整数索引键提前并按数值排序。
+  return new Proxy(row, {
+    ownKeys(target) {
+      const remaining = new Set(Reflect.ownKeys(target));
+      return [...plan.keys.filter((key) => remaining.delete(key)), ...remaining];
+    },
+  });
+}
+
 function generateRaw(
-  field: MockField,
+  field: PlannedField,
   ctx: GenContext,
   state: GenerationState,
   path: string,
 ): unknown {
   if (field.type === "object") {
-    const object: Record<string, unknown> = {};
-    const childCtx: GenContext = { ...ctx, row: object };
-    for (const child of field.children ?? []) {
-      if (!child.key) continue;
-      object[child.key] = generateConstrained(
-        child,
-        childCtx,
-        state,
-        `${path}.${child.key}`,
-      );
-    }
-    return object;
+    return field.childPlan
+      ? generateObject(field.childPlan, ctx, state, `${path}.`)
+      : {};
   }
   if (field.type === "array") {
     const min = Math.max(0, Math.trunc(num(field.params.minItems, 1)));
@@ -1571,19 +1720,8 @@ function generateRaw(
     const array: unknown[] = [];
     for (let itemIndex = 0; itemIndex < length; itemIndex += 1) {
       const itemPath = `${path}[${itemIndex}]`;
-      if (Array.isArray(field.children)) {
-        const object: Record<string, unknown> = {};
-        const childCtx: GenContext = { ...ctx, row: object };
-        for (const child of field.children) {
-          if (!child.key) continue;
-          object[child.key] = generateConstrained(
-            child,
-            childCtx,
-            state,
-            `${itemPath}.${child.key}`,
-          );
-        }
-        array.push(object);
+      if (field.childPlan) {
+        array.push(generateObject(field.childPlan, ctx, state, `${itemPath}.`));
       } else {
         const itemType = getFieldType(str(field.params.itemType, "string"));
         const itemField: MockField = {
@@ -1605,7 +1743,7 @@ function generateRaw(
 }
 
 function generateConstrained(
-  field: MockField,
+  field: PlannedField,
   ctx: GenContext,
   state: GenerationState,
   path: string,
@@ -1684,26 +1822,21 @@ function createState(options: GenerateOptions): GenerationState {
 }
 
 function generateOneRow(
-  fields: readonly MockField[],
+  plan: FieldPlan,
   index: number,
   previousRow: Record<string, unknown> | undefined,
   state: GenerationState,
 ): Record<string, unknown> {
-  const row: Record<string, unknown> = {};
   const ctx: GenContext = {
     index,
     rng: state.rng,
-    row,
+    row: {},
     previousRow,
     locale: state.locale,
     scenario: state.scenario,
     now: state.now,
   };
-  for (const field of fields) {
-    if (!field.key || !getFieldType(field.type)) continue;
-    row[field.key] = generateConstrained(field, ctx, state, field.key);
-  }
-  return row;
+  return generateObject(plan, ctx, state, "");
 }
 
 /**
@@ -1715,13 +1848,14 @@ export function generateRows(
   count: number,
   options: GenerateOptions = {},
 ): Record<string, unknown>[] {
+  const plan = prepareGeneration(fields);
   const total = normalizedCount(count);
   const startIndex = normalizedStartIndex(options.startIndex);
   const state = createState(options);
   const rows: Record<string, unknown>[] = [];
   let previousRow: Record<string, unknown> | undefined;
   for (let index = 0; index < startIndex + total; index += 1) {
-    const row = generateOneRow(fields, index, previousRow, state);
+    const row = generateOneRow(plan, index, previousRow, state);
     if (index >= startIndex) rows.push(row);
     previousRow = row;
   }
@@ -1735,6 +1869,7 @@ export async function* generateRowBatches(
   options: GenerateOptions = {},
   batchSize = 250,
 ): AsyncGenerator<Record<string, unknown>[]> {
+  const plan = prepareGeneration(fields);
   const total = normalizedCount(count);
   const startIndex = normalizedStartIndex(options.startIndex);
   const size = Math.min(
@@ -1745,7 +1880,7 @@ export async function* generateRowBatches(
   let previousRow: Record<string, unknown> | undefined;
   let batch: Record<string, unknown>[] = [];
   for (let index = 0; index < startIndex + total; index += 1) {
-    const row = generateOneRow(fields, index, previousRow, state);
+    const row = generateOneRow(plan, index, previousRow, state);
     previousRow = row;
     if (index < startIndex) continue;
     batch.push(row);

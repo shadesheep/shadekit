@@ -72,6 +72,8 @@ export interface MockField {
   label?: string;
   type: string;
   params: Record<string, unknown>;
+  /** 派生字段引用的同级字段 ID。模板通过 sourceKey 重建此关联。 */
+  sourceFieldId?: string;
   constraints?: FieldConstraints;
   /** 缺省 true；false 表示已勾掉不生成（配置保留，仅跳过）。 */
   enabled?: boolean;
