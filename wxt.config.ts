@@ -39,8 +39,13 @@ export default defineConfig({
     host_permissions: ["http://*/*", "https://*/*"],
     commands: {
       "open-account-switcher": {
+        // 建议键仅在安装时写入 profile；撞车会被静默丢弃，补救入口在扩展内
+        // （use-command-shortcut.ts）。
+        // mac 显式声明同一组合：macOS 上 Alt 即 Option（⌥⇧A）；不用 Command
+        // 是因为 Chromium 系已占用 ⌘⇧A（搜索标签页）。
         suggested_key: {
           default: "Alt+Shift+A",
+          mac: "Alt+Shift+A",
         },
         description: "快速切换账号",
       },

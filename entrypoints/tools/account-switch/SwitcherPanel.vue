@@ -192,7 +192,11 @@ const showLoginErrorToast = (
 };
 
 const switchAccount = async (account: PublicAccount) => {
-  if (account.hasSavedPassword === false) {
+  // 密码回退在 Background 统一完成（账号 → 环境默认 → 全局默认）；
+  // 只有三级来源全缺时才要求用户输入当次密码。
+  const hasDefaultPassword =
+    Boolean(matchedEnv.value?.hasDefaultPassword) || hasGlobalDefaultPassword.value;
+  if (account.hasSavedPassword === false && !hasDefaultPassword) {
     temporaryAccount.value = account;
     temporaryPassword.value = "";
     return;

@@ -223,7 +223,7 @@ export function buildAccountPanel(
           ...(env.loginMethod ? { loginMethod: env.loginMethod } : {}),
           ...(env.debugRedirect ? { debugRedirect: env.debugRedirect } : {}),
           debugRedirectEnabled: env.debugRedirectEnabled === true,
-          hasDefaultPassword: Boolean(env.defaultCredentialRef || env.defaultPassword),
+          hasDefaultPassword: Boolean(env.defaultPassword),
           // 只在不支持时出现；支持的声明不携带任何多余标志。
           ...(support.supported ? {} : { support }),
         },
@@ -238,7 +238,7 @@ export function buildAccountPanel(
     name: account.name,
     username: account.username,
     roles: [...account.roles],
-    hasSavedPassword: Boolean(account.credentialRef || account.password),
+    hasSavedPassword: Boolean(account.password),
   }));
   const tabOrder: AccountPanelData['tabOrder'] =
     Array.isArray(config.tabOrder) && config.tabOrder.length === 2
@@ -251,7 +251,7 @@ export function buildAccountPanel(
     domains,
     tabOrder,
     quickLoginDefaultDomain: config.quickLoginDefaultDomain ?? '',
-    hasGlobalDefaultPassword: Boolean(config.globalDefaultCredentialRef || config.globalDefaultPassword),
+    hasGlobalDefaultPassword: Boolean(config.globalDefaultPassword),
     envBadge: config.envBadge ?? { enabled: false, position: "bottom-right", whitelist: [] },
   };
 }
@@ -320,13 +320,12 @@ export function roleColorStyle(role: string): RoleColorStyle {
 // 归一化（adapter：配置原始形状 → Account）
 // ============================================================
 
-/** 配置中存储的账号原始形状（password 为旧版可选字段） */
+/** 配置中存储的账号原始形状 */
 export interface RawAccount {
   id: string;
   name: string;
   username: string;
   password?: string;
-  credentialRef?: string;
   roles?: string[];
   domains: string[];
 }

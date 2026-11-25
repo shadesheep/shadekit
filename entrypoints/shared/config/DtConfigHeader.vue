@@ -9,23 +9,30 @@ import type { SaveState } from './use-tool-config';
 
 defineProps<{
   title: string;
+  description?: string;
   saveState: SaveState;
 }>();
 </script>
 
 <template>
   <div class="dt-config-header">
-    <h3 class="dt-config-title">{{ title }}</h3>
+    <div>
+      <h3 class="dt-config-title">{{ title }}</h3>
+      <p v-if="description" class="dt-config-description">{{ description }}</p>
+    </div>
     <span
       class="dt-save-status"
       :class="{ saved: saveState === 'saved' }"
       aria-live="polite"
     >
       <template v-if="saveState === 'saved'">
-        <span class="i-lucide-check w-3 h-3" />
+        <span class="i-lucide-check w-3 h-3" aria-hidden="true" />
         已保存
       </template>
-      <template v-else>更改自动保存</template>
+      <template v-else>
+        <span class="i-lucide-cloud-check w-3.5 h-3.5" aria-hidden="true" />
+        更改自动保存
+      </template>
     </span>
   </div>
 </template>
@@ -33,35 +40,44 @@ defineProps<{
 <style scoped>
 .dt-config-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
 }
 
 .dt-config-title {
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 600;
   margin: 0;
-  color: #0f172a;
+  color: var(--config-ink, #0f172a);
 }
 
 [data-dt-dark] .dt-config-title {
-  color: #f1f5f9;
+  color: var(--config-ink, #f1f5f9);
+}
+
+.dt-config-description {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--config-secondary, #52637a);
 }
 
 .dt-save-status {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 5px;
+  padding-top: 4px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--config-secondary, #52637a);
   transition: color 0.2s ease;
   flex-shrink: 0;
 }
 
 [data-dt-dark] .dt-save-status {
-  color: #6e7681;
+  color: var(--config-secondary, #a5b2c4);
 }
 
 .dt-save-status.saved {

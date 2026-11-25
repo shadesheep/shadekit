@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../entrypoints/shared/security/vault-service", () => ({
   resolveSecret: mocks.resolveSecret,
+  VAULT_STORAGE_KEY: "devtools-account-switch-vault",
+  VAULT_META_KEY: "devtools-account-switch-vault-meta",
+  MIGRATION_RECOVERY_KEY: "devtools-account-switch-migration-recovery",
 }));
 
 const fetchMock = vi.fn();
@@ -114,7 +117,7 @@ function mirroredFutureConfig(
         id: "account-1",
         name: "未来账号",
         username: "alice",
-        credentialRef: "cred-account-1",
+        password: "fixture-password",
         roles: [],
         domains: [...environmentIds],
       },
@@ -214,7 +217,7 @@ describe("登录能力门 — 副作用之前拒绝", () => {
           id: "account-md5",
           name: "MD5账号",
           username: "alice",
-          credentialRef: "cred-md5",
+          password: "fixture-md5-password",
           roles: [],
           domains: [environmentId],
         },

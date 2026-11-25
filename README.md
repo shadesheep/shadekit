@@ -69,7 +69,7 @@
 
 *配置页与元素拾取均为真实界面；截图中的站点和身份均为虚构。*
 
-快捷键未生效时，打开 `chrome://extensions/shortcuts` 或 `edge://extensions/shortcuts`，为 ShadeKit 的「快速切换账号」设置 `Alt+Shift+A`。Firefox 用户可打开 `about:addons`，点击齿轮图标并选择「管理扩展快捷键」进行设置。
+快捷键未生效时（安装/更新时组合被其他扩展或程序占用，浏览器会静默放弃绑定），普通网页内仍可按 `Alt+Shift+A` 唤起（macOS 为 `⌥⇧A`，即 Option+Shift+A；扩展会在命令未绑定时启用页面内兜底）；浏览器内置页面除外。如需系统级生效，打开 `chrome://extensions/shortcuts` 或 `edge://extensions/shortcuts`，为 ShadeKit 的「快速切换账号」设置 `Alt+Shift+A`。Firefox 用户在设置页点「恢复默认」即可，也可打开 `about:addons`，点击齿轮图标并选择「管理扩展快捷键」手动设置。
 
 ![账号切换：从验收测试切换为交付管理员](docs/images/account-switch.gif)
 

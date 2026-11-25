@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { json } from '@codemirror/lang-json';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import {
   attachFileDrop,
   type CodeEditor,
@@ -9,16 +9,10 @@ import {
 import { syncScroll, type ScrollSync } from '../shared/lib/codemirror-scroll-sync';
 import { copyToClipboard } from '../shared/clipboard';
 import DtButton from '../shared/components/DtButton.vue';
-import DtEmptyState from '../shared/components/DtEmptyState.vue';
 import DtPanel from '../shared/components/DtPanel.vue';
 import { getConfig } from '../shared/tool-config';
 import ToastContainer from '../shared/ToastContainer.vue';
 import { showToast } from '../shared/use-toast';
-import {
-  exampleSideFill,
-  isEmptyDoc,
-  shouldShowEmptyState,
-} from '../tools/json-diff/lib/empty-state';
 import { createDiffMarkers } from '../tools/json-diff/lib/diff-markers';
 import {
   buildDiffPositions,
@@ -51,18 +45,7 @@ const diffMarkers = createDiffMarkers();
 const isDraggingLeft = ref(false);
 const isDraggingRight = ref(false);
 
-// ─── Empty State ─────────────────────────────────────────
-// 编辑器为 CodeMirror 实例（在 Vue 响应式之外），通过 updateListener 同步空态标记。
-// dismissed：点击空态聚焦后暂时隐藏遮罩，让光标可见；文档变更时复位。
-const leftEmpty = ref(true);
-const rightEmpty = ref(true);
-const leftDismissed = ref(false);
-const rightDismissed = ref(false);
-const showLeftEmptyState = computed(() =>
-  shouldShowEmptyState(leftEmpty.value && !leftDismissed.value, isDraggingLeft.value));
-const showRightEmptyState = computed(() =>
-  shouldShowEmptyState(rightEmpty.value && !rightDismissed.value, isDraggingRight.value));
-
+// ─── Diff State ──────────────────────────────────────────
 const differenceCount = ref(0);
 const diffStats = ref({ add: 0, remove: 0, replace: 0 });
 const currentDiffIndex = ref(-1);
@@ -160,7 +143,6 @@ const EXAMPLES = {
 function createSideEditor(
   parent: HTMLElement,
   initialText: string,
-  side: 'left' | 'right',
 ): CodeEditor {
   return createCodeEditor({
     parent,
@@ -168,14 +150,7 @@ function createSideEditor(
     language: json(),
     extraExtensions: diffMarkers.extension,
     onModEnter: () => doCompare(),
-    onChange: (text) => {
-      if (side === 'left') {
-        leftEmpty.value = isEmptyDoc(text);
-        leftDismissed.value = false;
-      } else {
-        rightEmpty.value = isEmptyDoc(text);
-        rightDismissed.value = false;
-      }
+    onChange: () => {
       if (!isFormatting && toolConfig.value.autoCompare) {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(doCompare, toolConfig.value.debounceMs);
@@ -336,27 +311,6 @@ function loadExample(key: keyof typeof EXAMPLES) {
   setTimeout(doCompare, 100);
 }
 
-function focusEditor(side: 'left' | 'right') {
-  // 隐藏遮罩让聚焦后的光标可见；文档变更时 dismissed 复位，空态恢复
-  if (side === 'left') {
-    leftDismissed.value = true;
-    leftEditor?.focus();
-  } else {
-    rightDismissed.value = true;
-    rightEditor?.focus();
-  }
-}
-
-// 空态「填入示例」：填入本侧示例，另一侧保持原样
-function fillExample(side: 'left' | 'right') {
-  const editor = side === 'left' ? leftEditor : rightEditor;
-  if (!editor) return;
-
-  const text = exampleSideFill(EXAMPLES.userInfo, side);
-  editor.setText(text);
-  showToast('已填入示例数据', 'info');
-}
-
 function clearAll() {
   leftEditor?.setText('');
   rightEditor?.setText('');
@@ -409,15 +363,11 @@ onMounted(() => {
   const rightInitial = getInitialText('right');
 
   if (leftEditorRef.value) {
-    leftEditor = createSideEditor(leftEditorRef.value, leftInitial, 'left');
+    leftEditor = createSideEditor(leftEditorRef.value, leftInitial);
   }
   if (rightEditorRef.value) {
-    rightEditor = createSideEditor(rightEditorRef.value, rightInitial, 'right');
+    rightEditor = createSideEditor(rightEditorRef.value, rightInitial);
   }
-
-  // URL 参数可能预填内容，初始化空态标记
-  leftEmpty.value = isEmptyDoc(getEditorText(leftEditor));
-  rightEmpty.value = isEmptyDoc(getEditorText(rightEditor));
 
   // 拖拽文件载入（目标为两侧面板整体）
   const sideDropOptions = (side: 'left' | 'right') => ({
@@ -513,13 +463,6 @@ onUnmounted(() => {
           释放以加载到左侧
         </div>
         <div class="editor-body">
-          <DtEmptyState v-if="showLeftEmptyState" overlay @click="focusEditor('left')">
-            <template #icon><div class="i-lucide-file-json w-8 h-8" /></template>
-            粘贴 JSON，或拖入 .json 文件
-            <template #actions>
-              <DtButton variant="primary" @click.stop="fillExample('left')">填入示例</DtButton>
-            </template>
-          </DtEmptyState>
           <div ref="leftEditorRef" class="code-editor"></div>
         </div>
       </DtPanel>
@@ -531,13 +474,6 @@ onUnmounted(() => {
           释放以加载到右侧
         </div>
         <div class="editor-body">
-          <DtEmptyState v-if="showRightEmptyState" overlay @click="focusEditor('right')">
-            <template #icon><div class="i-lucide-file-json w-8 h-8" /></template>
-            粘贴 JSON，或拖入 .json 文件
-            <template #actions>
-              <DtButton variant="primary" @click.stop="fillExample('right')">填入示例</DtButton>
-            </template>
-          </DtEmptyState>
           <div ref="rightEditorRef" class="code-editor"></div>
         </div>
       </DtPanel>

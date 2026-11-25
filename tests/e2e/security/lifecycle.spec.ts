@@ -193,24 +193,12 @@ test('[LIFE-02] recovers after the extension runtime restarts and keeps config a
         'devtools-account-switch'
       ],
   )) as {
-    accounts: Array<{ id: string; credentialRef?: string }>;
-    domains: Record<string, { defaultCredentialRef?: string }>;
+    accounts: Array<{ id: string; password?: string }>;
+    domains: Record<string, { defaultPassword?: string }>;
   };
-  expect(config.accounts.find((account) => account.id === 'fixture-admin')).toMatchObject(
-    { credentialRef: 'account:fixture-admin' },
-  );
-  expect(config.domains[origin]?.defaultCredentialRef).toBeTruthy();
-
-  const extensionPage = await context.newPage();
-  await extensionPage.goto(`chrome-extension://${extensionId}/options.html`);
-  const secret = await extensionPage.evaluate(() =>
-    chrome.runtime.sendMessage({
-      type: 'VAULT_HAS_SECRET',
-      credentialId: 'account:fixture-admin',
-    }),
-  );
-  expect(secret).toMatchObject({ success: true, hasSecret: true });
-  await extensionPage.close();
+  expect(config.accounts.find((account) => account.id === 'fixture-admin')?.password)
+    .toBe(FIXTURE_PASSWORD);
+  expect(config.domains[origin]?.defaultPassword).toBe(FIXTURE_PASSWORD);
 
   // 旧 worker handle 可能仍指向已关闭的 target；刷新站点重建 content script 后再登录。
   await page.reload();

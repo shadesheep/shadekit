@@ -34,7 +34,7 @@ async function prepareImport(event: Event): Promise<void> {
   busy.value = true;
   try {
     const text = await file.text();
-    const response = await sendBgMessage("VAULT_PREPARE_BACKUP", { text });
+    const response = await sendBgMessage("BACKUP_PREPARE", { text });
     if (!response.success || !response.summary) {
       showToast(response.error || "明文备份预览失败", "error");
       return;
@@ -53,7 +53,7 @@ async function confirmOperation(): Promise<void> {
   busy.value = true;
   try {
     if (mode.value === "export") {
-      const response = await sendBgMessage("VAULT_EXPORT_BACKUP");
+      const response = await sendBgMessage("BACKUP_EXPORT");
       if (!response.success || !response.backup) {
         showToast(response.error || "明文备份导出失败", "error");
         return;
@@ -61,14 +61,14 @@ async function confirmOperation(): Promise<void> {
       downloadBackup(response.backup);
       showToast("完整明文备份已导出，请妥善保管", "success");
     } else {
-      const response = await sendBgMessage("VAULT_CONFIRM_BACKUP", {
+      const response = await sendBgMessage("BACKUP_CONFIRM", {
         acceptPlaintextWarning: true,
       });
       if (!response.success) {
         showToast(response.error || "明文备份导入失败", "error");
         return;
       }
-      showToast(`完整备份已导入，${response.importedSecretCount ?? 0} 个秘密已迁入保险库`, "success");
+      showToast("完整备份已导入", "success");
       emit("imported");
     }
     mode.value = null;
@@ -90,7 +90,6 @@ async function confirmOperation(): Promise<void> {
     <button type="button" class="btn-export" title="显式确认后导出包含秘密的明文完整备份" aria-describedby="export-backup-warning" @click="mode = 'export'">
       <div class="i-lucide-upload w-4 h-4" aria-hidden="true" />导出明文备份
     </button>
-    <p id="export-backup-warning" class="export-warning">完整备份包含账号密码等明文秘密，仅用于受控迁移，请妥善保管。</p>
   </div>
 
   <div v-if="mode" class="backup-overlay" @mousedown.self="closeDialog">
@@ -102,12 +101,11 @@ async function confirmOperation(): Promise<void> {
       </template>
       <template v-else-if="summary">
         <h3>确认导入明文完整备份</h3>
-        <p class="plaintext-warning">导入将覆盖下列工具的当前设置；文件中的秘密会重新加密到本机保险库。</p>
+        <p class="plaintext-warning">导入将覆盖下列工具的当前设置。</p>
         <dl class="backup-summary">
           <div><dt>环境</dt><dd>{{ summary.environments.length }} 个环境</dd></div>
           <div><dt>账号</dt><dd>{{ summary.accounts }} 个账号</dd></div>
           <div><dt>策略</dt><dd>{{ summary.strategies }} 条策略</dd></div>
-          <div><dt>秘密</dt><dd>{{ summary.secrets }} 个秘密</dd></div>
         </dl>
         <p class="overwrite-label">将覆盖：{{ summary.overwrittenTools.join('、') }}</p>
         <ul v-if="summary.environments.some((environment) => !environment.support.supported)" class="support-list">

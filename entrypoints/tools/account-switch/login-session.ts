@@ -17,7 +17,6 @@ import {
 } from "./login-tab-flow";
 import { readSpecFromConfig } from "./spec/migrate";
 import type { LoginSpec } from "./spec/types";
-import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
 import type {
   AccountSwitchConfig,
   AuthCredentials,
@@ -39,7 +38,7 @@ import {
   type ErrorCode,
 } from "./utils/error-codes";
 import { RESTRICTED_PAGE_SCHEME, waitForTabLoaded } from "./utils/tab-load";
-import { getConfig } from "../../shared/tool-config";
+import { readAccountSwitchConfig } from "./config-store";
 import { registerLogSecrets } from "../../shared/logger";
 import { resolveSpecSecrets } from "./secret-resolver";
 import { planLoginPermissions } from "./permissions/permission-planner";
@@ -380,10 +379,7 @@ export async function prepareLogin(
     }
 
 
-    const config = await getConfig<AccountSwitchConfig>(
-      "account-switch",
-      ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-    );
+    const config = await readAccountSwitchConfig();
     if (!config) {
       return fail("配置未找到", { code: ErrorCodes.CONFIG_NOT_FOUND });
     }
@@ -454,7 +450,7 @@ export async function prepareLogin(
       }
       lockedTabId = newTabId;
     }
-    const resolvedSecrets = await resolveSpecSecrets(domainConfig, spec, config.strategies);
+    const resolvedSecrets = await resolveSpecSecrets(domainConfig, spec);
     const effectiveDomainConfig = resolvedSecrets.domainConfig;
     secretRestorers.push(registerLogSecrets(resolvedSecrets.secrets));
 

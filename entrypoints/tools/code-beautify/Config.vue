@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DtConfigSection from '../../shared/config/DtConfigSection.vue';
 import DtConfigHeader from '../../shared/config/DtConfigHeader.vue';
 import DtConfigItem from '../../shared/config/DtConfigItem.vue';
 import DtSegmented from '../../shared/config/DtSegmented.vue';
@@ -29,33 +30,29 @@ const INDENT_OPTIONS = [
 </script>
 
 <template>
-  <div class="code-beautify-config">
-    <DtConfigHeader title="代码美化设置" :save-state="saveState" />
+  <div class="dt-config-page">
+    <DtConfigHeader
+      title="代码美化设置"
+      description="设置格式化结果的缩进与显示方式。"
+      :save-state="saveState"
+    />
 
-    <DtConfigItem label="缩进空格数">
-      <DtSegmented v-model="config.indentSize" :options="INDENT_OPTIONS" />
-    </DtConfigItem>
+    <DtConfigSection title="格式与显示" icon="i-lucide-code">
+      <DtConfigItem label="缩进空格数">
+        <DtSegmented v-model="config.indentSize" :options="INDENT_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem label="显示行号" hint="格式化结果左侧显示行号">
+        <DtToggle v-model="config.showLineNumbers" />
+      </DtConfigItem>
+    </DtConfigSection>
 
-    <DtConfigItem label="显示行号" hint="格式化结果左侧显示行号">
-      <DtToggle v-model="config.showLineNumbers" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="允许多开"
-      hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
-    >
-      <DtToggle v-model="config.allowMultiple" />
-    </DtConfigItem>
+    <DtConfigSection title="页面行为" icon="i-lucide-panels-top-left">
+      <DtConfigItem
+        label="允许多开"
+        hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
+      >
+        <DtToggle v-model="config.allowMultiple" />
+      </DtConfigItem>
+    </DtConfigSection>
   </div>
 </template>
-
-<style scoped>
-.code-beautify-config {
-  padding: 8px 0;
-  color: #0f172a;
-}
-
-[data-dt-dark] .code-beautify-config {
-  color: #c9d1d9;
-}
-</style>

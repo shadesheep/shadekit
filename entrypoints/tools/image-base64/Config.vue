@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DtConfigSection from '../../shared/config/DtConfigSection.vue';
 import DtConfigHeader from '../../shared/config/DtConfigHeader.vue';
 import DtConfigItem from '../../shared/config/DtConfigItem.vue';
 import DtSegmented from '../../shared/config/DtSegmented.vue';
@@ -32,51 +33,50 @@ const FORMAT_OPTIONS: Array<{ value: ImageOutputFormat; label: string }> = [
 </script>
 
 <template>
-  <div class="image-base64-config">
-    <DtConfigHeader title="图片 Base64 设置" :save-state="saveState" />
+  <div class="dt-config-page">
+    <DtConfigHeader
+      title="图片 Base64 设置"
+      description="设置在线图片转换的默认格式与质量。"
+      :save-state="saveState"
+    />
 
-    <DtConfigItem label="输出图片格式" hint="从在线 URL 转换时使用此格式">
-      <DtSegmented v-model="config.imageFormat" :options="FORMAT_OPTIONS" />
-    </DtConfigItem>
+    <DtConfigSection title="图片输出" icon="i-lucide-image">
+      <DtConfigItem label="输出图片格式" hint="从在线 URL 转换时使用此格式">
+        <DtSegmented v-model="config.imageFormat" :options="FORMAT_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="图片质量"
+        hint="仅对 JPEG / WebP 格式有效(PNG 为无损格式)"
+        layout="stack"
+      >
+        <div class="quality-control">
+          <input
+            type="range"
+            v-model.number="config.imageQuality"
+            min="0.1"
+            max="1"
+            step="0.01"
+            class="quality-slider"
+            aria-label="图片质量"
+            :aria-valuetext="`${Math.round(config.imageQuality * 100)}%`"
+          />
+          <span class="quality-value">{{ Math.round(config.imageQuality * 100) }}%</span>
+        </div>
+      </DtConfigItem>
+    </DtConfigSection>
 
-    <!-- 质量滑杆为私货(Config Kit 无滑杆组件),放入 stack 项占满整行 -->
-    <DtConfigItem
-      label="图片质量"
-      hint="仅对 JPEG / WebP 格式有效(PNG 为无损格式)"
-      layout="stack"
-    >
-      <div class="quality-control">
-        <input
-          type="range"
-          v-model.number="config.imageQuality"
-          min="0.1"
-          max="1"
-          step="0.01"
-          class="quality-slider"
-        />
-        <span class="quality-value">{{ Math.round(config.imageQuality * 100) }}%</span>
-      </div>
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="允许多开"
-      hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
-    >
-      <DtToggle v-model="config.allowMultiple" />
-    </DtConfigItem>
+    <DtConfigSection title="页面行为" icon="i-lucide-panels-top-left">
+      <DtConfigItem
+        label="允许多开"
+        hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
+      >
+        <DtToggle v-model="config.allowMultiple" />
+      </DtConfigItem>
+    </DtConfigSection>
   </div>
 </template>
 
 <style scoped>
-.image-base64-config {
-  padding: 8px 0;
-  color: #0f172a;
-}
-
-[data-dt-dark] .image-base64-config {
-  color: #c9d1d9;
-}
-
 .quality-control {
   display: flex;
   align-items: center;
@@ -85,6 +85,7 @@ const FORMAT_OPTIONS: Array<{ value: ImageOutputFormat; label: string }> = [
 
 .quality-slider {
   flex: 1;
+  min-width: 0;
   accent-color: #6366f1;
 }
 

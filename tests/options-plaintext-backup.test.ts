@@ -34,7 +34,6 @@ const summary = {
   ],
   accounts: 1,
   strategies: 1,
-  secrets: 2,
   overwrittenTools: ["account-switch", "theme"],
 };
 
@@ -77,13 +76,13 @@ async function click(selector: string): Promise<void> {
 describe("选项页明文完整备份", () => {
   it("预览展示计数、覆盖范围、不支持原因和明文警告，正文不渲染", async () => {
     sendBgMessage.mockImplementation(async (type: string) => {
-      if (type === "VAULT_PREPARE_BACKUP") return { success: true, summary };
-      return { success: true, importedSecretCount: 2 };
+      if (type === "BACKUP_PREPARE") return { success: true, summary };
+      return { success: true };
     });
     const file = new File(
       [
         JSON.stringify({
-          __version: 3,
+          __version: 4,
           "account-switch": {
             accounts: [{ password: "DO-NOT-RENDER" }],
             domains: {},
@@ -100,13 +99,12 @@ describe("选项页明文完整备份", () => {
     await vi.waitFor(() => {
       expect(root.textContent).toContain("当前客户端不支持算子 future.op");
     });
-    expect(sendBgMessage).toHaveBeenCalledWith("VAULT_PREPARE_BACKUP", {
+    expect(sendBgMessage).toHaveBeenCalledWith("BACKUP_PREPARE", {
       text: expect.any(String),
     });
     expect(root.textContent).toContain("2 个环境");
     expect(root.textContent).toContain("1 个账号");
     expect(root.textContent).toContain("1 条策略");
-    expect(root.textContent).toContain("2 个秘密");
     expect(root.textContent).toContain("account-switch");
     expect(root.textContent).toContain("theme");
     expect(root.textContent).toContain("明文");
@@ -117,7 +115,7 @@ describe("选项页明文完整备份", () => {
 
     await click("[data-backup-confirm]");
     await vi.waitFor(() => {
-      expect(sendBgMessage).toHaveBeenCalledWith("VAULT_CONFIRM_BACKUP", {
+      expect(sendBgMessage).toHaveBeenCalledWith("BACKUP_CONFIRM", {
         acceptPlaintextWarning: true,
       });
     });
@@ -126,7 +124,7 @@ describe("选项页明文完整备份", () => {
   it("导出先确认明文风险，再下载 shadekit-config 文件且消息不带密码", async () => {
     sendBgMessage.mockResolvedValue({
       success: true,
-      backup: { __version: 3, "account-switch": { accounts: [], domains: {} } },
+      backup: { __version: 4, "account-switch": { accounts: [], domains: {} } },
     });
     await click(".btn-export");
     expect(sendBgMessage).not.toHaveBeenCalled();
@@ -135,7 +133,7 @@ describe("选项页明文完整备份", () => {
 
     await click("[data-backup-confirm]");
     await vi.waitFor(() => {
-      expect(sendBgMessage).toHaveBeenCalledWith("VAULT_EXPORT_BACKUP");
+      expect(sendBgMessage).toHaveBeenCalledWith("BACKUP_EXPORT");
     });
     expect(URL.createObjectURL).toHaveBeenCalledOnce();
     expect(downloadedName).toMatch(/^shadekit-config-\d{4}-\d{2}-\d{2}\.json$/);

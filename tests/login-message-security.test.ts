@@ -22,7 +22,11 @@ vi.stubGlobal("chrome", {
   permissions: { contains: async () => true, request: async () => true }, runtime: { id: extensionId } });
 
 const handler = vi.fn(async () => ({ success: true }));
-const core = { openToolTab: vi.fn(async () => undefined) };
+const core = {
+  openToolTab: vi.fn(async () => undefined),
+  getAccountSwitcherShortcut: vi.fn(async () => ""),
+  triggerAccountSwitcher: vi.fn(async () => false),
+};
 let listener: ReturnType<typeof createBackgroundMessageListener>;
 
 beforeEach(() => {

@@ -43,6 +43,7 @@ const emit = defineEmits<{
       <span class="dt-toggle-knob" />
     </span>
     <span v-if="$slots.default" class="dt-toggle-text"><slot /></span>
+    <span v-else class="dt-toggle-state" aria-hidden="true">{{ modelValue ? '已开启' : '已关闭' }}</span>
   </button>
 </template>
 
@@ -53,10 +54,18 @@ const emit = defineEmits<{
   gap: 8px;
   border: none;
   background: transparent;
-  padding: 0;
+  padding: 6px 0;
   cursor: pointer;
   font-size: 13px;
   color: #0f172a;
+}
+
+.dt-toggle-state {
+  display: var(--config-toggle-state, none);
+  order: -1;
+  color: var(--config-secondary);
+  font-size: 12px;
+  min-width: 36px;
 }
 
 [data-dt-dark] .dt-toggle {
@@ -68,13 +77,13 @@ const emit = defineEmits<{
   width: 38px;
   height: 20px;
   border-radius: 9999px;
-  background: #cbd5e1;
+  background: var(--config-off, #cbd5e1);
   transition: all 0.2s ease-out;
   flex-shrink: 0;
 }
 
 [data-dt-dark] .dt-toggle-track {
-  background: #475569;
+  background: var(--config-off, #475569);
 }
 
 .dt-toggle-track.on {

@@ -62,37 +62,25 @@ export const allTools: ToolDefinition[] = [
           msg.debugRedirect,
         );
       },
-      VAULT_GET_CONFIG: async () => {
-        const { handleVaultGetConfig } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultGetConfig();
+      ACCOUNT_CONFIG_GET: async () => {
+        const { handleAccountConfigGet } = await import("../tools/account-switch/config-background-handler");
+        return handleAccountConfigGet();
       },
-      VAULT_SAVE_CONFIG: async (msg) => {
-        const { handleVaultSaveConfig } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultSaveConfig(msg.patch, msg.clearCredentialRefs);
+      ACCOUNT_CONFIG_SAVE: async (msg) => {
+        const { handleAccountConfigSave } = await import("../tools/account-switch/config-background-handler");
+        return handleAccountConfigSave(msg.patch);
       },
-      VAULT_PUT_SECRET: async (msg) => {
-        const { handleVaultPutSecret } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultPutSecret(msg.credentialId, msg.plaintext);
+      BACKUP_EXPORT: async () => {
+        const { handleBackupExport } = await import("../tools/account-switch/config-background-handler");
+        return handleBackupExport();
       },
-      VAULT_DELETE_SECRET: async (msg) => {
-        const { handleVaultDeleteSecret } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultDeleteSecret(msg.credentialId);
+      BACKUP_PREPARE: async (msg) => {
+        const { handleBackupPrepare } = await import("../tools/account-switch/config-background-handler");
+        return handleBackupPrepare(msg.text);
       },
-      VAULT_HAS_SECRET: async (msg) => {
-        const { handleVaultHasSecret } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultHasSecret(msg.credentialId);
-      },
-      VAULT_EXPORT_BACKUP: async () => {
-        const { handleVaultExportBackup } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultExportBackup();
-      },
-      VAULT_PREPARE_BACKUP: async (msg) => {
-        const { handleVaultPrepareBackup } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultPrepareBackup(msg.text);
-      },
-      VAULT_CONFIRM_BACKUP: async (msg) => {
-        const { handleVaultConfirmBackup } = await import("../tools/account-switch/vault-background-handler");
-        return handleVaultConfirmBackup(msg.acceptPlaintextWarning);
+      BACKUP_CONFIRM: async (msg) => {
+        const { handleBackupConfirm } = await import("../tools/account-switch/config-background-handler");
+        return handleBackupConfirm(msg.acceptPlaintextWarning);
       },
       TEST_RECIPE: async (msg, sender) => {
         const { handleTestRecipe } = await import(

@@ -91,7 +91,11 @@ function registerRouter() {
   messageListeners.clear();
   const routeTable = buildMessageRouteTable(allTools);
   messageListeners.add(
-    createBackgroundMessageListener(routeTable, { openToolTab }),
+    createBackgroundMessageListener(routeTable, {
+      openToolTab,
+      getAccountSwitcherShortcut: async () => '',
+      triggerAccountSwitcher: async () => false,
+    }),
   );
 }
 
@@ -204,6 +208,8 @@ describe('Background Router round-trip', () => {
     const routeTable = buildMessageRouteTable(allTools);
     const listener = createBackgroundMessageListener(routeTable, {
       openToolTab,
+      getAccountSwitcherShortcut: async () => '',
+      triggerAccountSwitcher: async () => false,
     });
     const sendResponse = vi.fn();
     expect(listener({ type: bogusType }, fakeSender, sendResponse)).toBe(false);

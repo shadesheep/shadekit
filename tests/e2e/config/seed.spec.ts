@@ -39,9 +39,8 @@ test('[SEED-01] seeded wildcard environment and accounts render in options', asy
   const admin = stored?.accounts.find(
     (account) => account.id === 'fixture-admin',
   );
-  expect(admin?.credentialRef).toBe('account:fixture-admin');
-  expect(admin?.password).toBeUndefined();
+  expect(admin?.password).toBe(FIXTURE_PASSWORD);
 
-  // 普通配置只保存引用；fixture 密码只能存在于保险库的加密载荷里。
-  expect(JSON.stringify(stored)).not.toContain(FIXTURE_PASSWORD);
+  // 密码以明文保存在配置里，不再有保险库密文。
+  expect(JSON.stringify(stored)).toContain(FIXTURE_PASSWORD);
 });

@@ -1,5 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { authLog } from './shared/logger';
+import { getCommandShortcut, SHORTCUT_COMMAND_NAME } from './shared/command-shortcut';
 import { sendContentMessage } from './shared/messages';
 import { getConfig, initConfig } from './shared/tool-config';
 import {
@@ -8,7 +9,6 @@ import {
 } from './shared/message-router';
 import { allTools } from './shared/tool-definitions';
 import { ErrorCodes, buildErrorDetail, errorCodeOf, formatLoginError } from './tools/account-switch/utils/error-codes';
-import type { AccountSwitchConfig } from './tools/account-switch/types';
 import {
   hasWildcardHostname,
   parseQuickLoginSelection,
@@ -17,14 +17,19 @@ import {
   handleQuickLogin,
   handleQuickLoginInNewTab,
 } from './tools/account-switch/background-handler';
+import { materializeLegacyVault } from './tools/account-switch/legacy-vault';
+import { readAccountSwitchConfig } from './tools/account-switch/config-store';
 
 export default defineBackground({
   main() {
-    // 注意:快捷键无法零交互强制注册。
-    // - manifest suggested_key 仅在安装时且无冲突时生效(冲突会静默失败);
-    // - chrome.commands.update 需要 Chrome 131+,Edge 当前(151)未实现,且
-    //   只能覆盖非用户显式设置的快捷键。
-    // 因此这里不做"自动注册",未生效时由选项页检测并引导用户(见 account-switch Config.vue 快捷键状态块)。
+    // 快捷键策略：onCommand 只响应，不做绑定。
+    // - manifest 的 suggested_key 在 install 与 update 时都会尝试写入（用户改过
+    //   才跳过）；写入那一刻若组合已被其他扩展/保留键占用，浏览器静默放弃
+    //   （CommandService::AddKeybindingPref，allow_overrides=false）。
+    // - Chrome/Edge 没有 chrome.commands.update（只有 getAll/onCommand），无法
+    //   后台补绑；Firefox 有 commands.reset，设置页提供「恢复默认」。
+    // - 未绑定时由 content/shortcut-fallback.ts 在页面内按同一组合兜底，
+    //   触发消息会再查一次绑定，避免浏览器原生通道与兜底重复执行。
 
     chrome.runtime.onInstalled.addListener(async (details) => {
 
@@ -36,16 +41,15 @@ export default defineBackground({
       }
     });
 
-    // 默认配置就绪后先回滚中断导入，再迁移旧明文；恢复失败只记录结构化错误。
+    // 默认配置就绪后把旧版保险库里的密码还原成明文；失败只记录结构化错误。
     void initToolDefaults()
       .then(async () => {
-        const { recoverSecurityState } = await import('./shared/security/startup');
-        await recoverSecurityState();
+        await materializeLegacyVault();
       })
       .catch((error: unknown) => {
-        void authLog.error('保险库启动恢复未完成', {
+        void authLog.error('旧版保险库迁移未完成', {
           extra: {
-            action: 'VAULT_STARTUP_RECOVERY',
+            action: 'LEGACY_VAULT_MIGRATION',
             errorCode: errorCodeOf(error),
           },
         });
@@ -54,57 +58,15 @@ export default defineBackground({
     // 注册右键菜单
     void registerContextMenus();
 
-    // 注册快捷键监听
+    // 注册快捷键监听（绑定由浏览器维护；未绑定时页面内兜底见 content）
     chrome.commands.onCommand.addListener(async (command) => {
-      if (command === 'open-account-switcher') {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        if (!tab?.id) return;
-        try {
-          // 尝试获取页面选中文本
-          const [{ result: selectedText }] = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => window.getSelection()?.toString().trim() || '',
-          });
-
-          if (selectedText) {
-            // 有选中文本，尝试快捷登录
-            await handleQuickLoginFromSelection(selectedText, tab.id, tab.url || '');
-          } else {
-            // 无选中文本，打开账号切换面板
-            await sendContentMessage(tab.id, 'OPEN_ACCOUNT_SWITCHER');
-          }
-        } catch {
-          // Content script may not be available on this tab (e.g. chrome://, about:blank)
-          // 回退到发送消息打开面板
-          try {
-            await sendContentMessage(tab.id!, 'OPEN_ACCOUNT_SWITCHER');
-          } catch {
-            // 受限页面（chrome://、扩展商店、空白页等）无法注入，明确告知用户
-            // 附错误码，便于反馈定位
-            chrome.notifications.create({
-              type: 'basic',
-              iconUrl: chrome.runtime.getURL('logo_48.png'),
-              title: 'ShadeKit',
-              message: `此页面不支持账号切换（浏览器内置页面），请在目标系统页面上使用 [${ErrorCodes.TAB_RESTRICTED}]`,
-            });
-            // 非 dev 模式也可事后查日志定位（最小失败摘要）
-            void authLog.error(
-              `快捷打开账号切换失败 [${ErrorCodes.TAB_RESTRICTED}] 页面地址受限，无法注入`,
-              {
-                extra: {
-                  action: 'OPEN_ACCOUNT_SWITCHER',
-                  errorCode: ErrorCodes.TAB_RESTRICTED,
-                  url: tab.url,
-                  failureSummary: true,
-                },
-              },
-            );
-          }
-        }
-      }
+      if (command !== SHORTCUT_COMMAND_NAME) return;
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (!tab?.id) return;
+      await runAccountSwitcherShortcut(tab.id, tab.url ?? '');
     });
 
     // 注册表驱动的消息路由：按消息 type 全局路由（ADR-0003 D1）。
@@ -112,7 +74,16 @@ export default defineBackground({
     // 监听回调工厂见 message-router.ts（round-trip 测试 seam）。
     const routeTable = buildMessageRouteTable(allTools);
     chrome.runtime.onMessage.addListener(
-      createBackgroundMessageListener(routeTable, { openToolTab }),
+      createBackgroundMessageListener(routeTable, {
+        openToolTab,
+        getAccountSwitcherShortcut: () => getCommandShortcut(),
+        triggerAccountSwitcher: async (tabId, url) => {
+          // 已绑定则交给浏览器原生通道：兜底与原生各执行一次会双开面板
+          if (await getCommandShortcut()) return false;
+          await runAccountSwitcherShortcut(tabId, url);
+          return true;
+        },
+      }),
     );
 
     // 处理右键菜单点击
@@ -216,6 +187,58 @@ async function initToolDefaults() {
 }
 
 /**
+ * 账号切换快捷键的实际动作：有选中文本走快捷登录，否则打开面板。
+ * 原生 onCommand 与页面内兜底（content/shortcut-fallback.ts）共用，行为必须一致。
+ */
+async function runAccountSwitcherShortcut(
+  tabId: number,
+  url: string,
+): Promise<void> {
+  try {
+    // 尝试获取页面选中文本
+    const [{ result: selectedText }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => window.getSelection()?.toString().trim() || '',
+    });
+
+    if (selectedText) {
+      // 有选中文本，尝试快捷登录
+      await handleQuickLoginFromSelection(selectedText, tabId, url);
+    } else {
+      // 无选中文本，打开账号切换面板
+      await sendContentMessage(tabId, 'OPEN_ACCOUNT_SWITCHER');
+    }
+  } catch {
+    // Content script may not be available on this tab (e.g. chrome://, about:blank)
+    // 回退到发送消息打开面板
+    try {
+      await sendContentMessage(tabId, 'OPEN_ACCOUNT_SWITCHER');
+    } catch {
+      // 受限页面（chrome://、扩展商店、空白页等）无法注入，明确告知用户
+      // 附错误码，便于反馈定位
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('logo_48.png'),
+        title: 'ShadeKit',
+        message: `此页面不支持账号切换（浏览器内置页面），请在目标系统页面上使用 [${ErrorCodes.TAB_RESTRICTED}]`,
+      });
+      // 非 dev 模式也可事后查日志定位（最小失败摘要）
+      void authLog.error(
+        `快捷打开账号切换失败 [${ErrorCodes.TAB_RESTRICTED}] 页面地址受限，无法注入`,
+        {
+          extra: {
+            action: 'OPEN_ACCOUNT_SWITCHER',
+            errorCode: ErrorCodes.TAB_RESTRICTED,
+            url,
+            failureSummary: true,
+          },
+        },
+      );
+    }
+  }
+}
+
+/**
  * 从选中文本解析登录信息；当前页面命中环境时原地切换，否则新标签页登录。
  */
 async function handleQuickLoginFromSelection(
@@ -230,10 +253,8 @@ async function handleQuickLoginFromSelection(
     './tools/account-switch/utils/error-codes'
   );
 
-  // 读取配置
-  const asConfig = await getConfig<AccountSwitchConfig>(
-    'account-switch',
-  );
+  // 读取配置（含旧版保险库明文迁移）
+  const asConfig = await readAccountSwitchConfig();
   const defaultDomain = asConfig?.quickLoginDefaultDomain || '';
 
   // 显式 URL > 当前页面命中环境 > 默认环境。

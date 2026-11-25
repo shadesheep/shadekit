@@ -346,6 +346,14 @@ describe("SwitcherPanel 已配置环境", () => {
         ...structuredClone(panelData),
         origin: "https://target.example.com",
         matchedEnvKey: "https://target.example.com",
+        // 环境与全局默认密码都不存在时，才允许要求当次密码。
+        hasGlobalDefaultPassword: false,
+        domains: {
+          "https://target.example.com": {
+            ...panelData.domains["https://target.example.com"],
+            hasDefaultPassword: false,
+          },
+        },
         accounts: [{ id: "acc-temp", name: "临时账号", username: "temp", roles: [], hasSavedPassword: false }],
       });
       return Promise.resolve({ success: true });
@@ -370,6 +378,31 @@ describe("SwitcherPanel 已配置环境", () => {
       hasUrl: false,
     });
     expect(mocks.sendBgMessage).not.toHaveBeenCalledWith("SWITCH_ACCOUNT", expect.anything());
-    expect(mocks.sendBgMessage).not.toHaveBeenCalledWith("VAULT_PUT_SECRET", expect.anything());
+  });
+
+  it("无保存密码但存在默认密码时直接切换，不弹当次密码框", async () => {
+    mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
+    mocks.sendBgMessage.mockImplementation((type: string) => {
+      if (type === "GET_ACCOUNT_PANEL") return Promise.resolve({
+        ...structuredClone(panelData),
+        origin: "https://target.example.com",
+        matchedEnvKey: "https://target.example.com",
+        accounts: [{ id: "acc-default", name: "默认密码账号", username: "alice", roles: [], hasSavedPassword: false }],
+      });
+      return Promise.resolve({ success: true });
+    });
+    await mountPanel();
+    root.querySelector<HTMLButtonElement>(".as-ql-btn")?.remove();
+    Array.from(root.querySelectorAll<HTMLButtonElement>(".as-tab-btn")).find((button) => button.textContent?.includes("选择账号"))?.click();
+    await flush();
+    root.querySelector<HTMLButtonElement>(".as-account-card")!.click();
+    await flush();
+
+    expect(root.querySelector("[data-temporary-password]")).toBeNull();
+    expect(mocks.sendBgMessage).toHaveBeenCalledWith("SWITCH_ACCOUNT", {
+      accountId: "acc-default",
+      environmentId: "https://target.example.com",
+    });
   });
 });

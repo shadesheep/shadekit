@@ -1,6 +1,5 @@
-import { getConfig } from "../../../shared/tool-config";
+import { readAccountSwitchConfig } from "../config-store";
 import { readSpecFromConfig } from "../spec/migrate";
-import type { AccountSwitchConfig } from "../types";
 import { normalizeDomain } from "../utils/env";
 import { planLoginPermissions, type PermissionPlan } from "./permission-planner";
 import { originToMatchPattern } from "./origin-pattern";
@@ -19,7 +18,7 @@ export function registerEnvironmentPlan(environmentId: string, plan: PermissionP
 export async function getEnvironmentPermissionPlan(environmentId: string): Promise<PermissionPlan> {
   const existing = environmentPlans.get(environmentId);
   if (existing) return existing;
-  const config = await getConfig<AccountSwitchConfig>("account-switch");
+  const config = await readAccountSwitchConfig();
   const environment = config?.domains[environmentId];
   if (!environment) throw new PermissionError("ORIGIN_UNSUPPORTED", "环境不存在或已删除");
   const { spec } = readSpecFromConfig(environment, config?.strategies);

@@ -1,5 +1,6 @@
 import { sendBgMessage } from "../../shared/messages";
-import { getConfig, updateConfigTransaction } from "../../shared/tool-config";
+import { updateConfigTransaction } from "../../shared/tool-config";
+import { readAccountSwitchConfig } from "./config-store";
 import { rankPickerTabs } from "./config/target-picker";
 import {
   applyLoginFormFrame,
@@ -161,7 +162,7 @@ function expectedAutoSpec(
 export async function lockPreparedLoginForm(
   input: PreparedLoginFormLock,
 ): Promise<LoginFormLockResult> {
-  const initial = await getConfig<AccountSwitchConfig>(TOOL_ID);
+  const initial = await readAccountSwitchConfig();
   if (!expectedAutoSpec(initial, input)) {
     return { status: "skipped", reason: "环境已删除或声明已变化" };
   }

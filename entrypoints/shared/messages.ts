@@ -3,7 +3,8 @@
  *
  * 以判别联合声明全部消息类型：
  * - BackgroundMessageMap：页面/content script → background（chrome.runtime.sendMessage）
- *   含 9 类工具消息（registry handler）+ OPEN_TOOL_TAB 核心消息（background 自处理）
+ *   含工具消息（registry handler）+ 核心消息（background 自处理：OPEN_TOOL_TAB /
+ *   GET_ACCOUNT_SWITCHER_SHORTCUT / TRIGGER_ACCOUNT_SWITCHER）
  * - ContentMessageMap：background → content script（chrome.tabs.sendMessage）
  *
  * 所有发送点统一经 sendBgMessage / sendContentMessage，编译期校验
@@ -56,6 +57,23 @@ export interface BackgroundMessageMap {
     };
     response: { success: boolean };
   };
+  /**
+   * content script 查询账号切换命令的绑定状态。
+   * `shortcut` 为空串 = 安装/更新时撞车被浏览器静默丢弃 → 页面内按键兜底接管。
+   */
+  GET_ACCOUNT_SWITCHER_SHORTCUT: {
+    payload: Record<string, never>;
+    response: { shortcut: string };
+  };
+  /**
+   * 页面内按键兜底触发命令（Chrome/Edge 没有编程式绑定 API，只能这样补）。
+   * background 在执行前会再查一次绑定：返回 `handled: false` 表示已绑定，
+   * 应由浏览器原生通道处理，避免同一次按键执行两次。
+   */
+  TRIGGER_ACCOUNT_SWITCHER: {
+    payload: Record<string, never>;
+    response: { handled: boolean };
+  };
 
   // --- 账号切换 ---
   GET_ACCOUNT_PANEL: {
@@ -81,8 +99,8 @@ export interface BackgroundMessageMap {
     };
     response: LoginResponse;
   };
-  /** 仅扩展配置页：先完成迁移，再读取不含明文的引用配置。 */
-  VAULT_GET_CONFIG: {
+  /** 仅扩展配置页：读取账号切换配置（明文密码，无保险库）。 */
+  ACCOUNT_CONFIG_GET: {
     payload: Record<string, never>;
     response: {
       success: boolean;
@@ -91,12 +109,10 @@ export interface BackgroundMessageMap {
       errorCode?: ErrorCode;
     };
   };
-  /** 仅扩展配置页：一次性秘密随补丁进入 Background，普通存储只提交引用。 */
-  VAULT_SAVE_CONFIG: {
+  /** 仅扩展配置页：字段级保存账号切换配置。 */
+  ACCOUNT_CONFIG_SAVE: {
     payload: {
       patch: Partial<AccountSwitchConfig>;
-      /** 用户显式点名的凭据引用：只清除这些，未提及的引用保持不变。 */
-      clearCredentialRefs?: string[];
     };
     response: {
       success: boolean;
@@ -105,27 +121,15 @@ export interface BackgroundMessageMap {
       errorCode?: ErrorCode;
     };
   };
-  VAULT_PUT_SECRET: {
-    payload: { credentialId: string; plaintext: string };
-    response: LoginResponse;
-  };
-  VAULT_DELETE_SECRET: {
-    payload: { credentialId: string };
-    response: LoginResponse;
-  };
-  VAULT_HAS_SECRET: {
-    payload: { credentialId: string };
-    response: { success: boolean; hasSecret?: boolean; error?: string; errorCode?: ErrorCode };
-  };
-  VAULT_EXPORT_BACKUP: {
+  BACKUP_EXPORT: {
     payload: Record<string, never>;
     response: LoginResponse & { backup?: Record<string, unknown> };
   };
-  VAULT_PREPARE_BACKUP: {
+  BACKUP_PREPARE: {
     payload: { text: string };
     response: LoginResponse & { summary?: BackupImportSummary };
   };
-  VAULT_CONFIRM_BACKUP: {
+  BACKUP_CONFIRM: {
     payload: { acceptPlaintextWarning: boolean };
     response: LoginResponse & { importedSecretCount?: number };
   };
@@ -236,7 +240,10 @@ export type BackgroundMessageType = keyof BackgroundMessageMap;
  * background 核心消息 type——由 background.ts 直接处理，
  * 工具不得在 backgroundHandlers 中声明同名 type（见 types.ts 的排除）。
  */
-export type CoreMessageType = "OPEN_TOOL_TAB";
+export type CoreMessageType =
+  | "OPEN_TOOL_TAB"
+  | "GET_ACCOUNT_SWITCHER_SHORTCUT"
+  | "TRIGGER_ACCOUNT_SWITCHER";
 
 /** 工具可声明的消息 type（registry handler 的合法 key） */
 export type ToolMessageType = Exclude<BackgroundMessageType, CoreMessageType>;

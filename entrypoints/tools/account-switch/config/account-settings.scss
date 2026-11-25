@@ -1,0 +1,100 @@
+.account-settings,
+.account-strategies {
+  max-width: 1040px;
+}
+
+.account-settings {
+  display: grid;
+  gap: 16px;
+  --settings-surface: #fff;
+  --settings-soft: #f1f5f9;
+  --settings-border: #e2e8f0;
+  --settings-text: #0f172a;
+  --settings-muted: #64748b;
+  color: var(--settings-text);
+
+  .settings-card {
+    background: var(--settings-surface);
+    border: 1px solid var(--settings-border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .settings-card-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+  }
+  .settings-description, .settings-footnote, .quick-login-summary {
+    color: var(--settings-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 6px 0 0;
+  }
+  .settings-hint { color: var(--settings-muted); margin: 12px 0 0; }
+  .shortcut-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+  .shortcut-manual-hint { color: var(--settings-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+  .shortcut-status, .shortcut-available { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .shortcut-status { gap: 12px; flex-wrap: wrap; }
+  .shortcut-available { color: #15803d; }
+  .shortcut-status kbd { background: var(--settings-soft); border: 1px solid var(--settings-border); border-radius: 5px; padding: 3px 8px; }
+  .badge-settings-layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; margin-top: 20px; }
+  .badge-settings-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .badge-settings-fields:disabled { opacity: .55; }
+  .badge-settings-fields :deep(.dt-config-item) { padding: 16px 0; border-top: 1px solid var(--settings-border); border-bottom: 0; }
+  .badge-settings-fields :deep(.dt-segmented) { flex-wrap: wrap; max-width: 100%; }
+  .badge-settings-fields :deep(.dt-config-label) { color: var(--settings-text); }
+  .badge-scope-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--settings-muted); }
+  .badge-preview { padding-top: 16px; border-top: 1px solid var(--settings-border); }
+  .badge-preview-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--settings-muted); margin-bottom: 10px; }
+  .badge-preview-browser { border: 1px solid var(--settings-border); border-radius: 8px; overflow: hidden; background: var(--settings-surface); }
+  .badge-preview-toolbar { display: flex; gap: 12px; align-items: center; padding: 8px; background: var(--settings-soft); border-bottom: 1px solid var(--settings-border); font-size: 11px; color: var(--settings-muted); }
+  .badge-preview-page { position: relative; height: 128px; padding: 40px 16px 16px; }
+  .badge-preview-line { height: 7px; width: 82%; margin-bottom: 10px; border-radius: 3px; background: var(--settings-border); }
+  .badge-preview-line.short { width: 56%; }
+  .badge-preview-indicator { position: absolute; max-width: calc(100% - 18px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; font-size: 11px; border-radius: 4px; background: #eef2ff; color: #4338ca; }
+  .badge-preview-indicator.top-left { top: 9px; left: 9px; }
+  .badge-preview-indicator.top-right { top: 9px; right: 9px; }
+  .badge-preview-indicator.bottom-left { bottom: 9px; left: 9px; }
+  .badge-preview-indicator.bottom-right { bottom: 9px; right: 9px; }
+  .settings-footnote { display: flex; align-items: center; gap: 6px; margin-top: 14px; }
+  .badge-environment-manager { margin-top: 16px; border-top: 1px solid var(--settings-border); padding-top: 16px; }
+  .badge-manager-heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+  .badge-manager-heading span { color: var(--settings-muted); }
+  .badge-environment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; margin-top: 10px; }
+  .badge-environment-option { display: flex; align-items: flex-start; gap: 9px; padding: 10px 0; cursor: pointer; min-width: 0; }
+  .badge-environment-option input { accent-color: #6366f1; margin: 4px 0 0; flex-shrink: 0; }
+  .badge-environment-option > span { min-width: 0; }
+  .badge-environment-option strong { font-size: 13px; font-weight: 500; }
+  .badge-environment-url { display: block; margin-top: 2px; font-size: 12px; color: var(--settings-muted); overflow-wrap: anywhere; }
+  .quick-login-defaults summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  .quick-login-summary { font-weight: 400; margin-left: 12px; }
+  .quick-login-fields { margin-top: 16px; border-top: 1px solid var(--settings-border); }
+  .quick-login-fields :deep(.dt-config-item) { padding: 14px 0; }
+  .quick-login-fields :deep(.dt-config-control) { min-width: 0; }
+  .quick-login-fields .dt-select { max-width: 100%; }
+  .quick-login-fields .field-hint { color: var(--settings-muted); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
+[data-dt-dark] .account-settings {
+  --settings-surface: #161b22;
+  --settings-soft: #21262d;
+  --settings-border: #30363d;
+  --settings-text: #f1f5f9;
+  --settings-muted: #a1adbd;
+  .shortcut-available { color: #4ade80; }
+  .badge-preview-indicator { background: #2b2853; color: #c4b5fd; }
+}
+
+@media (max-width: 900px) {
+  .account-settings .badge-settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .account-settings .badge-preview { max-width: 260px; }
+}
+@media (max-width: 600px) {
+  .account-settings .settings-card { padding: 16px; }
+  .account-settings .badge-environment-grid { grid-template-columns: minmax(0, 1fr); }
+  .account-settings .quick-login-summary { display: block; margin: 6px 0 0 16px; }
+}

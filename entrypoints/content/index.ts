@@ -20,6 +20,7 @@ import {
 } from "./shadow-style-injector";
 import { getFloatPanelPosition } from "./float-panel-position";
 import { panelComponentLoaders } from "./panel-components";
+import { initShortcutFallback } from "./shortcut-fallback";
 // 样式经标准 Vite 管线打包为 content-scripts/content.css
 // （cssInjectionMode: 'ui' → 不注入页面，由 shadow-style-injector 运行时
 // fetch 后注入各 Shadow Root）。导入顺序即最终 CSS 级联顺序。
@@ -78,6 +79,9 @@ export default defineContentScript({
     if ((await loadEnvBadgeConfig()).enabled) {
       initEnvIndicator();
     }
+
+    // 快捷键兜底：仅在浏览器没绑定命令时接管（Chrome/Edge 无编程式绑定 API）
+    void initShortcutFallback();
 
     // 主题管理（不影响宿主页面）
     void watchDarkMode(applyThemeToContainers);

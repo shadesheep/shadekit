@@ -8,8 +8,9 @@ import { allTools } from '../shared/tool-definitions';
 import { isToolEnabled } from '../shared/tool-state';
 import {
   formatShortcut,
-  useCommandShortcut,
-} from '../shared/use-command-shortcut';
+  getShortcutSettingsPageUrl,
+} from '../shared/command-shortcut';
+import { useCommandShortcut } from '../shared/use-command-shortcut';
 import { showToast } from '../shared/use-toast';
 
 const logoUrl = ref('');
@@ -44,7 +45,7 @@ const activeTool = ref<string | null>(null);
 const disabledCount = ref(0);
 
 // 账号切换快捷键状态（null = 查询中；'' = 未注册/被占用）
-const { shortcut, updating, updateSupported, refresh, enableSuggested } =
+const { shortcut, restoring, canRestore, refresh, restoreSuggested } =
   useCommandShortcut();
 
 // 键盘导航选中索引（-1 = 无选中，鼠标 hover 会同步该值）
@@ -139,21 +140,19 @@ const handleListKeydown = (e: KeyboardEvent) => {
 };
 
 // 快捷键设置页地址（chrome:// 不允许编程式打开，只能复制给用户粘贴）
-const shortcutsPageUrl = navigator.userAgent.includes('Edg')
-  ? 'edge://extensions/shortcuts'
-  : 'chrome://extensions/shortcuts';
+const shortcutsPageUrl = getShortcutSettingsPageUrl();
 
-const handleEnableShortcut = async () => {
+const handleRestoreShortcut = async () => {
   try {
-    await enableSuggested();
+    await restoreSuggested();
     if (shortcut.value) {
-      showToast(`快捷键已设置为 ${formatShortcut(shortcut.value)}`, 'success');
+      showToast(`已恢复默认快捷键 ${formatShortcut(shortcut.value)}`, 'success');
     } else {
-      // update 成功但仍未注册（被占用），明确告知而非静默
-      showToast('设置未生效，快捷键可能被占用，请手动设置', 'error', 4000);
+      // reset 成功但仍未注册（被占用），明确告知而非静默
+      showToast('恢复未生效，快捷键可能被占用，请手动设置', 'error', 4000);
     }
   } catch (e) {
-    showToast(e instanceof Error ? e.message : '设置失败', 'error');
+    showToast(e instanceof Error ? e.message : '恢复失败', 'error');
   }
 };
 
@@ -256,12 +255,12 @@ const goBack = () => {
         <div class="i-lucide-alert-triangle w-3.5 h-3.5" />
         <span class="shortcut-missing-text">账号切换快捷键未生效</span>
         <button
-          v-if="updateSupported"
+          v-if="canRestore"
           class="shortcut-fix-btn"
-          :disabled="updating"
-          @click="handleEnableShortcut"
+          :disabled="restoring"
+          @click="handleRestoreShortcut"
         >
-          {{ updating ? '设置中…' : '一键设置' }}
+          {{ restoring ? '恢复中…' : '恢复默认' }}
         </button>
         <button v-else class="shortcut-fix-btn" @click="copyShortcutsPageUrl">
           去设置

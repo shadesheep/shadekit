@@ -134,6 +134,68 @@ describe("Background 按 ID 解析已保存账号", () => {
     });
   });
 
+  it("账号无密码时回退环境默认密码", async () => {
+    const noAccountPassword = {
+      ...config,
+      accounts: [{ ...config.accounts[0]!, password: "" }],
+    };
+    storageGet.mockImplementation(async (keys: string[]) =>
+      keys.includes("devtools-account-switch")
+        ? { "devtools-account-switch": noAccountPassword }
+        : {},
+    );
+    await expect(handleSwitchAccount("acc-current", origin, sender)).resolves.toMatchObject({
+      success: true,
+    });
+    expect(runLoginSpec.mock.calls[0]![1].credentials.password).toBe(
+      "saved-env-password-81f4",
+    );
+  });
+
+  it("环境无默认密码时回退全局默认密码", async () => {
+    const globalOnly = {
+      ...config,
+      accounts: [{ ...config.accounts[0]!, password: "" }],
+      domains: {
+        ...config.domains,
+        [origin]: { ...config.domains[origin]!, defaultPassword: undefined },
+      },
+    };
+    storageGet.mockImplementation(async (keys: string[]) =>
+      keys.includes("devtools-account-switch")
+        ? { "devtools-account-switch": globalOnly }
+        : {},
+    );
+    await expect(handleSwitchAccount("acc-current", origin, sender)).resolves.toMatchObject({
+      success: true,
+    });
+    expect(runLoginSpec.mock.calls[0]![1].credentials.password).toBe(
+      "saved-global-password-37b6",
+    );
+  });
+
+  it("三级密码来源全缺时拒绝登录且不执行登录声明", async () => {
+    const noPassword = {
+      ...config,
+      accounts: [{ ...config.accounts[0]!, password: "" }],
+      domains: {
+        ...config.domains,
+        [origin]: { ...config.domains[origin]!, defaultPassword: undefined },
+      },
+      globalDefaultPassword: undefined,
+    };
+    storageGet.mockImplementation(async (keys: string[]) =>
+      keys.includes("devtools-account-switch")
+        ? { "devtools-account-switch": noPassword }
+        : {},
+    );
+    await expect(handleSwitchAccount("acc-current", origin, sender)).resolves.toMatchObject({
+      success: false,
+      errorCode: "CONFIG_INVALID",
+    });
+    expect(runLoginSpec).not.toHaveBeenCalled();
+  });
+
   it("运行中的密码即使放入普通日志字段也不会持久化", async () => {
     runLoginSpec.mockImplementation(async (_spec, ctx) => {
       await logger.info("受控运行调试", {

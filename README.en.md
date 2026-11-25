@@ -69,7 +69,7 @@ If automatic detection is inaccurate, edit the environment and click **Login For
 
 *The configuration page and element picker are actual interfaces; all sites and identities shown in the screenshots are fictional.*
 
-If the shortcut does not work, open `chrome://extensions/shortcuts` or `edge://extensions/shortcuts` and set `Alt+Shift+A` for ShadeKit's **Quick Account Switch** command. Firefox users can open `about:addons`, click the gear icon, and select **Manage Extension Shortcuts**.
+If the shortcut does not work, open `chrome://extensions/shortcuts` or `edge://extensions/shortcuts` and set `Alt+Shift+A` for ShadeKit's **Quick Account Switch** command (shown as `⌥⇧A`, i.e. Option+Shift+A, on macOS). Firefox users can open `about:addons`, click the gear icon, and select **Manage Extension Shortcuts**.
 
 ![Account switching: from acceptance tester to delivery administrator](docs/images/account-switch.gif)
 

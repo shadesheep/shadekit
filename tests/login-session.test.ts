@@ -583,28 +583,6 @@ describe('prepareLogin — execTarget（ADR-0012 D9）', () => {
     expect(isLoginLocked(42)).toBe(false);
   });
 
-  it('new 路径后续步骤失败 → 新建 tab 被关闭、锁被释放', async () => {
-    storageWith({
-      domains: {
-        'http://example.com': {
-          name: 'x',
-          loginMethod: 'generic',
-          strategyConfig: {
-            spec: { ...stubSpec(), vars: [{ name: 'token', secret: true }] },
-            secretVarRefs: { token: 'missing-secret' },
-          },
-        },
-      },
-    });
-    const outcome = await prepareLogin(
-      baseInput({ execTarget: { kind: 'new', url: 'http://example.com/page' } }),
-    );
-    expect(outcome.ok).toBe(false);
-    expect(tabsCreateMock).toHaveBeenCalledTimes(1);
-    expect(tabsRemoveMock).toHaveBeenCalledWith(42);
-    expect(isLoginLocked(42)).toBe(false);
-  });
-
   it('existing 路径 tabId 缺失 → 显式错误，不创建 tab、不进入流程', async () => {
     storageWith(CONFIG);
     const outcome = await prepareLogin(

@@ -1,0 +1,37 @@
+/* Config Kit 配置页专用色阶，保持说明文字在两种主题下清晰可读。 */
+.dt-config-page {
+  --config-ink: #0f172a;
+  --config-secondary: #52637a;
+  --config-line: #e2e8f0;
+  --config-surface: #ffffff;
+  --config-soft: #f1f5f9;
+  --config-accent: #4f46e5;
+  --config-control-line: #94a3b8;
+  --config-off: #64748b;
+  --config-segment-padding: 6px 12px;
+  --config-segment-font-size: 13px;
+  --config-toggle-state: inline;
+  container: dt-config / inline-size;
+  width: 100%;
+  max-width: 880px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 4px 0 12px;
+  color: var(--config-ink);
+}
+
+[data-dt-dark] .dt-config-page {
+  --config-ink: #f1f5f9;
+  --config-secondary: #a5b2c4;
+  --config-line: #303b4c;
+  --config-surface: #161b22;
+  --config-soft: #21262d;
+  --config-accent: #b4afff;
+  --config-control-line: #66758a;
+  --config-off: #66758a;
+}
+
+.dt-config-page :is(button, input):focus-visible {
+  outline: 2px solid var(--config-accent);
+  outline-offset: 3px;
+}

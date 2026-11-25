@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DtConfigSection from "../../shared/config/DtConfigSection.vue";
 import DtButton from "../../shared/components/DtButton.vue";
 import DtConfigActions from "../../shared/config/DtConfigActions.vue";
 import DtConfigHeader from "../../shared/config/DtConfigHeader.vue";
@@ -79,76 +80,70 @@ async function resetFields() {
 </script>
 
 <template>
-  <div class="mock-data-config">
-    <DtConfigHeader title="模拟数据设置" :save-state="saveState" />
+  <div class="dt-config-page">
+    <DtConfigHeader
+      title="模拟数据设置"
+      description="设置生成、预览与导出的默认行为。"
+      :save-state="saveState"
+    />
 
-    <DtConfigItem label="默认生成条数" hint="工具页生成的记录条数；大数据量仅保留少量预览，完整结果通过分批下载输出">
-      <DtNumberField v-model="config.count" :min="1" :max="100000" />
-    </DtConfigItem>
+    <DtConfigSection title="生成与输出" icon="i-lucide-database">
+      <DtConfigItem label="默认生成条数" hint="工具页生成的记录条数；大数据量仅保留少量预览，完整结果通过分批下载输出">
+        <DtNumberField v-model="config.count" :min="1" :max="100000" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="默认输出格式"
+        hint="「源码」视图的输出格式,也决定下载文件的类型"
+      >
+        <DtSegmented v-model="config.format" :options="FORMAT_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="字段变化后自动生成"
+        hint="关闭后需点击「生成」或按 Ctrl+↵ 手动生成"
+      >
+        <DtToggle v-model="config.autoGenerate" />
+      </DtConfigItem>
+    </DtConfigSection>
 
-    <DtConfigItem
-      label="默认输出格式"
-      hint="「源码」视图的输出格式,也决定下载文件的类型"
-    >
-      <DtSegmented v-model="config.format" :options="FORMAT_OPTIONS" />
-    </DtConfigItem>
+    <DtConfigSection title="结果与预览" icon="i-lucide-panels-top-left">
+      <DtConfigItem
+        label="默认结果视图"
+        hint="卡片视图逐条展示、点击复制,适合测试人员;源码视图为 JSON/CSV 等原文"
+      >
+        <DtSegmented v-model="config.viewMode" :options="VIEW_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="快速取数候选条数"
+        hint="「快速取数」模式每次生成的候选值数量"
+      >
+        <DtSegmented v-model="config.quickCount" :options="QUICK_COUNT_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="表格预览上限"
+        hint="「表格」视图最多预览的记录条数,完整数据可切换源码视图或下载"
+      >
+        <DtSegmented
+          v-model="config.tablePreviewLimit"
+          :options="PREVIEW_LIMIT_OPTIONS"
+        />
+      </DtConfigItem>
+    </DtConfigSection>
 
-    <DtConfigItem
-      label="默认结果视图"
-      hint="卡片视图逐条展示、点击复制,适合测试人员;源码视图为 JSON/CSV 等原文"
-    >
-      <DtSegmented v-model="config.viewMode" :options="VIEW_OPTIONS" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="快速取数候选条数"
-      hint="「快速取数」模式每次生成的候选值数量"
-    >
-      <DtSegmented v-model="config.quickCount" :options="QUICK_COUNT_OPTIONS" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="表格预览上限"
-      hint="「表格」视图最多预览的记录条数,完整数据可切换源码视图或下载"
-    >
-      <DtSegmented
-        v-model="config.tablePreviewLimit"
-        :options="PREVIEW_LIMIT_OPTIONS"
-      />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="字段变化后自动生成"
-      hint="关闭后需点击「生成」或按 Ctrl+↵ 手动生成"
-    >
-      <DtToggle v-model="config.autoGenerate" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="允许多开"
-      hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
-    >
-      <DtToggle v-model="config.allowMultiple" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="工作状态"
-      hint="字段列表、条数、格式等会在工具页内自动保存;如果字段列表被视为已清空，下次打开工具页会恢复为「用户信息」场景的默认字段"
-    >
-      <DtConfigActions>
-        <DtButton @click="resetFields">清空已保存的字段列表</DtButton>
-      </DtConfigActions>
-    </DtConfigItem>
+    <DtConfigSection title="页面与工作状态" icon="i-lucide-settings-2">
+      <DtConfigItem
+        label="允许多开"
+        hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
+      >
+        <DtToggle v-model="config.allowMultiple" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="工作状态"
+        hint="字段列表、条数、格式等会在工具页内自动保存;如果字段列表被视为已清空，下次打开工具页会恢复为「用户信息」场景的默认字段"
+      >
+        <DtConfigActions>
+          <DtButton @click="resetFields">清空已保存的字段列表</DtButton>
+        </DtConfigActions>
+      </DtConfigItem>
+    </DtConfigSection>
   </div>
 </template>
-
-<style scoped>
-.mock-data-config {
-  padding: 8px 0;
-  color: #0f172a;
-}
-
-[data-dt-dark] .mock-data-config {
-  color: #c9d1d9;
-}
-</style>

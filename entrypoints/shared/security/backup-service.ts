@@ -1,139 +1,41 @@
 import { getAllConfig, isExportableConfigId } from "../config-transfer";
 import { CONFIG_VERSION, keyFor, migrateConfig } from "../tool-config";
+import { isRecord } from "../type-guards";
+import { ACCOUNT_CONFIG_WRITE_LOCK } from "../../tools/account-switch/config-store";
 import { SecurityError } from "./errors";
 import { storageValuesEqual } from "./canonical-json";
-import type { VaultRecord } from "./types";
-import {
-  cleanupOrphanSecrets,
-  IMPORT_JOURNAL_KEY,
-  openLocalPayload,
-  putSecret,
-  resetVaultState,
-  resolveSecret,
-  sealLocalPayload,
-  VAULT_META_KEY,
-  VAULT_STORAGE_KEY,
-} from "./vault-service";
-import {
-  ACCOUNT_CONFIG_WRITE_LOCK,
-  collectCredentialRefs,
-  prepareSecretReferences,
-} from "../../tools/account-switch/secret-migration";
-import type { AccountSwitchConfig, DomainConfig } from "../../tools/account-switch/types";
+import type {
+  AccountSwitchConfig,
+  DomainConfig,
+} from "../../tools/account-switch/types";
 import {
   inspectLoginSpecSupport,
   type SpecSupportReport,
 } from "../../tools/account-switch/spec/capabilities";
 import { requireSupportedLoginSpec } from "../../tools/account-switch/spec/document";
 
-const IMPORT_FORMAT = "shadekit-import-journal/v1";
 const ACCOUNT_CONFIG_ID = "account-switch";
-
-interface ImportJournal {
-  format: typeof IMPORT_FORMAT;
-  stage: "prepared";
-  recovery: VaultRecord;
-  keys: string[];
-}
 
 export interface BackupImportSummary {
   plaintext: true;
   environments: Array<{ name: string; support: SpecSupportReport }>;
   accounts: number;
   strategies: number;
-  secrets: number;
   overwrittenTools: string[];
 }
 
 export interface PreparedBackupImport {
   summary: BackupImportSummary;
-  /** Background-only secret-reference config; never send this object to a page. */
-  accountSwitch: AccountSwitchConfig;
-  /** Background-only portable plaintext, held until the explicit confirmation. */
-  secrets: Map<string, string>;
   configWrites: Record<string, unknown>;
-  includesAccountSwitch: boolean;
 }
 
 export interface ImportResult {
   success: true;
-  importedSecretCount: number;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function requiredSecret(ref: string): Promise<string> {
-  const value = await resolveSecret(ref);
-  if (value === undefined) {
-    throw new SecurityError("VAULT_UNAVAILABLE", "备份引用的秘密不存在");
-  }
-  return value;
-}
-
-function rawVariables(spec: unknown): Record<string, unknown>[] {
-  if (!isRecord(spec) || !Array.isArray(spec.vars)) return [];
-  return spec.vars.filter(isRecord);
-}
-
-async function portableAccountConfig(
-  source: AccountSwitchConfig,
-): Promise<AccountSwitchConfig> {
-  const config = structuredClone(source);
-  for (const account of config.accounts) {
-    if (!account.credentialRef) continue;
-    account.password = await requiredSecret(account.credentialRef);
-    delete account.credentialRef;
-  }
-  for (const domain of Object.values(config.domains)) {
-    if (domain.defaultCredentialRef) {
-      domain.defaultPassword = await requiredSecret(domain.defaultCredentialRef);
-      delete domain.defaultCredentialRef;
-    }
-    for (const [name, ref] of Object.entries(domain.secretVarRefs ?? {})) {
-      domain.vars = { ...(domain.vars ?? {}), [name]: await requiredSecret(ref) };
-    }
-    delete domain.secretVarRefs;
-    const privateRefs = domain.strategyConfig?.secretVarRefs;
-    if (privateRefs && domain.strategyConfig?.spec) {
-      for (const variable of rawVariables(domain.strategyConfig.spec)) {
-        const name = typeof variable.name === "string" ? variable.name : undefined;
-        const ref = name ? privateRefs[name] : undefined;
-        if (variable.secret === true && ref) {
-          variable.default = await requiredSecret(ref);
-        }
-      }
-      delete domain.strategyConfig.secretVarRefs;
-    }
-    if (domain.strategyConfig) delete domain.strategyConfig.declaredSpecVersion;
-  }
-  for (const strategy of Object.values(config.strategies ?? {})) {
-    for (const variable of rawVariables(strategy.spec)) {
-      const name = typeof variable.name === "string" ? variable.name : undefined;
-      const ref = name ? strategy.secretVarRefs?.[name] : undefined;
-      if (variable.secret === true && ref) {
-        variable.default = await requiredSecret(ref);
-      }
-    }
-    delete strategy.secretVarRefs;
-    delete strategy.declaredSpecVersion;
-  }
-  if (config.globalDefaultCredentialRef) {
-    config.globalDefaultPassword = await requiredSecret(
-      config.globalDefaultCredentialRef,
-    );
-    delete config.globalDefaultCredentialRef;
-  }
-  return config;
-}
-
-/** The explicit plaintext-backup path is the only bulk secret materialization API. */
+/** 完整备份直接导出存储里的明文配置（不含弃用的保险库密文）。 */
 export async function exportPlaintextBackup(): Promise<Record<string, unknown>> {
-  const payload = await getAllConfig();
-  const account = payload[ACCOUNT_CONFIG_ID] as AccountSwitchConfig | undefined;
-  if (account) payload[ACCOUNT_CONFIG_ID] = await portableAccountConfig(account);
-  return payload;
+  return getAllConfig();
 }
 
 function specSupport(
@@ -179,6 +81,28 @@ function effectiveDomainSpec(
     spec: strategy.spec,
     declaredSpecVersion: strategy.declaredSpecVersion,
   };
+}
+
+/** 旧备份可能只带保险库引用；新版本无法解密，必须显式拒绝而不是导入死引用。 */
+const LEGACY_REF_KEYS = new Set([
+  "credentialRef",
+  "defaultCredentialRef",
+  "globalDefaultCredentialRef",
+  "secretVarRefs",
+]);
+
+function assertNoVaultRefs(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoVaultRefs(item);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (LEGACY_REF_KEYS.has(key)) {
+      throw new SecurityError("CONFIG_INVALID", "备份包含已弃用的加密密码引用，请改用新版导出的明文备份");
+    }
+    assertNoVaultRefs(child);
+  }
 }
 
 function validateAccountConfig(config: AccountSwitchConfig): BackupImportSummary["environments"] {
@@ -258,7 +182,7 @@ function validatePayload(raw: unknown): Record<string, unknown> {
   return data;
 }
 
-/** Parse, validate, derive support, and prepare every write without side effects. */
+/** 解析、校验并准备写入；不产生副作用。 */
 export async function preparePlaintextBackupImport(
   text: string,
 ): Promise<PreparedBackupImport> {
@@ -266,130 +190,48 @@ export async function preparePlaintextBackupImport(
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new SecurityError("CONFIG_INVALID", "明文备份 JSON 无法解析");
+    throw new SecurityError("CONFIG_INVALID", "备份 JSON 无法解析");
   }
   const payload = validatePayload(parsed);
   const source = payload[ACCOUNT_CONFIG_ID] as AccountSwitchConfig | undefined;
-  const environments = source ? validateAccountConfig(source) : [];
-  const prepared = source ? prepareSecretReferences(source) : undefined;
-  if (prepared) {
-    for (const ref of collectCredentialRefs(prepared.config)) {
-      if (!prepared.secrets.has(ref)) {
-        throw new SecurityError(
-          "VAULT_UNAVAILABLE",
-          "完整备份缺少引用对应的 portable 秘密",
-        );
-      }
-    }
+  let environments: BackupImportSummary["environments"] = [];
+  if (source) {
+    environments = validateAccountConfig(source);
+    assertNoVaultRefs(source);
   }
-
   const overwrittenTools = Object.keys(payload).filter(
     (key) => key !== "__version" && isExportableConfigId(key),
   );
   const configWrites: Record<string, unknown> = {};
   for (const id of overwrittenTools) {
-    configWrites[keyFor(id)] =
-      id === ACCOUNT_CONFIG_ID && prepared ? prepared.config : payload[id];
+    configWrites[keyFor(id)] = payload[id];
   }
-  const accountSwitch = prepared?.config ?? { accounts: [], domains: {}, strategies: {} };
   return {
     summary: {
       plaintext: true,
       environments,
-      accounts: accountSwitch.accounts.length,
-      strategies: Object.keys(accountSwitch.strategies ?? {}).length,
-      secrets: prepared?.secrets.size ?? 0,
+      accounts: source?.accounts.length ?? 0,
+      strategies: Object.keys(source?.strategies ?? {}).length,
       overwrittenTools,
     },
-    accountSwitch,
-    secrets: prepared?.secrets ?? new Map(),
     configWrites,
-    includesAccountSwitch: prepared !== undefined,
   };
-}
-
-async function readJournal(): Promise<ImportJournal | undefined> {
-  const result = await chrome.storage.local.get([IMPORT_JOURNAL_KEY]);
-  return result[IMPORT_JOURNAL_KEY] as ImportJournal | undefined;
-}
-
-export async function recoverInterruptedImport(): Promise<void> {
-  const journal = await readJournal();
-  if (!journal) return;
-  if (
-    journal.format !== IMPORT_FORMAT ||
-    journal.stage !== "prepared" ||
-    !journal.recovery ||
-    !Array.isArray(journal.keys)
-  ) {
-    throw new SecurityError("VAULT_UNAVAILABLE", "导入恢复日志格式不受支持");
-  }
-  const snapshot = (await openLocalPayload("import-recovery", journal.recovery)) as {
-    values?: Record<string, unknown>;
-  };
-  if (!snapshot.values) {
-    throw new SecurityError("VAULT_UNAVAILABLE", "导入恢复快照无效");
-  }
-  await chrome.storage.local.set(snapshot.values);
-  const missing = journal.keys.filter((key) => !Object.hasOwn(snapshot.values!, key));
-  if (missing.length > 0) await chrome.storage.local.remove(missing);
-  // 快照可能删除了导入期间新建的保险库元数据（首次使用保险库的失败导入）：
-  // 必须同时丢弃内存 DEK，否则同一 worker 生命周期的后续写入会加密在
-  // 一份已不存在的 wrappedDek 下，重启后无法解密。
-  resetVaultState();
-  await chrome.storage.local.remove(IMPORT_JOURNAL_KEY);
-}
-
-async function commitUnlocked(prepared: PreparedBackupImport): Promise<ImportResult> {
-  const affectedKeys = [
-    ...new Set([
-      ...Object.keys(prepared.configWrites),
-      VAULT_META_KEY,
-      VAULT_STORAGE_KEY,
-    ]),
-  ];
-  const before = await chrome.storage.local.get(affectedKeys);
-  const recovery = await sealLocalPayload("import-recovery", { values: before });
-  const journal: ImportJournal = {
-    format: IMPORT_FORMAT,
-    stage: "prepared",
-    recovery,
-    keys: affectedKeys,
-  };
-
-  try {
-    await chrome.storage.local.set({ [IMPORT_JOURNAL_KEY]: journal });
-    for (const [id, plaintext] of prepared.secrets) {
-      await putSecret(id, plaintext);
-      if ((await resolveSecret(id)) !== plaintext) {
-        throw new SecurityError("VAULT_UNAVAILABLE", "导入秘密回读核对失败");
-      }
-    }
-    await chrome.storage.local.set(prepared.configWrites);
-    const readback = await chrome.storage.local.get(Object.keys(prepared.configWrites));
-    for (const [key, value] of Object.entries(prepared.configWrites)) {
-      // chrome.storage 读回时会重排对象键，必须按内容而非键序比较。
-      if (!storageValuesEqual(readback[key], value)) {
-        throw new SecurityError("VAULT_UNAVAILABLE", "导入配置读回校验失败");
-      }
-    }
-    if (prepared.includesAccountSwitch) {
-      await cleanupOrphanSecrets(
-        new Set(collectCredentialRefs(prepared.accountSwitch)),
-      );
-    }
-    await chrome.storage.local.remove(IMPORT_JOURNAL_KEY);
-    return { success: true, importedSecretCount: prepared.secrets.size };
-  } catch (error) {
-    await recoverInterruptedImport();
-    throw error;
-  }
 }
 
 export async function commitPreparedBackupImport(
   prepared: PreparedBackupImport,
 ): Promise<ImportResult> {
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-  const operation = () => commitUnlocked(prepared);
+  const operation = async (): Promise<ImportResult> => {
+    await chrome.storage.local.set(prepared.configWrites);
+    const readback = await chrome.storage.local.get(Object.keys(prepared.configWrites));
+    for (const [key, value] of Object.entries(prepared.configWrites)) {
+      // chrome.storage 读回时会重排对象键，必须按内容而非键序比较。
+      if (!storageValuesEqual(readback[key], value)) {
+        throw new SecurityError("CONFIG_INVALID", "导入配置读回校验失败");
+      }
+    }
+    return { success: true };
+  };
   return locks ? locks.request(ACCOUNT_CONFIG_WRITE_LOCK, operation) : operation();
 }

@@ -341,6 +341,8 @@ const password = parsed.password || envPassword || globalDefaultPassword.value |
     ▼
 [background-handler.ts] handleSwitchAccount(account, origin, sender)
     │
+    ├── 0. resolveLoginPassword() — 账号密码 → 环境默认 → 全局默认
+    │   └── 三级全缺 → CONFIG_INVALID（不进入登录执行）
     ├── 1. prepareLogin()（login-session.ts）— 登录 prelude
     │   ├── 从 chrome.storage.local 读取配置 devtools-account-switch
     │   ├── matchDomain(origin) 匹配 DomainConfig
@@ -508,6 +510,8 @@ entrypoints/tools/account-switch/
 | `TEST_RECIPE` | 选项页配方编辑器（旧 recipe） | background.ts | `handleTestRecipe` | tabId, origin, recipe, only? → 逐步骤命中状态（`only` 为单步试跑下标） |
 | `SCAN_LOGIN_FORM` | 选项页配方编辑器 | background.ts | `handleScanLoginForm` | tabId, origin → 命中 frame 的用户名 / 密码 / 提交候选（只读） |
 | `OPEN_ACCOUNT_SWITCHER` | background.ts | Content Script | 打开面板 | — |
+| `GET_ACCOUNT_SWITCHER_SHORTCUT` | Content Script | background.ts | 查询命令绑定状态（空串 = 未绑定，页面内兜底接管） | — |
+| `TRIGGER_ACCOUNT_SWITCHER` | Content Script | background.ts | 兜底触发快捷键动作（未绑定时）；`handled: false` 表示绑定已存在，交给原生通道 | — |
 
 ---
 

@@ -9,7 +9,7 @@
  */
 
 import { authLog } from "../../shared/logger";
-import { getConfig } from "../../shared/tool-config";
+import { readAccountSwitchConfig } from "./config-store";
 import { runLoginSpec } from "./spec/login-run";
 import type { FormScanFrame } from "./strategies/login-form-scan";
 import type { AuthStorageSelection } from "./strategies/auth-storage";
@@ -24,7 +24,7 @@ import { prepareLogin } from "./login-session";
 import type { DryRunStepResult } from "./strategies/generic-dry-run";
 import { normalizeRecipe } from "./strategies/generic-recipe";
 import type { RecipeStepTrace } from "./strategies/generic-runner";
-import type { Account, AccountSwitchConfig, AuthContext, DomainConfig } from "./types";
+import type { Account, AuthContext, DomainConfig } from "./types";
 import { ACCOUNT_SWITCH_CONFIG_DEFAULTS } from "./types";
 import {
   accountBoundToEnvironment,
@@ -33,7 +33,7 @@ import {
   resolveEnvironment,
   type AccountPanelData,
 } from "./account-view";
-import { resolveAccountPassword, resolveDefaultPassword, resolveLoginPassword, resolveSpecSecrets } from "./secret-resolver";
+import { resolveDefaultPassword, resolveLoginPassword, resolveSpecSecrets } from "./secret-resolver";
 import { matchEnvironment, normalizeDomain, normalizedOrigin } from "./utils/env";
 import { hasWildcardHostname } from "./utils/quick-login-target";
 import type { ErrorCode } from "./utils/error-codes";
@@ -58,13 +58,6 @@ function rejectedLogin(message: string): LoginResponse {
   return { success: false, error: message, errorCode: ErrorCodes.LOGIN_REJECTED };
 }
 
-async function readAccountSwitchConfig(): Promise<AccountSwitchConfig | undefined> {
-  return getConfig<AccountSwitchConfig>(
-    "account-switch",
-    ACCOUNT_SWITCH_CONFIG_DEFAULTS,
-  );
-}
-
 /** Content Script 只能取得公共投影；origin 由 Chrome sender 决定，不接受消息伪造。 */
 export async function handleGetAccountPanel(
   sender: chrome.runtime.MessageSender,
@@ -78,10 +71,7 @@ export async function handleGetAccountPanel(
   }
   if (origin && sender.tab && /^https?:/i.test(sender.url ?? "")) await assertRuntimeTarget(origin);
   const config = await readAccountSwitchConfig();
-  return buildAccountPanel(
-    config ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS },
-    pageUrl,
-  );
+  return buildAccountPanel(config ?? { ...ACCOUNT_SWITCH_CONFIG_DEFAULTS }, pageUrl);
 }
 
 /** 只在 Background 内按一次运行解析账号；调用方不能读取其他账号的明文。 */
@@ -96,7 +86,7 @@ async function resolveSavedAccount(
   const config = await readAccountSwitchConfig();
   const account = config?.accounts.find((candidate) => candidate.id === accountId);
   const environment = config?.domains[environmentId];
-  if (!account || !environment) {
+  if (!config || !account || !environment) {
     return { error: rejectedLogin("账号或环境不存在") };
   }
   const bound = account.domains.some((domain) =>
@@ -127,7 +117,8 @@ async function resolveSavedAccount(
   await assertLoginPermissions(plan);
   return {
     account,
-    password: await resolveAccountPassword(account),
+    // 账号密码 → 环境默认 → 全局默认，与快捷登录/试跑同一回退语义。
+    password: await resolveLoginPassword(account, config, environmentId),
     origin: effectiveOrigin,
     environment,
   };
@@ -171,7 +162,7 @@ async function resolveQuickLoginPassword(
     return {
       error: {
         success: false,
-        error: error instanceof Error ? error.message : "保险库不可用",
+        error: error instanceof Error ? error.message : "读取账号密码失败",
         errorCode: errorCodeOf(error),
       },
     };
@@ -259,12 +250,20 @@ export async function handleSwitchAccount(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : "保险库不可用",
+      error: error instanceof Error ? error.message : "读取账号密码失败",
       errorCode: errorCodeOf(error),
     };
   }
   if ("error" in resolved) return resolved.error;
   const { account, password, environment } = resolved;
+  // 三级密码来源全缺时明确拒绝，避免把空密码交给登录声明执行器。
+  if (!password) {
+    return {
+      success: false,
+      error: "未配置密码：请使用一次性密码或设置默认密码",
+      errorCode: ErrorCodes.CONFIG_INVALID,
+    };
+  }
   // options/popup 环境：扩展页没有可登录的站点文档（sender.tab 指向扩展页自身）。
   if (!sender.tab || senderIsExtensionPage(sender)) {
     const openableUrl = resolveOpenableUrl(environmentId, environment.entryUrl);
@@ -448,7 +447,7 @@ export async function handleTrialSavedAccount(
     }
     // 能力门先于秘密解析与默认密码解析。
     const spec = assertEnvironmentLoginSupported(domainConfig, config.strategies);
-    const resolved = await resolveSpecSecrets(domainConfig, spec, config.strategies);
+    const resolved = await resolveSpecSecrets(domainConfig, spec);
     // 密码回退与 account-view.resolvePassword 同一语义（空值视为未设置）。
     const password = await resolveLoginPassword(account, config, environmentId);
     if (!password) {
@@ -483,7 +482,7 @@ export async function handleTrialSavedAccount(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : "保险库不可用",
+      error: error instanceof Error ? error.message : "试登录失败",
       errorCode: errorCodeOf(error),
       signals: [],
       requestSent: false,

@@ -77,17 +77,32 @@ function saveEdit(): void {
   emit('save', next, `登录策略「${entry?.name ?? ''}」已更新`);
 }
 
+function closeActionMenu(event: Event): void {
+  (event.target as HTMLElement).closest('details')?.removeAttribute('open');
+}
+
+function closeMenuOnBlur(event: FocusEvent): void {
+  const menu = event.currentTarget as HTMLDetailsElement;
+  if (!menu.contains(event.relatedTarget as Node | null)) menu.open = false;
+}
+
+function environmentNames(urls: string[]): string {
+  return urls.map((url) => props.domains[url]?.name || url).join('、');
+}
+
 function syncToEnvironments(item: StrategyListItem): void {
   const bound = boundEnvironments(props.domains, item.id);
   if (bound.length === 0) return;
-  const privateCount = bound.filter(
+  const privateEnvironments = bound.filter(
     (url) => props.domains[url]?.strategyConfig?.spec !== undefined,
-  ).length;
+  );
+  const privateCount = privateEnvironments.length;
   if (
     privateCount > 0 &&
     !confirm(
       `确定重置登录策略「${item.name}」的镜像？\n` +
-        `这将覆盖 ${privateCount} 个环境的私有修改，且无法恢复。`,
+        `这将覆盖 ${privateCount} 个环境的私有修改，且无法恢复。\n` +
+        `受影响环境：${environmentNames(privateEnvironments)}`,
     )
   )
     return;
@@ -118,7 +133,8 @@ function remove(item: StrategyListItem): void {
   if (
     !confirm(
       `确定删除登录策略「${item.name}」？\n${detail}\n\n` +
-        '策略库条目删除后不可恢复，环境记录不会被删除。',
+        '策略库条目删除后不可恢复，环境记录不会被删除。' +
+        (bound.length ? `\n关联环境：${environmentNames(bound)}` : ''),
     )
   )
     return;
@@ -148,14 +164,13 @@ function formatTime(ts: number): string {
 
 <template>
   <div class="form-card">
-    <h3>
-      <div class="i-lucide-library w-4 h-4" />
-      登录策略库
-    </h3>
-    <p class="settings-hint">
-      策略是可分享的登录声明，独立于环境。环境通过「登录策略」关联策略，关联不产生额外环境；
-      未偏离库版本的环境会持续跟随库版本；在本环境修改并保存声明后，仅本环境生效。删除策略会让镜像环境回到未配置状态。
-    </p>
+    <div class="strategy-heading">
+      <div>
+        <h3><div class="i-lucide-library w-4 h-4" aria-hidden="true" />登录策略库</h3>
+        <p class="settings-hint">集中维护可被多个环境复用的登录流程</p>
+      </div>
+      <span class="strategy-count">{{ items.length }} 个策略</span>
+    </div>
 
     <div v-if="items.length === 0" class="strategy-empty">
       还没有登录策略。在「环境与账号」页用「导入登录策略包…」导入，或在环境编辑页把当前声明存入策略库。
@@ -188,20 +203,25 @@ function formatTime(ts: number): string {
           >
             <div class="i-lucide-pencil w-3.5 h-3.5 mr-1" />编辑
           </DtButton>
-          <DtButton
-            size="sm"
-            :disabled="item.boundCount === 0"
-            :title="item.boundCount === 0 ? '没有已关联的环境' : `把 ${item.boundCount} 个已关联环境中改过声明的重置回镜像`"
-            @click="syncToEnvironments(item)"
-          >
-            <div class="i-lucide-refresh-cw w-3.5 h-3.5 mr-1" />重置镜像
-          </DtButton>
-          <DtButton size="sm" variant="danger" @click="remove(item)">
-            <div class="i-lucide-trash-2 w-3.5 h-3.5 mr-1" />删除
-          </DtButton>
+          <details class="strategy-more" name="strategy-actions" @keydown.esc.prevent="closeActionMenu" @focusout="closeMenuOnBlur">
+            <summary :aria-label="`更多策略操作：${item.name}`">更多<div class="i-lucide-chevron-down w-3.5 h-3.5" aria-hidden="true" /></summary>
+            <div class="strategy-menu">
+              <button type="button" :disabled="item.boundCount === 0" @click="closeActionMenu($event); syncToEnvironments(item)">
+                <div class="i-lucide-refresh-cw w-3.5 h-3.5" aria-hidden="true" />重置镜像
+              </button>
+              <button type="button" class="strategy-delete" @click="closeActionMenu($event); remove(item)">
+                <div class="i-lucide-trash-2 w-3.5 h-3.5" aria-hidden="true" />删除策略
+              </button>
+            </div>
+          </details>
         </div>
       </li>
     </ul>
+
+    <details class="strategy-help">
+      <summary>关联环境如何跟随策略？</summary>
+      <p>未单独修改登录流程的环境会跟随策略库更新；已自定义的环境保留自己的流程。重置镜像会覆盖这些自定义修改；删除策略会让跟随库版本的环境回到未配置状态。</p>
+    </details>
 
     <DtDrawer :show="!!editingSpec" :title="`编辑策略「${editingName}」`" @close="closeEdit">
       <div v-if="editingSpec" class="strategy-editor">
@@ -225,13 +245,13 @@ function formatTime(ts: number): string {
 
 .settings-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
   margin-bottom: 16px;
 }
 
 .strategy-empty {
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
   padding: 14px 0;
 }
 
@@ -249,7 +269,7 @@ function formatTime(ts: number): string {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 18px 20px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   transition: all 0.15s ease-out;
@@ -314,18 +334,45 @@ function formatTime(ts: number): string {
 .strategy-meta {
   margin-top: 3px;
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .strategy-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  align-items: center;
 }
 
 .strategy-editor {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.strategy-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.strategy-heading h3 { margin-bottom: 6px; font-size: 15px; }
+.strategy-heading .settings-hint { margin: 0; }
+.strategy-count { color: #64748b; font-size: 12px; white-space: nowrap; }
+.strategy-more { position: relative; }
+.strategy-more summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; border: 1px solid #e2e8f0; border-radius: 6px; padding: 3px 8px; font-size: 12px; color: #374151; background: #fff; }
+.strategy-more summary::-webkit-details-marker { display: none; }
+.strategy-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 160px; z-index: 10; padding: 5px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 6px 20px #0f172a15; }
+.strategy-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 5px; background: transparent; padding: 9px; text-align: left; color: #334155; cursor: pointer; font-size: 12px; }
+.strategy-menu button:hover { background: #f1f5f9; }
+.strategy-menu button:disabled { opacity: .5; cursor: not-allowed; }
+.strategy-menu .strategy-delete { color: #b91c1c; }
+.strategy-help { margin-top: 20px; font-size: 12px; color: #64748b; }
+.strategy-help summary { cursor: pointer; }
+.strategy-help p { max-width: 70ch; line-height: 1.7; margin: 10px 0 0; }
+[data-dt-dark] .strategy-menu, [data-dt-dark] .strategy-more summary { background: #161b22; border-color: #30363d; color: #f1f5f9; }
+[data-dt-dark] .strategy-menu button { color: #cbd5e1; }
+[data-dt-dark] .strategy-menu button:hover { background: #21262d; }
+[data-dt-dark] .strategy-menu .strategy-delete { color: #f87171; }
+[data-dt-dark] .settings-hint, [data-dt-dark] .strategy-count, [data-dt-dark] .strategy-meta, [data-dt-dark] .strategy-empty, [data-dt-dark] .strategy-help { color: #a1adbd; }
+@media (max-width: 600px) {
+  .strategy-item { flex-wrap: wrap; padding: 16px; }
+  .strategy-actions { margin-left: auto; }
+  .strategy-meta { overflow-wrap: anywhere; }
 }
 </style>

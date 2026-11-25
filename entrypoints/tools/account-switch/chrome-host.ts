@@ -148,8 +148,11 @@ export function createChromeHostBridge(ctx: AuthContext): HostBridge {
       page: {
         execute: (command: PageAgentCommand) => executePageCommand(tabId, command),
         currentUrl: async () => {
+          // 只认已提交的地址：pendingUrl 在表单提交发起的一瞬间就变成 action
+          // 地址，urlChanged 会据此在登录响应到达前误判成功，随后的尾部刷新
+          // 还会中断仍在途的登录请求（如 Jenkins 的表单登录）。
           const tab = await chrome.tabs.get(tabId);
-          return tab.pendingUrl || tab.url || "";
+          return tab.url || tab.pendingUrl || "";
         },
         navigate: async (url: string) => { await assertRuntimeTarget(url); await chrome.tabs.update(tabId, { url }); },
         waitForLoad: (timeoutMs: number) => waitForTabLoaded(tabId, timeoutMs),

@@ -10,6 +10,7 @@ import {
   supportReason,
 } from "./account-view";
 import { accountInitial } from "./account-palette";
+import { accountPasswordSummary } from "./account-password-state";
 import { buildEnvGroups, normalizeEnvTag, removeEnvironment, tagColor } from "./account-env-view";
 import { sendBgMessage } from "../../shared/messages";
 import { validateLoginSpec } from "./spec/validate";
@@ -36,11 +37,13 @@ import DtToggle from "../../shared/config/DtToggle.vue";
 import DtSegmented from "../../shared/config/DtSegmented.vue";
 import {
   formatShortcut,
+  getShortcutSettingsPageUrl,
   SHORTCUT_SUGGESTED,
-  useCommandShortcut,
-} from "../../shared/use-command-shortcut";
+} from "../../shared/command-shortcut";
+import { useCommandShortcut } from "../../shared/use-command-shortcut";
 import DomainsPanel, { type EnvSavePayload } from "./config/DomainsPanel.vue";
 import StrategyLibrary from "./config/StrategyLibrary.vue";
+import EnvironmentIdentity from "./config/EnvironmentIdentity.vue";
 import DtButton from "../../shared/components/DtButton.vue";
 import DtDrawer from "../../shared/components/DtDrawer.vue";
 import DtPanel from "../../shared/components/DtPanel.vue";
@@ -51,12 +54,13 @@ const emit = defineEmits<{ editEnvConsumed: [] }>();
 
 
 // 主视图（环境卡片）为默认视图；设置页承载环境指示器等次级配置
-const activeTab = ref<"main" | "settings">("main");
+const activeTab = ref<"main" | "strategies" | "settings">("main");
 const config = ref<AccountSwitchConfig>({
   accounts: [],
   domains: {},
   strategies: {},
 });
+const showBadgeEnvironments = ref(false);
 const quickLoginDefaultDomain = ref("");
 const globalDefaultPassword = ref("");
 // 加载失败时表单停在空集合：必须阻断所有保存/编辑/导入入口，避免覆盖真实数据。
@@ -65,16 +69,20 @@ const loadError = ref("");
 const formHighlight = ref(false);
 
 // 快捷键状态（ADR-0001 D4 可见性底线：安装时被占用会静默注册失败，此处检测并引导）
-const { shortcut, updating, updateSupported, refresh, enableSuggested } =
+const { shortcut, restoring, canRestore, refresh, restoreSuggested } =
   useCommandShortcut();
+// macOS 显示 ⌥⇧A，其他平台显示 Alt+Shift+A
+const suggestedShortcut = formatShortcut(SHORTCUT_SUGGESTED);
+// chrome:// / edge:// 不允许编程式打开，只能提示用户粘贴
+const shortcutSettingsUrl = getShortcutSettingsPageUrl();
 const shortcutUpdateError = ref("");
 
-async function handleEnableShortcut() {
+async function handleRestoreShortcut() {
   shortcutUpdateError.value = "";
   try {
-    await enableSuggested();
+    await restoreSuggested();
   } catch (e) {
-    shortcutUpdateError.value = e instanceof Error ? e.message : "设置失败";
+    shortcutUpdateError.value = e instanceof Error ? e.message : "恢复失败";
   }
 }
 
@@ -93,30 +101,17 @@ const editingAccount = ref<string | null>(null);
 const customRoleInput = ref("");
 // 角色自由文本收进「更多」：默认只展示 3 个预设 chip
 const showCustomRole = ref(false);
-const showAccountPassword = ref(false);
-const showGlobalPassword = ref(false);
+// 「显示密码」开关（环境与账号页顶部）：默认开启，持久化到配置；
+// 控制密码输入框显示明文还是掩码。
+const showPasswords = ref(true);
 const accountFormError = ref("");
-// 显式清除与「留空保持不变」区分：只有点了清除按钮才删除已存储引用。
-const clearAccountPasswordOnSave = ref(false);
 
 watch(() => newAccount.value.username, () => {
   accountFormError.value = "";
 });
 
-watch(() => newAccount.value.password, (value) => {
-  if (value) clearAccountPasswordOnSave.value = false;
-});
-
-const editingAccountHasStoredPassword = computed(() => {
-  if (!editingAccount.value || clearAccountPasswordOnSave.value) return false;
-  return Boolean(
-    config.value.accounts.find((account) => account.id === editingAccount.value)
-      ?.credentialRef,
-  );
-});
-
 const hasGlobalDefaultPassword = computed(() =>
-  Boolean(config.value.globalDefaultCredentialRef),
+  Boolean(config.value.globalDefaultPassword),
 );
 
 // 预定义角色与角色色同源（account-view，ADR-0004 D6）
@@ -127,8 +122,6 @@ function cloneAccount(id: string) {
   const acc = config.value.accounts.find((a) => a.id === id);
   if (!acc) return;
   editingAccount.value = null;
-  showAccountPassword.value = false;
-  clearAccountPasswordOnSave.value = false;
   accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
@@ -163,7 +156,7 @@ const domainOptions = computed(() => {
 
 async function loadConfig(): Promise<boolean> {
   try {
-    const response = await sendBgMessage("VAULT_GET_CONFIG");
+    const response = await sendBgMessage("ACCOUNT_CONFIG_GET");
     if (!response.success || !response.config) {
       loadError.value = response.error || "配置读取失败";
       return false;
@@ -186,6 +179,7 @@ async function loadConfig(): Promise<boolean> {
     // tabOrder 存储字段保留（SwitcherPanel 仍读取），本页不再提供配置 UI
     quickLoginDefaultDomain.value = data?.quickLoginDefaultDomain || "";
     globalDefaultPassword.value = data?.globalDefaultPassword || "";
+    showPasswords.value = data?.showPasswords !== false;
     loadError.value = "";
     return true;
   } catch (error: unknown) {
@@ -218,7 +212,6 @@ function accountsPatch(): Pick<AccountSwitchConfig, "accounts"> {
  */
 async function saveFields(
   patch: Partial<AccountSwitchConfig>,
-  clearCredentialRefs: string[] = [],
 ): Promise<boolean> {
   const guardedPatch = guardConfigSavePatch(loadError.value, patch);
   if (!guardedPatch) {
@@ -227,10 +220,8 @@ async function saveFields(
   }
   try {
     const sanitizedPatch = JSON.parse(JSON.stringify(guardedPatch)) as Partial<AccountSwitchConfig>;
-    const clearRefs = clearCredentialRefs.filter(Boolean);
-    const response = await sendBgMessage("VAULT_SAVE_CONFIG", {
+    const response = await sendBgMessage("ACCOUNT_CONFIG_SAVE", {
       patch: sanitizedPatch,
-      ...(clearRefs.length > 0 ? { clearCredentialRefs: clearRefs } : {}),
     });
     if (!response.success || !response.config) {
       showToast(response.error || "保存配置失败", "error");
@@ -240,7 +231,7 @@ async function saveFields(
       ...config.value,
       ...response.config,
     };
-    globalDefaultPassword.value = "";
+    globalDefaultPassword.value = response.config.globalDefaultPassword ?? "";
     return true;
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "未知错误";
@@ -256,11 +247,20 @@ async function saveFields(
 async function saveWithFeedback(
   patch: Partial<AccountSwitchConfig>,
   successMessage: string,
-  clearCredentialRefs: string[] = [],
 ): Promise<void> {
-  if (await saveFields(patch, clearCredentialRefs)) {
+  if (await saveFields(patch)) {
     showToast(successMessage, "success");
   }
+}
+
+/** 切换「显示密码」：先更新 UI（输入框立即响应），再持久化到配置。 */
+async function setShowPasswords(next: boolean) {
+  if (showPasswords.value === next) return;
+  showPasswords.value = next;
+  await saveWithFeedback(
+    { showPasswords: next },
+    next ? "密码已显示" : "密码已隐藏",
+  );
 }
 
 // 环境增删改查由 DomainsPanel 承载，这里只负责落盘（只覆盖 domains 字段）
@@ -309,10 +309,7 @@ async function onEnvSaveWithAccounts(payload: EnvSavePayload): Promise<void> {
   nextAccounts.push(...payload.addedAccounts);
 
   const saveBase = () =>
-    saveFields(
-      { domains: payload.domains, accounts: nextAccounts },
-      payload.clearCredentialRefs,
-    );
+    saveFields({ domains: payload.domains, accounts: nextAccounts });
   if (previousEnvKey === null) {
     const result = await finalizeNewEnvironmentSave({
       candidate: payload.lockCandidate,
@@ -416,8 +413,6 @@ function editAccount(id: string) {
   const acc = config.value.accounts.find((a) => a.id === id);
   if (!acc) return;
   editingAccount.value = id;
-  showAccountPassword.value = false;
-  clearAccountPasswordOnSave.value = false;
   accountFormError.value = "";
   showAccountForm.value = true;
   newAccount.value = {
@@ -433,16 +428,11 @@ async function saveEditAccount() {
   const values = accountFormValues();
   if (!editingAccount.value || !values) return;
   const acc = config.value.accounts.find((a) => a.id === editingAccount.value);
-  const clearRefs: string[] = [];
   if (acc) {
     acc.name = values.name;
     acc.username = values.username;
     if (newAccount.value.password) {
       acc.password = newAccount.value.password;
-    } else if (clearAccountPasswordOnSave.value && acc.credentialRef) {
-      // 只登记清除，保存成功前不改动响应式引用：失败时本地状态仍反映
-      // 真实存储，成功后由后台回包覆盖为无引用的新配置。
-      clearRefs.push(acc.credentialRef);
     } else {
       delete acc.password;
     }
@@ -450,7 +440,6 @@ async function saveEditAccount() {
     acc.domains = [...newAccount.value.domains];
   }
   editingAccount.value = null;
-  clearAccountPasswordOnSave.value = false;
   const savedAccountName = values.name;
   newAccount.value = {
     name: "",
@@ -464,14 +453,11 @@ async function saveEditAccount() {
   await saveWithFeedback(
     accountsPatch(),
     `账号「${savedAccountName}」已保存`,
-    clearRefs,
   );
 }
 
 function cancelEditAccount() {
   editingAccount.value = null;
-  showAccountPassword.value = false;
-  clearAccountPasswordOnSave.value = false;
   newAccount.value = {
     name: "",
     username: "",
@@ -497,7 +483,7 @@ async function deleteAccount(id: string) {
 }
 
 // ============================================================
-// 主视图：环境卡片
+// 主视图：环境筛选与账号表格
 // 渲染数据来源只有 buildEnvGroups 投影；UI 不自行遍历 config.domains。
 // ============================================================
 const envGroups = computed(() => buildEnvGroups(config.value));
@@ -520,12 +506,47 @@ const isEmptyState = computed(
   () => envCount.value === 0 && accountCount.value === 0,
 );
 
-// ----- 主视图：表格 + 环境轨道（原型 ?variant=B / ADR-0017 决策见 spec） -----
-// 状态：环境过滤（'all' | envKey | 'unbound'）、搜索、角色、上手卡折叠
+// ----- 主视图：左侧环境筛选、搜索与角色组合过滤 -----
+// 状态：环境过滤（'all' | envKey | 'unbound'）、搜索、角色
 type EnvFilter = "all" | "unbound" | string;
 const envFilter = ref<EnvFilter>("all");
 const query = ref("");
 const roleFilter = ref("");
+
+function environmentLabel(env: DomainConfig): string {
+  const tag = env.tags?.map(normalizeEnvTag).find(Boolean);
+  const type = tag ? { local: "本地", test: "测试", uat: "预发", prod: "生产" }[tag] : "";
+  return type ? `${env.name} · ${type}` : env.name;
+}
+
+// 删除或导入环境后，不保留已失效的筛选 key。
+watch(() => config.value.domains, domains => {
+  if (envFilter.value !== "all" && envFilter.value !== "unbound" && !domains[envFilter.value]) {
+    envFilter.value = "all";
+  }
+}, { deep: true });
+
+const bindingAccountId = ref<string | null>(null);
+const bindingAccount = computed(() => config.value.accounts.find(account => account.id === bindingAccountId.value));
+
+function accountEnvironmentSummary(account: Account): string {
+  const envs = accEnvList(account);
+  const first = envs.find(item => item.key === envFilter.value) ?? envs[0];
+  if (!first) return "未关联环境";
+  return `${environmentLabel(first.env)}${envs.length > 1 ? ` +${envs.length - 1}` : ""}`;
+}
+
+function showEnvironmentAccounts(key: string) {
+  envFilter.value = key;
+  bindingAccountId.value = null;
+  closeMenu();
+}
+
+const hasAnyAccountFilters = computed(() => envFilter.value !== "all" || hasAccountFilters.value);
+function clearAllAccountFilters() {
+  envFilter.value = "all";
+  clearAccountFilters();
+}
 
 /** 账号当前生效的环境 key：编辑表单的预填用「首个绑定」，验证/登录取对应环境 */
 function accFallbackEnv(
@@ -838,6 +859,23 @@ const POSITION_OPTIONS: Array<{ value: EnvBadgePosition; label: string }> = [
   { value: "bottom-right", label: "右下" },
 ];
 
+const badgePreviewName = computed(() => {
+  const environment = domainOptions.value.find((option) =>
+    envBadge.value.whitelist.length === 0 || envBadge.value.whitelist.includes(option.url),
+  );
+  return environment?.name || "环境名称";
+});
+const selectedBadgeEnvironmentCount = computed(() =>
+  domainOptions.value.filter((option) => envBadge.value.whitelist.includes(option.url)).length,
+);
+const quickLoginSummary = computed(() => {
+  const environment = domainOptions.value.find((option) => option.url === quickLoginDefaultDomain.value);
+  const target = quickLoginDefaultDomain.value
+    ? `默认环境：${environment?.name || "未匹配到环境"}`
+    : "未设置默认环境";
+  return `${target} · ${hasGlobalDefaultPassword.value ? "密码已设置" : "未设置全局密码"}`;
+});
+
 /** 显示范围：白名单空 = 全部已配置环境 */
 const badgeScope = computed<"all" | "selected">(() =>
   envBadge.value.whitelist.length === 0 ? "all" : "selected",
@@ -869,6 +907,12 @@ function setBadgeScope(scope: "all" | "selected") {
       whitelist: Object.keys(config.value.domains),
     });
   }
+}
+
+function handleWhitelistChange(key: string, event: Event) {
+  toggleWhitelist(key);
+  // 拒绝取消最后一项时也还原原生复选框状态。
+  (event.target as HTMLInputElement).checked = envBadge.value.whitelist.includes(key);
 }
 
 function toggleWhitelist(key: string) {
@@ -906,20 +950,16 @@ function verifyStateOf(envKey: string, accId: string): VerifyState | undefined {
 /** 行内验证只判断密码来源是否存在；实际秘密由 Background 按 ID 解析。 */
 function hasRowPassword(env: DomainConfig, acc: Account): boolean {
   return Boolean(
-    acc.credentialRef || acc.password || env.defaultCredentialRef || env.defaultPassword ||
-    config.value.globalDefaultCredentialRef || globalDefaultPassword.value
+    acc.password || env.defaultPassword ||
+    config.value.globalDefaultPassword || globalDefaultPassword.value
   );
 }
 
-function accountPasswordState(acc: Account): { label: string; missing: boolean } {
-  if (acc.credentialRef || acc.password) return { label: "已配置", missing: false };
-  if (accEnvList(acc).some(({ env }) => env.defaultCredentialRef || env.defaultPassword)) {
-    return { label: "环境默认", missing: false };
-  }
-  if (config.value.globalDefaultCredentialRef || globalDefaultPassword.value) {
-    return { label: "全局默认", missing: false };
-  }
-  return { label: "未配置", missing: true };
+function accountPasswordState(acc: Account) {
+  const environments = accEnvList(acc)
+    .filter(item => envFilter.value === "all" || envFilter.value === "unbound" || item.key === envFilter.value)
+    .map(item => item.env);
+  return accountPasswordSummary(acc, environments, Boolean(config.value.globalDefaultPassword || globalDefaultPassword.value));
 }
 
 async function verifyAccount(envKey: string, env: DomainConfig, acc: Account) {
@@ -1099,16 +1139,7 @@ function saveQuickLoginDefaultDomain() {
   );
 }
 
-function clearGlobalDefaultPassword() {
-  const ref = config.value.globalDefaultCredentialRef;
-  if (!ref) return;
-  globalDefaultPassword.value = "";
-  void saveWithFeedback({}, "已清除全局默认密码", [ref]);
-}
-
 function saveGlobalDefaultPassword() {
-  // 留空本身不写数据；只有显式清除按钮才删除已存储的默认密码。
-  if (!globalDefaultPassword.value) return;
   void saveWithFeedback(
     { globalDefaultPassword: globalDefaultPassword.value },
     "设置已保存",
@@ -1125,8 +1156,8 @@ function saveGlobalDefaultPassword() {
         <strong>无法读取账号配置，已禁用编辑、保存与导入</strong>
         <p class="config-load-error-detail">{{ loadError }}</p>
         <p>
-          当前保险库可能来自旧主密码或未知格式。ShadeKit 不会自动转换、改写或清空它，
-          请先恢复原保险库或导入备份，再刷新本页。
+          当前配置无法读取（可能来自旧版或未知格式）。ShadeKit 不会自动改写或清空它，
+          请先导入备份或修复存储后，再刷新本页。
         </p>
         <DtButton size="sm" variant="primary" @click="retryLoad">
           <div class="i-lucide-refresh-cw w-3.5 h-3.5 mr-1" />重试
@@ -1141,6 +1172,10 @@ function saveGlobalDefaultPassword() {
         <div class="i-lucide-layout-grid w-3.5 h-3.5 mr-1" />
         环境与账号
       </button>
+      <button type="button" :class="['tab-btn', { active: activeTab === 'strategies' }]" :aria-pressed="activeTab === 'strategies'" @click="activeTab = 'strategies'">
+        <div class="i-lucide-library w-3.5 h-3.5 mr-1" aria-hidden="true" />
+        登录策略
+      </button>
       <button :class="['tab-btn', { active: activeTab === 'settings' }]" @click="handleSettingsClick">
         <div class="i-lucide-settings w-3.5 h-3.5 mr-1" />
         设置
@@ -1150,17 +1185,17 @@ function saveGlobalDefaultPassword() {
 
     <!-- 主视图：环境卡片 -->
     <div v-show="activeTab === 'main'" class="tab-content">
-      <!-- 顶部栏：规模统计（US-7）+ 环境操作（「＋ 环境」降级为次要按钮） -->
+      <!-- 顶部栏：规模统计、主要账号操作与次级导入入口 -->
       <div class="main-topbar">
         <span class="toolbar-count">{{ envCount }} 个环境 · {{ accountCount }} 个账号</span>
         <div class="main-topbar-actions">
-          <DtButton size="sm" variant="primary" @click="domainsPanelRef?.openCreate()">
-            <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />新建环境
+          <DtButton size="sm" variant="secondary" @click="domainsPanelRef?.openCreate()">
+            <span class="i-lucide-plus w-3.5 h-3.5" aria-hidden="true" />新建环境
           </DtButton>
-          <DtButton size="sm" variant="secondary" @click="addAccountToView">
+          <DtButton size="sm" variant="primary" @click="addAccountToView">
             <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />新建账号
           </DtButton>
-          <DtButton size="sm" variant="secondary" title="从文件导入可复用的登录方式，不包含账号密码" @click="domainsPanelRef?.openImport()">
+          <DtButton size="sm" variant="ghost" title="从文件导入可复用的登录方式，不包含账号密码" @click="domainsPanelRef?.openImport()">
             <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入策略
           </DtButton>
         </div>
@@ -1191,20 +1226,15 @@ function saveGlobalDefaultPassword() {
           <div class="form-row">
             <label for="account-password">
               密码 <span class="optional">（选填）</span>
-              <span v-if="editingAccountHasStoredPassword" class="stored-secret-badge">已设置</span>
             </label>
-            <div class="password-input-wrapper">
-              <input id="account-password" class="dt-input password-input" v-model="newAccount.password" :type="showAccountPassword ? 'text' : 'password'" :placeholder="editingAccountHasStoredPassword ? '已保存密码；留空保持不变' : '留空时使用环境或全局默认密码'" />
-              <button class="password-toggle" type="button" @click="showAccountPassword = !showAccountPassword" :title="showAccountPassword ? '隐藏密码' : '显示密码'" :aria-label="showAccountPassword ? '隐藏账号密码' : '显示账号密码'" :aria-pressed="showAccountPassword">
-                <div :class="showAccountPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
-              </button>
-            </div>
-            <p v-if="editingAccountHasStoredPassword" class="field-hint">
-              已保存密码不会显示明文；输入新密码可替换，
-              <button type="button" class="secret-clear-link" @click="clearAccountPasswordOnSave = true; newAccount.password = ''">清除已保存密码</button>
-            </p>
-            <p v-if="clearAccountPasswordOnSave" class="field-hint field-hint-warning">保存后将清除该账号已存储的密码。</p>
-            <p v-else class="field-hint">使用时依次读取：账号密码 → 环境默认密码 → 全局默认密码。</p>
+            <input
+              id="account-password"
+              class="dt-input"
+              v-model="newAccount.password"
+              :type="showPasswords ? 'text' : 'password'"
+              placeholder="留空时使用环境或全局默认密码"
+            />
+            <p class="field-hint">使用时依次读取：账号密码 → 环境默认密码 → 全局默认密码；清空保存即移除账号密码。</p>
           </div>
           <div class="form-row">
             <label id="account-roles-label">角色 <span class="optional">（选填，用于筛选）</span></label>
@@ -1284,68 +1314,68 @@ function saveGlobalDefaultPassword() {
         </DtEmptyState>
       </DtPanel>
 
-      <!-- 主视图：表格 + 环境轨道（原型 ?variant=B；环境退化为左侧筛选轨道）。空态下隐藏骨架，避免与引导卡重复 -->
+      <!-- 左侧环境直接切换，账号表保持紧凑等高。 -->
       <div v-else class="env-rail-layout">
-        <!-- 左轨道：全部 / 各环境 / 未绑定 -->
-        <aside class="env-rail">
-          <button
-            type="button"
-            class="rail-item"
-            :class="{ active: envFilter === 'all' }"
-            @click="envFilter = 'all'; closeMenu()"
-          >
-            <span class="rail-dot none" />
-            <span class="rail-label">全部账号</span>
-            <span class="rail-count">{{ accountCount }}</span>
-          </button>
-          <div class="rail-sep" />
-
-          <button
-            v-for="g in envGroups.groups"
-            :key="g.key"
-            type="button"
-            class="rail-item"
-            :class="{ active: envFilter === g.key }"
-            @click="envFilter = g.key; closeMenu()"
-          >
-            <span class="rail-dot" :style="{ backgroundColor: envDotColor(g.env) }" />
-            <span class="rail-label">{{ g.env.name }}</span>
-            <span v-if="g.env.matchPath" class="env-tag rail-env-tag" title="页面路径">{{ g.env.matchPath }}</span>
-            <span
-              v-if="!envSupportOf(g.key).supported"
-              class="rail-support-warn"
-              :title="supportReason(envSupportOf(g.key))"
-              aria-label="当前客户端不支持该环境的登录声明"
-            >!</span>
-            <span class="rail-count">{{ g.accounts.length }}</span>
-          </button>
-
-          <div class="rail-sep" />
-
-          <button
-            type="button"
-            class="rail-item"
-            :class="{ active: envFilter === 'unbound' }"
-            @click="envFilter = 'unbound'; closeMenu()"
-          >
-            <span class="rail-dot none" />
-            <span class="rail-label">未关联环境</span>
-            <span class="rail-count">{{ envGroups.unbound.length }}</span>
-          </button>
-
-          <div class="rail-note">
-            {{ envBadge.enabled ? `环境角标：${badgeEnabledCount} / ${envGroups.groups.length} 个环境开启` : '环境角标：未启用' }}
+        <aside class="env-rail" aria-label="环境筛选">
+          <div class="rail-heading">
+            <span>环境</span>
           </div>
+          <button type="button" class="rail-item rail-summary" :class="{ active: envFilter === 'all' }" :aria-pressed="envFilter === 'all'" @click="showEnvironmentAccounts('all')">
+            <span class="rail-label">全部账号</span><span class="rail-count">{{ accountCount }}</span>
+          </button>
+          <div class="rail-environments">
+            <button
+              v-for="group in envGroups.groups"
+              :key="group.key"
+              type="button"
+              class="rail-item rail-environment"
+              :class="{ active: envFilter === group.key }"
+              :aria-pressed="envFilter === group.key"
+              :aria-label="`${environmentLabel(group.env)}，${group.key}，${group.accounts.length} 个账号`"
+              @click="showEnvironmentAccounts(group.key)"
+            >
+              <span class="rail-dot" :style="{ backgroundColor: envDotColor(group.env) }" aria-hidden="true" />
+              <EnvironmentIdentity :env="group.env" :env-key="group.key" compact />
+              <span v-if="!envSupportOf(group.key).supported" class="rail-warning" :title="supportReason(envSupportOf(group.key))" aria-label="当前客户端不支持该环境的登录声明">!</span>
+              <span class="rail-count">{{ group.accounts.length }}</span>
+            </button>
+          </div>
+          <button type="button" class="rail-item rail-summary" :class="{ active: envFilter === 'unbound' }" :aria-pressed="envFilter === 'unbound'" @click="showEnvironmentAccounts('unbound')">
+            <span class="rail-label">未关联环境</span><span class="rail-count">{{ envGroups.unbound.length }}</span>
+          </button>
         </aside>
-
-        <!-- 右表区：搜索 + 角色筛选 + 账号表 -->
         <div class="env-table-wrap">
+        <div class="env-table-filterbar">
+          <div class="account-search">
+            <span class="i-lucide-search w-3.5 h-3.5" aria-hidden="true" />
+            <input class="env-search" v-model="query" aria-label="搜索账号名称或用户名" placeholder="搜索名称或用户名…" />
+            <button v-if="query" type="button" class="search-clear" aria-label="清空账号搜索" @click="query = ''">
+              <span class="i-lucide-x w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <div class="account-filter-status">
+            <!-- 角色 pill 筛选：按现有数据中的角色动态生成（预设在前，自定义在后） -->
+            <div v-if="roleFilterOptions.length > 0" class="role-pills-filter">
+              <button
+                v-for="r in roleFilterOptions"
+                :key="r"
+                type="button"
+                class="pill"
+                :class="{ active: roleFilter === r }"
+                :style="roleColorStyle(r)"
+                :aria-pressed="roleFilter === r"
+                @click="roleFilter = roleFilter === r ? '' : r"
+              >{{ r }}</button>
+            </div>
+
+          <span class="filter-result" role="status">{{ roleFilter ? roleFilter + ' · ' : '' }}显示 {{ filteredAccounts.length }} 个账号</span>
+          <DtButton v-if="hasAnyAccountFilters" size="sm" variant="ghost" @click="clearAllAccountFilters">清除筛选</DtButton>
+        </div>
           <!-- 选中某具体环境时：环境上下文工具条（验证/指示器/编辑等，承接 A 卡头能力） -->
           <div v-if="envFilter !== 'all' && envFilter !== 'unbound' && envGroups.groups.find((g) => g.key === envFilter)" class="env-context-bar">
             <span class="rail-dot" :style="{ backgroundColor: envDotColor(envOfKey(envFilter)) }" />
-            <span class="item-name">{{ envOfKey(envFilter).name }}</span>
-            <span v-if="envOfKey(envFilter).matchPath" class="env-tag" title="页面路径">{{ envOfKey(envFilter).matchPath }}</span>
-            <span class="item-sub">{{ envFilter }}</span>
+            <EnvironmentIdentity :env="envOfKey(envFilter)" :env-key="envFilter" />
             <span class="context-spacer" />
             <DtButton v-if="!envBadge.enabled" size="sm" variant="secondary" title="前往设置启用环境角标" @click="activeTab = 'settings'">启用角标</DtButton>
             <label v-else class="toggle-switch" :title="`在「${envOfKey(envFilter).name}」页面显示环境角标`">
@@ -1400,90 +1430,77 @@ function saveGlobalDefaultPassword() {
           </div>
           -->
 
-          <div class="env-table-filterbar">
-            <input
-              class="dt-input env-search"
-              v-model="query"
-              aria-label="搜索账号名称或用户名"
-              placeholder="搜索名称或用户名…"
-            />
-            <!-- 角色 pill 筛选：按现有数据中的角色动态生成（预设在前，自定义在后） -->
-            <div v-if="roleFilterOptions.length > 0" class="role-pills-filter">
-              <button
-                v-for="r in roleFilterOptions"
-                :key="r"
-                type="button"
-                class="pill"
-                :class="{ active: roleFilter === r }"
-                :style="roleColorStyle(r)"
-                :aria-pressed="roleFilter === r"
-                @click="roleFilter = roleFilter === r ? '' : r"
-              >{{ r }}</button>
-            </div>
-          </div>
 
           <div class="env-table-scroll">
           <table class="env-table">
+            <colgroup><col class="account-column" /><col class="environment-column" /><col class="password-column" /><col class="actions-column" /></colgroup>
             <thead>
               <tr>
                 <th>账号 / 角色</th>
                 <th>环境</th>
-                <th>密码</th>
+                <th>密码来源</th>
                 <th style="text-align:right">操作</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="acc in filteredAccounts" :key="acc.id">
+              <tr v-for="acc in filteredAccounts" :key="acc.id" class="account-row">
                 <td class="col-account">
                   <div class="acc-main">
-                    <div class="acc-avatar">{{ accountInitial(acc) }}</div>
+                    <div class="acc-avatar" aria-hidden="true">{{ accountInitial(acc) }}</div>
                     <div class="acc-main-body">
                       <div class="acc-line">
-                        <span class="item-name">{{ acc.name }}</span>
-                        <span v-for="r in acc.roles" :key="r" class="role-pill" :style="roleColorStyle(r)">{{ r }}</span>
+                        <span class="item-name" :title="acc.name">{{ acc.name }}</span>
+                        <span v-if="acc.roles[0]" class="role-pill" :style="roleColorStyle(acc.roles[0])" :title="acc.roles.join('、')">{{ acc.roles[0] }}</span>
+                        <span v-if="acc.roles.length > 1" class="role-overflow" :title="acc.roles.join('、')" :aria-label="`角色：${acc.roles.join('、')}`">+{{ acc.roles.length - 1 }}</span>
                       </div>
-                      <div class="item-sub">
-                        <div class="i-lucide-at-sign w-3 h-3 inline mr-0.5" />{{ acc.username }}
+                      <div v-if="!rowVerify(acc)" class="item-sub" :title="acc.username">
+                        <div class="i-lucide-at-sign w-3 h-3 inline mr-0.5" aria-hidden="true" />{{ acc.username }}
+                      </div>
+                      <div
+                        v-else-if="rowVerify(acc) && rowVerify(acc)!.status !== 'running'"
+                        class="verify-line"
+                        :title="rowVerify(acc)?.message"
+                        :class="rowVerify(acc)!.status === 'ok' ? 'verify-ok' : 'verify-fail'"
+                      >
+                        {{ (rowVerify(acc)!.status === 'ok' ? '✓ ' : '✗ ') + rowVerify(acc)!.message }}
+                      </div>
+                      <div
+                        v-else-if="rowVerify(acc)?.status === 'running'"
+                        class="verify-line verify-running"
+                      >
+                        检查中…
                       </div>
                     </div>
                   </div>
-                  <div
-                    v-if="rowVerify(acc) && rowVerify(acc)!.status !== 'running'"
-                    class="verify-line"
-                    :class="rowVerify(acc)!.status === 'ok' ? 'verify-ok' : 'verify-fail'"
-                  >
-                    {{ (rowVerify(acc)!.status === 'ok' ? '✓ ' : '✗ ') + rowVerify(acc)!.message }}
-                  </div>
-                  <div
-                    v-else-if="rowVerify(acc)?.status === 'running'"
-                    class="verify-line verify-running"
-                  >
-                    检查中…
-                  </div>
+
                 </td>
                 <td class="col-envs">
                   <div v-if="accEnvList(acc).length === 0" class="env-cell">
                     <span class="rail-dot none" /><span class="cell-hint">未关联环境</span>
                   </div>
-                  <div v-else class="env-multi">
-                    <template
-                      v-for="(e, i) in accEnvList(acc)"
-                      :key="e.key"
-                    >
-                      <span v-if="i > 0" class="env-multi-sep">·</span>
-                      <span class="env-multi-item">
-                        <span class="env-multi-name">{{ e.env.name }}</span>
-                      </span>
-                    </template>
-                  </div>
+                  <button
+                    v-else
+                    type="button"
+                    class="environment-summary"
+                    :title="accEnvList(acc).map(entry => `${environmentLabel(entry.env)} — ${entry.key}`).join('；')"
+                    :aria-label="`查看账号「${acc.name}」关联的 ${accEnvList(acc).length} 个环境`"
+                    aria-haspopup="dialog"
+                    @click="bindingAccountId = acc.id"
+                  >
+                    <span>{{ accountEnvironmentSummary(acc) }}</span>
+                    <span class="i-lucide-chevron-right w-3 h-3" aria-hidden="true" />
+                  </button>
                 </td>
                 <td class="col-password">
-                  <span class="pw-state" :class="{ 'pw-missing': accountPasswordState(acc).missing }" title="密码优先级：账号密码 → 环境默认密码 → 全局默认密码">
+                  <span class="pw-state" :class="{ 'pw-missing': accountPasswordState(acc).missing }" :title="accountPasswordState(acc).detail">
                     <div class="i-lucide-lock w-3 h-3 inline mr-0.5" />{{ accountPasswordState(acc).label }}
                   </span>
                 </td>
                 <td class="col-actions">
                   <div class="item-actions">
+                    <DtButton size="sm" class="account-edit-btn" :aria-label="`编辑账号「${acc.name}」`" @click="closeMenu(); editAccount(acc.id)">
+                      <span class="i-lucide-pencil w-3 h-3" aria-hidden="true" />编辑
+                    </DtButton>
                     <div class="more-wrap">
                       <DtButton size="sm" class="more-btn" title="账号操作" :aria-label="`账号「${acc.name}」的其他操作`" :aria-expanded="openMenu === 'acc:' + acc.id" :aria-controls="openMenu === 'acc:' + acc.id ? 'acc:' + acc.id + ':menu' : undefined" @click.stop="toggleMenu('acc:' + acc.id, $event)">⋯</DtButton>
                       <Teleport to="body">
@@ -1500,7 +1517,6 @@ function saveGlobalDefaultPassword() {
                             <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); verifyMenuAccount(acc)">检查配置</button>
                             <div class="more-sep" />
                           </template>
-                          <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); editAccount(acc.id)">编辑账号</button>
                           <button type="button" role="menuitem" class="more-item" @click="closeMenu(true); cloneAccount(acc.id)">创建副本</button>
                           <button type="button" role="menuitem" class="more-item more-danger" @click="closeMenu(true); deleteAccount(acc.id)">删除账号</button>
                         </div>
@@ -1522,127 +1538,153 @@ function saveGlobalDefaultPassword() {
           </div>
 
           <div class="env-table-foot">
+            <span class="badge-summary">{{ envBadge.enabled ? `环境角标：${badgeEnabledCount} / ${envCount} 个环境开启` : '环境角标：未启用' }}</span>
             <span class="toolbar-count">{{ filteredAccounts.length }} / {{ accountCount }} 个账号</span>
           </div>
         </div>
       </div>
 
-      <!-- 环境表单与配置包导入向导（列表由上方环境卡承载） -->
+      <DtDrawer :show="Boolean(bindingAccount)" :title="`${bindingAccount?.name ?? ''} · 关联环境`" @close="bindingAccountId = null">
+        <ul v-if="bindingAccount" class="account-bindings">
+          <li v-for="entry in accEnvList(bindingAccount)" :key="entry.key">
+            <EnvironmentIdentity :env="entry.env" :env-key="entry.key" />
+            <DtButton size="sm" @click="showEnvironmentAccounts(entry.key)">查看账号</DtButton>
+          </li>
+        </ul>
+      </DtDrawer>
+
+      <!-- 环境表单与配置包导入向导 -->
       <DomainsPanel
         ref="domainsPanelRef"
         :domains="config.domains"
         :strategies="config.strategies"
         :accounts="config.accounts"
+        :show-passwords="showPasswords"
         @save="onDomainsSave"
         @save-patch="onDomainsPatch"
         @save-with-accounts="onEnvSaveWithAccounts"
       />
     </div>
 
-    <!-- 设置：快捷键 / 环境指示器 / 登录策略库 / 快捷登录默认值 -->
-    <div v-show="activeTab === 'settings'" class="tab-content">
-      <!-- 快捷键（ADR-0001 D4 可见性底线：从主视图迁入设置区，B 布局下收进设置） -->
-      <div v-if="shortcut !== null" class="form-card">
-        <h3>
-          <div class="i-lucide-keyboard w-4 h-4" />
-          快捷键
-        </h3>
-        <template v-if="shortcut">
-          <p class="settings-hint">
-            快捷键 <kbd>{{ formatShortcut(shortcut) }}</kbd> 已生效。
-          </p>
-        </template>
-        <template v-else>
-          <p class="settings-hint">
-            快捷键未生效（安装时 {{ SHORTCUT_SUGGESTED }} 可能被其他程序占用）。
-          </p>
-          <div class="shortcut-actions">
-            <button
-              v-if="updateSupported"
-              class="shortcut-enable-btn"
-              :disabled="updating"
-              @click="handleEnableShortcut"
-            >
-              {{ updating ? '设置中…' : `一键设置为 ${SHORTCUT_SUGGESTED}` }}
-            </button>
-            <span class="shortcut-manual-hint">
-              或手动设置：打开
-              <code>edge://extensions/shortcuts</code>
-              （地址栏粘贴访问），找到「ShadeKit」→「快速切换账号」，输入
-              {{ SHORTCUT_SUGGESTED }}
-            </span>
-            <span v-if="shortcutUpdateError" class="shortcut-error">{{ shortcutUpdateError }}</span>
-          </div>
-        </template>
-      </div>
-
-      <!-- 环境指示器（Config Kit：DtConfigItem + DtToggle + DtSegmented） -->
-      <div class="form-card">
-        <h3>
-          <div class="i-lucide-map-pin w-4 h-4" />
-          环境角标
-        </h3>
-        <p class="settings-hint">在匹配环境的页面角落显示环境名称，帮助区分本地、测试和生产环境。更改后，已打开的页面需刷新才会生效。</p>
-
-        <div class="settings-items">
-          <DtConfigItem label="启用环境角标" hint="关闭后所有页面都不再显示角标">
-            <DtToggle
-              :model-value="envBadge.enabled"
-              @update:model-value="setEnvBadgeEnabled"
-            />
-          </DtConfigItem>
-          <DtConfigItem label="停靠位置" hint="角标显示在页面的哪个角落">
-            <DtSegmented
-              :model-value="envBadge.position"
-              :options="POSITION_OPTIONS"
-              @update:model-value="setEnvBadgePosition"
-            />
-          </DtConfigItem>
-          <DtConfigItem label="显示范围" hint="「仅这些环境」至少保留 1 个；若要全部关闭，请关闭上方总开关" layout="stack">
-            <DtSegmented
-              :model-value="badgeScope"
-              :options="[
-                { value: 'all', label: '全部已配置环境' },
-                { value: 'selected', label: '仅这些环境' },
-              ]"
-              @update:model-value="setBadgeScope"
-            />
-            <div v-if="badgeScope === 'selected'" class="env-whitelist">
-              <p v-if="domainOptions.length === 0" class="field-hint">还没有已配置的环境</p>
-              <label v-for="opt in domainOptions" :key="opt.url" class="env-whitelist-item">
-                <input
-                  type="checkbox"
-                  :checked="envBadge.whitelist.includes(opt.url)"
-                  @change="toggleWhitelist(opt.url)"
-                />
-                <span>{{ opt.name }}（{{ opt.url }}）</span>
-              </label>
-            </div>
-          </DtConfigItem>
-        </div>
-      </div>
-
-      <!-- 登录策略库（ADR-0019）：策略独立于环境，可复用 / 分享 / 解绑 -->
+    <!-- 登录策略独立管理，保留既有编辑与保存路径 -->
+    <div v-show="activeTab === 'strategies'" class="account-strategies">
       <StrategyLibrary
         :strategies="config.strategies"
         :domains="config.domains"
         @save="onStrategiesSave"
         @save-domains="onDomainsSave"
       />
+    </div>
 
-      <!-- 快捷登录默认值 -->
-      <div class="form-card">
-        <h3>
-          <div class="i-lucide-zap w-4 h-4" />
-          快捷登录默认值
-        </h3>
-        <p class="settings-hint">当快捷登录文本不含 URL 时，使用此处配置作为目标。全局默认密码在环境未配置默认密码时作为最后回退。</p>
+    <div v-show="activeTab === 'settings'" class="account-settings">
+      <section v-if="shortcut === ''" class="settings-card shortcut-card" aria-label="快捷键">
+        <div class="settings-card-heading">
+          <h3><div class="i-lucide-keyboard w-4 h-4" aria-hidden="true" />快速打开面板</h3>
+        </div>
+        <p class="settings-hint">
+          系统快捷键未生效（安装/更新时 {{ suggestedShortcut }} 可能已被其他扩展或程序占用）。
+          普通网页内的按键兜底已启用，按 {{ suggestedShortcut }} 仍可唤起面板（浏览器内置页面除外）；
+          如需系统级绑定，请手动设置或恢复默认。
+        </p>
+        <div class="shortcut-actions">
+          <button
+            v-if="canRestore"
+            class="shortcut-enable-btn"
+            :disabled="restoring"
+            @click="handleRestoreShortcut"
+          >
+            {{ restoring ? '恢复中…' : `恢复默认 ${suggestedShortcut}` }}
+          </button>
+          <span class="shortcut-manual-hint">
+            或手动设置：打开
+            <code>{{ shortcutSettingsUrl }}</code>
+            <template v-if="shortcutSettingsUrl === 'about:addons'">
+              ，点击齿轮图标 →「管理扩展快捷键」
+            </template>
+            <template v-else>（地址栏粘贴访问）</template>
+            ，找到「ShadeKit」→「快速切换账号」，输入
+            <kbd>{{ suggestedShortcut }}</kbd>
+          </span>
+          <span v-if="shortcutUpdateError" class="shortcut-error">{{ shortcutUpdateError }}</span>
+        </div>
+      </section>
 
-        <div class="form-row">
-          <label for="quick-login-default-domain">默认环境</label>
+      <section class="settings-card" aria-label="环境角标">
+        <div class="settings-card-heading">
+          <div>
+            <h3><div class="i-lucide-map-pin w-4 h-4" aria-hidden="true" />环境角标</h3>
+            <p class="settings-description">在页面角落显示环境名称</p>
+          </div>
+          <DtToggle label="启用环境角标" :model-value="envBadge.enabled" @update:model-value="setEnvBadgeEnabled">
+            {{ envBadge.enabled ? '已启用' : '已关闭' }}
+          </DtToggle>
+        </div>
+        <div class="badge-settings-layout">
+          <fieldset class="badge-settings-fields" :disabled="!envBadge.enabled">
+            <legend class="sr-only">环境角标显示设置</legend>
+            <DtConfigItem label="显示位置" layout="stack">
+              <DtSegmented :model-value="envBadge.position" :options="POSITION_OPTIONS" @update:model-value="setEnvBadgePosition" />
+            </DtConfigItem>
+            <DtConfigItem label="显示范围" layout="stack">
+              <DtSegmented
+                :model-value="badgeScope"
+                :options="[{ value: 'all', label: '全部已配置环境' }, { value: 'selected', label: '指定环境' }]"
+                @update:model-value="setBadgeScope"
+              />
+              <div v-if="badgeScope === 'selected'" class="badge-scope-summary">
+                <span>已选择 {{ selectedBadgeEnvironmentCount }} 个环境</span>
+                <DtButton size="sm" variant="ghost" :aria-expanded="showBadgeEnvironments" aria-controls="badge-environment-manager" @click="showBadgeEnvironments = !showBadgeEnvironments">
+                  管理环境<div :class="showBadgeEnvironments ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="w-3.5 h-3.5 ml-1" aria-hidden="true" />
+                </DtButton>
+              </div>
+              <p v-else class="settings-description">在全部已配置环境中显示角标</p>
+            </DtConfigItem>
+          </fieldset>
+          <div class="badge-preview" role="img" :aria-label="envBadge.enabled ? `环境角标显示在页面${POSITION_OPTIONS.find(option => option.value === envBadge.position)?.label}角` : '环境角标已关闭'">
+            <span class="badge-preview-label"><div class="i-lucide-monitor w-3.5 h-3.5" aria-hidden="true" />位置预览</span>
+            <div class="badge-preview-browser">
+              <div class="badge-preview-toolbar"><span>•••</span>业务页面</div>
+              <div class="badge-preview-page">
+                <div class="badge-preview-line" /><div class="badge-preview-line short" /><div class="badge-preview-line" />
+                <span v-if="envBadge.enabled" class="badge-preview-indicator" :class="envBadge.position">{{ badgePreviewName }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="settings-footnote"><div class="i-lucide-info w-3.5 h-3.5" aria-hidden="true" />更改后，已打开的业务页面需刷新生效</p>
+        <div v-if="badgeScope === 'selected' && showBadgeEnvironments && envBadge.enabled" id="badge-environment-manager" class="badge-environment-manager">
+          <div class="badge-manager-heading"><strong>选择显示角标的环境</strong><span>至少保留 1 个；全部关闭请使用总开关</span></div>
+          <p v-if="domainOptions.length === 0" class="settings-description">还没有已配置的环境</p>
+          <div class="badge-environment-grid">
+            <label v-for="opt in domainOptions" :key="opt.url" class="badge-environment-option">
+              <input type="checkbox" :checked="envBadge.whitelist.includes(opt.url)" @change="handleWhitelistChange(opt.url, $event)" />
+              <span><strong>{{ opt.name }}</strong><span class="badge-environment-url">{{ opt.url }}</span></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-card" aria-label="密码显示">
+        <div class="settings-card-heading">
+          <div>
+            <h3><div class="i-lucide-eye w-4 h-4" aria-hidden="true" />密码显示</h3>
+            <p class="settings-description">账号、环境默认密码与全局默认密码输入框显示明文</p>
+          </div>
+          <DtToggle label="显示密码" :model-value="showPasswords" @update:model-value="setShowPasswords">
+            {{ showPasswords ? '显示明文' : '掩码显示' }}
+          </DtToggle>
+        </div>
+      </section>
+
+      <details class="settings-card quick-login-defaults">
+        <summary>快捷登录默认值<span class="quick-login-summary">{{ quickLoginSummary }}</span></summary>
+        <p class="settings-description">未提供 URL 时使用默认环境；环境未配置密码时使用全局默认密码。</p>
+        <div class="quick-login-fields">
+        <DtConfigItem label="默认环境" layout="stack">
           <template v-if="domainOptions.length > 0">
             <select
               id="quick-login-default-domain"
+              aria-label="默认环境"
               class="dt-select"
               v-model="quickLoginDefaultDomain"
               @change="saveQuickLoginDefaultDomain()"
@@ -1665,32 +1707,21 @@ function saveGlobalDefaultPassword() {
               <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />先添加一个环境
             </DtButton>
           </template>
+        </DtConfigItem>
+        <DtConfigItem label="全局默认密码" layout="stack">
+          <span v-if="hasGlobalDefaultPassword" class="stored-secret-badge">已设置</span>
+          <input
+            id="global-default-password"
+            aria-label="全局默认密码"
+            class="dt-input"
+            v-model="globalDefaultPassword"
+            :type="showPasswords ? 'text' : 'password'"
+            @change="saveGlobalDefaultPassword()"
+            placeholder="输入后保存；清空保存即移除"
+          />
+        </DtConfigItem>
         </div>
-        <div class="form-row">
-          <label for="global-default-password">
-            全局默认密码
-            <span v-if="hasGlobalDefaultPassword" class="stored-secret-badge">已设置</span>
-          </label>
-          <div class="password-input-wrapper">
-            <input
-              id="global-default-password"
-              class="dt-input password-input"
-              v-model="globalDefaultPassword"
-              :type="showGlobalPassword ? 'text' : 'password'"
-              @change="saveGlobalDefaultPassword()"
-              :placeholder="hasGlobalDefaultPassword ? '已保存密码；留空保持不变' : '输入后保存'"
-            />
-            <button class="password-toggle" type="button" @click="showGlobalPassword = !showGlobalPassword" :title="showGlobalPassword ? '隐藏密码' : '显示密码'" :aria-label="showGlobalPassword ? '隐藏全局默认密码' : '显示全局默认密码'" :aria-pressed="showGlobalPassword">
-              <div :class="showGlobalPassword ? 'i-lucide-eye-off w-4 h-4' : 'i-lucide-eye w-4 h-4'" />
-            </button>
-          </div>
-          <p v-if="hasGlobalDefaultPassword" class="field-hint">
-            已保存的密码不会显示明文；输入新密码可替换，
-            <button type="button" class="secret-clear-link" @click="clearGlobalDefaultPassword()">清除已保存密码</button>
-          </p>
-        </div>
-      </div>
-
+      </details>
     </div>
     </template>
   </div>
@@ -1699,9 +1730,20 @@ function saveGlobalDefaultPassword() {
 <style scoped>
 @import '../../shared/component-styles.scss';
 @import './config/config-panel-shared.scss';
+@import './config/account-settings.scss';
 
 .config-panel {
+  --account-secondary: #52637a;
   min-height: 400px;
+}
+
+[data-dt-dark] .config-panel {
+  --account-secondary: #a5b2c4;
+}
+
+.config-panel .toolbar-count {
+  color: var(--account-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 加载失败阻断页：表单为空集合时不允许任何写操作 */
@@ -1818,6 +1860,12 @@ function saveGlobalDefaultPassword() {
   flex-wrap: wrap;
   gap: 6px;
   margin-left: auto;
+}
+
+[data-dt-dark] .main-topbar-actions :deep(.dt-button--primary) {
+  background: var(--gradient-primary);
+  border-color: transparent;
+  color: #fff;
 }
 
 /* 空态引导卡：使用共享 Panel / EmptyState，保持与其他工具页一致。 */
@@ -2303,17 +2351,6 @@ select[multiple] option {
   margin-bottom: 16px;
 }
 
-/* 设置页：Config Kit 区块容器与字段级提示 */
-.settings-items {
-  border: 1px solid #f1f5f9;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-[data-dt-dark] .settings-items {
-  border-color: #21262d;
-}
-
 .field-hint {
   font-size: 12px;
   color: #94a3b8;
@@ -2342,160 +2379,12 @@ select[multiple] option {
   background: #1e3a5f;
 }
 
-.secret-clear-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #dc2626;
-  font-size: 12px;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.secret-clear-link:hover {
-  color: #b91c1c;
-}
-
-[data-dt-dark] .secret-clear-link {
-  color: #f87171;
-}
-
-.field-hint-warning {
-  color: #dc2626;
-}
-
-[data-dt-dark] .field-hint-warning {
-  color: #f87171;
-}
-
-/* 显示范围「仅这些环境」的勾选列表 */
-.env-whitelist {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.env-whitelist-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #334155;
-  cursor: pointer;
-}
-
-[data-dt-dark] .env-whitelist-item {
-  color: #c9d1d9;
-}
-
-.env-whitelist-item input[type='checkbox'] {
-  accent-color: #6366f1;
-}
-
 /* Utility */
 .mt-4 {
   margin-top: 16px;
 }
 
-/* Password visibility toggle */
-.password-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.password-input {
-  flex: 1;
-  padding-right: 36px;
-}
-
-.password-toggle {
-  position: absolute;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  color: #94a3b8;
-  transition: all 0.15s ease-out;
-  flex-shrink: 0;
-}
-
-.password-toggle:hover {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-[data-dt-dark] .password-toggle:hover {
-  background: var(--dt-dark-surface-hover);
-  color: #8b949e;
-}
-
-/* ===== 快捷键状态卡片（原 GuideSection，ADR-0001 D4） ===== */
-.shortcut-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 12px;
-  line-height: 1.6;
-  margin-bottom: 16px;
-}
-
-.shortcut-ok {
-  color: #16a34a;
-  background: rgba(22, 163, 74, 0.06);
-  border: 1px solid rgba(22, 163, 74, 0.2);
-  align-items: center;
-}
-
-[data-dt-dark] .shortcut-ok {
-  color: #4ade80;
-  background: rgba(74, 222, 128, 0.08);
-  border-color: rgba(74, 222, 128, 0.25);
-}
-
-.shortcut-missing {
-  color: #b45309;
-  background: rgba(217, 119, 6, 0.06);
-  border: 1px solid rgba(217, 119, 6, 0.25);
-}
-
-[data-dt-dark] .shortcut-missing {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.08);
-  border-color: rgba(251, 191, 36, 0.25);
-}
-
-.shortcut-status .i-lucide-keyboard,
-.shortcut-status .i-lucide-alert-triangle {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.shortcut-ok kbd {
-  display: inline-block;
-  padding: 1px 6px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  background: rgba(22, 163, 74, 0.1);
-  border-radius: 4px;
-}
-
-.shortcut-missing-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
+/* ===== 快捷键缺失时的修复卡片（ADR-0001 D4） ===== */
 .shortcut-actions {
   display: flex;
   flex-direction: column;
@@ -2547,92 +2436,30 @@ select[multiple] option {
   color: #f87171;
 }
 
-/* ===== 主视图：表格 + 环境轨道（原型 ?variant=B） ===== */
-.env-rail-layout {
-  display: flex;
-  gap: 14px;
-  align-items: flex-start;
-}
-
-/* 左轨道（容器 1120 下表格可用约 700px） */
+/* 左侧紧凑环境列表：地址单行省略，完整地址保留在可访问名称与提示中。 */
+.env-rail-layout { display: flex; align-items: flex-start; gap: 16px; }
 .env-rail {
-  flex: 0 0 180px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--dt-surface, #f8fafc);
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  flex: 0 0 196px;
+  min-width: 0;
   padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-base);
+  box-sizing: border-box;
 }
+.rail-heading { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px 6px; font-size: 12px; color: var(--account-secondary); }
+.rail-environments { max-height: calc(100dvh - 370px); overflow-y: auto; min-height: 52px; margin: 6px 0; padding: 4px 0; border-block: 1px solid var(--border); }
+.rail-item { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 8px; border: 0; border-radius: 6px; box-sizing: border-box; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; font-size: 13px; transition: background 0.15s ease-out; }
+.rail-item:hover { background: var(--surface-hover); }
+.rail-item.active { --identity-secondary: #fff; --identity-production: #fff; --identity-tag-bg: rgba(255,255,255,0.18); background: var(--gradient-primary); color: #fff; }
+.rail-environment { height: 52px; }
+.rail-summary { height: 36px; }
+.rail-label { flex: 1; min-width: 0; }
+.rail-count { flex-shrink: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--account-secondary); }
+.rail-item.active .rail-count { color: #fff; }
+.rail-warning { color: var(--warning); font-size: 12px; }
 
-[data-dt-dark] .env-rail {
-  background: var(--dt-dark-surface-1, #161b22);
-  border-color: var(--dt-dark-border, #30363d);
-}
-
-.rail-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 9px;
-  border: none;
-  background: transparent;
-  border-radius: 7px;
-  font-size: 13px;
-  color: #0f172a;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.15s ease-out;
-}
-
-[data-dt-dark] .rail-item {
-  color: #f1f5f9;
-}
-
-.rail-item:hover {
-  background: rgba(99, 102, 241, 0.07);
-}
-
-.rail-item.active {
-  background: linear-gradient(135deg, #6366f1, #3b82f6);
-  color: #fff;
-}
-
-.rail-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rail-env-tag {
-  flex-shrink: 0;
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-  padding: 1px 5px;
-}
-
-.rail-item.active .rail-env-tag {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-}
-
-.rail-count {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.rail-item.active .rail-count {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-/* 环境轨道项左侧色条：与 SwitcherPanel 账号卡片 .as-accent 同款（3px 竖条），
-   取代原先的圆形色点 —— 圆形在轨道上视觉太花，色条更收敛 */
+/* 主视图：顶部筛选 + 等高账号表 */
 .rail-dot {
   width: 3px;
   height: 14px;
@@ -2640,38 +2467,7 @@ select[multiple] option {
   flex-shrink: 0;
   background: #6b7280;
 }
-
-.rail-dot.none {
-  background: #cbd5e1;
-}
-
-[data-dt-dark] .rail-dot.none {
-  background: #475569;
-}
-
-.rail-sep {
-  height: 1px;
-  background: #e2e8f0;
-  margin: 4px 0;
-}
-
-[data-dt-dark] .rail-sep {
-  background: var(--dt-dark-border, #30363d);
-}
-
-.rail-note {
-  margin-top: 6px;
-  padding: 6px 9px;
-  font-size: 12px;
-  color: #94a3b8;
-  border-radius: 6px;
-  background: rgba(99, 102, 241, 0.05);
-}
-
-[data-dt-dark] .rail-note {
-  color: #8b949e;
-  background: rgba(99, 102, 241, 0.12);
-}
+.rail-dot.none { background: var(--account-secondary); }
 
 /* 右表区 */
 .env-table-wrap {
@@ -2687,31 +2483,12 @@ select[multiple] option {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
 }
 
 [data-dt-dark] .env-context-bar {
   background: var(--dt-dark-surface-1, #161b22);
   border-color: var(--dt-dark-border, #30363d);
-}
-
-.rail-support-warn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 9999px;
-  background: #fef3c7;
-  color: #92400e;
-  font-size: 11px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-[data-dt-dark] .rail-support-warn {
-  background: #422006;
-  color: #fcd34d;
 }
 
 .env-support-note {
@@ -2775,7 +2552,14 @@ select[multiple] option {
 
 .env-search {
   flex: 1;
-  min-width: 160px;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
 }
 
 .role-pills-filter {
@@ -2821,7 +2605,7 @@ select[multiple] option {
   border-radius: 10px;
   overflow-x: auto;
   overflow-y: auto;
-  max-height: calc(100vh - 320px);
+  max-height: calc(100dvh - 340px);
   min-height: 120px;
 }
 
@@ -2831,6 +2615,8 @@ select[multiple] option {
 
 .env-table {
   width: 100%;
+  min-width: 620px;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   background: #fff;
@@ -2842,22 +2628,32 @@ select[multiple] option {
   background: var(--dt-dark-surface-1, #161b22);
 }
 
-/* 列宽：auto 布局 + 「窄列 width:1% + nowrap」收缩，账号列吃剩余空间。
-   表格可用宽约 500px（960 容器 - sidebar - 轨道），因此只保留 4 列。 */
-.env-table .col-account {
-  min-width: 190px;
-}
-
-.env-table th:nth-child(3),
-.env-table td:nth-child(3),
-.env-table th:nth-child(4),
-.env-table td:nth-child(4) {
-  width: 1%;
-  white-space: nowrap;
-}
+/* 明确分配列宽，用户内容不会改变其他行的布局。 */
+.account-column { width: 38%; }
+.environment-column { width: 26%; }
+.password-column { width: 16%; }
+.actions-column { width: 20%; }
+.account-row { height: 64px; }
 
 .env-table .pw-state {
   margin-left: 0;
+  color: var(--account-secondary);
+}
+
+.env-table .pw-state.pw-missing {
+  color: #b45309;
+}
+
+[data-dt-dark] .env-table .pw-state.pw-missing {
+  color: #fbbf24;
+}
+
+.account-edit-btn {
+  color: var(--account-secondary);
+}
+
+[data-dt-dark] .account-edit-btn {
+  color: var(--account-secondary);
 }
 
 /* 账号识别色头像：颜色由账号名+用户名稳定哈希自 10 色池取，亮/暗主题各一套 token */
@@ -2869,6 +2665,7 @@ select[multiple] option {
 }
 
 .acc-main-body {
+  flex: 1;
   min-width: 0;
 }
 
@@ -2877,8 +2674,8 @@ select[multiple] option {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 7px;
   font-size: 12px;
   font-weight: 600;
@@ -2899,10 +2696,14 @@ select[multiple] option {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  height: 20px;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .acc-line .item-name {
+  min-width: 0;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2912,6 +2713,7 @@ select[multiple] option {
 
 /* 用户名过长时省略，不把名称挤成一字一行 */
 .env-table .col-account .item-sub {
+  color: var(--account-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2931,13 +2733,13 @@ select[multiple] option {
   padding: 8px 9px;
   font-size: 12px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--account-secondary);
   border-bottom: 1px solid #e2e8f0;
   background: #f8fafc;
 }
 
 [data-dt-dark] .env-table th {
-  color: #8b949e;
+  color: var(--account-secondary);
   border-bottom-color: var(--dt-dark-border, #30363d);
   background: #21262d;
 }
@@ -2945,7 +2747,7 @@ select[multiple] option {
 .env-table td {
   padding: 8px 9px;
   border-bottom: 1px solid #f1f5f9;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 [data-dt-dark] .env-table td {
@@ -2966,46 +2768,19 @@ select[multiple] option {
   margin: 0 0 12px;
 }
 
-.env-multi {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-  /* 环境列的内容上限：超出时环境项之间换行，而不是把整张表撑宽 */
-  max-width: 250px;
-}
-
-/* 每个环境名是不可拆分单元，只在环境之间允许换行 */
-.env-multi-item {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.env-multi-sep {
-  color: #94a3b8;
-}
-
-.env-multi-name {
-  color: #334155;
-}
-
-[data-dt-dark] .env-multi-name {
-  color: #c9d1d9;
-}
-
 .env-cell {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #94a3b8;
+  color: var(--account-secondary);
   font-size: 12px;
 }
 
 .env-table-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   padding: 8px 2px 0;
 }
@@ -3024,7 +2799,7 @@ select[multiple] option {
 }
 
 .cell-hint {
-  color: #94a3b8;
+  color: var(--account-secondary);
   font-size: 12px;
 }
 
@@ -3038,4 +2813,81 @@ select[multiple] option {
 [data-dt-dark] .more-sep {
   background: var(--dt-dark-border, #30363d);
 }
+
+.account-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 240px;
+  min-width: 180px;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-base);
+  color: var(--account-secondary);
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.account-search:focus-within { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.search-clear {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.search-clear:hover { background: var(--surface-hover); }
+.account-filter-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 34px;
+  margin-bottom: 12px;
+}
+.filter-result { margin-left: auto; color: var(--account-secondary); font-size: 12px; }
+.environment-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.environment-summary > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.environment-summary > span:last-child { flex-shrink: 0; color: var(--account-secondary); }
+.environment-summary:hover { border-color: var(--border); background: var(--surface-hover); }
+.env-table .item-actions { justify-content: flex-end; }
+.env-table .role-pill {
+  max-width: 110px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  margin: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--account-secondary);
+}
+.env-table .role-overflow { font-size: 11px; color: var(--account-secondary); flex-shrink: 0; }
+.env-table .verify-line {
+  line-height: 18px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge-summary { color: var(--account-secondary); font-size: 12px; }
+.account-bindings { margin: 0; padding: 0; list-style: none; }
+.account-bindings > li { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.account-bindings > li:last-child { border-bottom: 0; }
 </style>

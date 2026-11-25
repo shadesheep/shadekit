@@ -21,25 +21,19 @@ const loginMessageTypes = new Set<LoginMessageType>([
   "REQUEST_ENVIRONMENT_PERMISSIONS",
 ]);
 
-type VaultMessageType =
-  | "VAULT_GET_CONFIG"
-  | "VAULT_SAVE_CONFIG"
-  | "VAULT_PUT_SECRET"
-  | "VAULT_DELETE_SECRET"
-  | "VAULT_HAS_SECRET"
-  | "VAULT_EXPORT_BACKUP"
-  | "VAULT_PREPARE_BACKUP"
-  | "VAULT_CONFIRM_BACKUP";
+type ConfigMessageType =
+  | "ACCOUNT_CONFIG_GET"
+  | "ACCOUNT_CONFIG_SAVE"
+  | "BACKUP_EXPORT"
+  | "BACKUP_PREPARE"
+  | "BACKUP_CONFIRM";
 
-const vaultMessageTypes = new Set<VaultMessageType>([
-  "VAULT_GET_CONFIG",
-  "VAULT_SAVE_CONFIG",
-  "VAULT_PUT_SECRET",
-  "VAULT_DELETE_SECRET",
-  "VAULT_HAS_SECRET",
-  "VAULT_EXPORT_BACKUP",
-  "VAULT_PREPARE_BACKUP",
-  "VAULT_CONFIRM_BACKUP",
+const configMessageTypes = new Set<ConfigMessageType>([
+  "ACCOUNT_CONFIG_GET",
+  "ACCOUNT_CONFIG_SAVE",
+  "BACKUP_EXPORT",
+  "BACKUP_PREPARE",
+  "BACKUP_CONFIRM",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,36 +100,23 @@ function validLoginPayload(type: LoginMessageType, message: Record<string, unkno
   }
 }
 
-function validVaultPayload(type: VaultMessageType, message: Record<string, unknown>): boolean {
+function validConfigPayload(type: ConfigMessageType, message: Record<string, unknown>): boolean {
   switch (type) {
-    case "VAULT_SAVE_CONFIG": {
+    case "ACCOUNT_CONFIG_SAVE": {
       const allowedPatchKeys = new Set([
         "accounts", "domains", "strategies", "quickLoginDefaultDomain",
-        "tabOrder", "envBadge", "globalDefaultPassword",
+        "tabOrder", "envBadge", "globalDefaultPassword", "showPasswords",
       ]);
-      return hasExactKeys(message, ["patch"], ["clearCredentialRefs"]) && isRecord(message.patch)
-        && Object.keys(message.patch).every((key) => allowedPatchKeys.has(key))
-        && (message.clearCredentialRefs === undefined
-          || (Array.isArray(message.clearCredentialRefs)
-            && message.clearCredentialRefs.every(
-              (ref) => isString(ref) && ref.length > 0,
-            )));
+      return hasExactKeys(message, ["patch"]) && isRecord(message.patch)
+        && Object.keys(message.patch).every((key) => allowedPatchKeys.has(key));
     }
-    case "VAULT_PUT_SECRET":
-      return hasExactKeys(message, ["credentialId", "plaintext"])
-        && isString(message.credentialId) && message.credentialId.length > 0
-        && isString(message.plaintext);
-    case "VAULT_DELETE_SECRET":
-    case "VAULT_HAS_SECRET":
-      return hasExactKeys(message, ["credentialId"])
-        && isString(message.credentialId) && message.credentialId.length > 0;
-    case "VAULT_PREPARE_BACKUP":
+    case "BACKUP_PREPARE":
       return hasExactKeys(message, ["text"]) && isString(message.text);
-    case "VAULT_CONFIRM_BACKUP":
+    case "BACKUP_CONFIRM":
       return hasExactKeys(message, ["acceptPlaintextWarning"])
         && typeof message.acceptPlaintextWarning === "boolean";
-    case "VAULT_EXPORT_BACKUP":
-    case "VAULT_GET_CONFIG":
+    case "BACKUP_EXPORT":
+    case "ACCOUNT_CONFIG_GET":
       return hasExactKeys(message, []);
   }
 }
@@ -199,15 +180,15 @@ function loginMessageError(
   return null;
 }
 
-function vaultMessageError(
+function configMessageError(
   message: unknown,
   sender: chrome.runtime.MessageSender,
 ): { success: false; error: string; errorCode: string } | null {
   if (!isRecord(message) || !isString(message.type)) return null;
-  if (!vaultMessageTypes.has(message.type as VaultMessageType)) return null;
-  const type = message.type as VaultMessageType;
-  if (!validVaultPayload(type, message)) {
-    return { success: false, error: "保险库消息字段无效", errorCode: "CONFIG_INVALID" };
+  if (!configMessageTypes.has(message.type as ConfigMessageType)) return null;
+  const type = message.type as ConfigMessageType;
+  if (!validConfigPayload(type, message)) {
+    return { success: false, error: "配置消息字段无效", errorCode: "CONFIG_INVALID" };
   }
   const extensionId = chrome.runtime.id;
   // 配置页本身也可能以真实标签页打开（options.html），因此 tab 的存在与否
@@ -217,7 +198,7 @@ function vaultMessageError(
     sender.id === extensionId &&
     isOwnExtensionPage(sender, extensionId);
   if (!ownPage) {
-    return { success: false, error: "保险库消息来源未获授权", errorCode: "LOGIN_REJECTED" };
+    return { success: false, error: "配置消息来源未获授权", errorCode: "LOGIN_REJECTED" };
   }
   return null;
 }
@@ -274,7 +255,18 @@ export interface CoreMessageHandlers {
     params: Record<string, string>,
     forceNew: boolean,
   ): Promise<void>;
+  /** 账号切换命令当前绑定的快捷键；空串 = 未绑定（兜底应在页面内接管） */
+  getAccountSwitcherShortcut(): Promise<string>;
+  /** 页面兜底触发命令；false = 已绑定，浏览器原生通道已处理 */
+  triggerAccountSwitcher(tabId: number, url: string): Promise<boolean>;
 }
+
+/** `chrome.runtime.onMessage` 监听回调形状（background 注册、测试直接调用） */
+export type BackgroundMessageListener = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: unknown) => void,
+) => boolean;
 
 /**
  * 创建 chrome.runtime.onMessage 监听回调（ADR-0003 D1 的测试 seam）。
@@ -293,16 +285,12 @@ export interface CoreMessageHandlers {
 export function createBackgroundMessageListener(
   routeTable: Map<string, MessageHandler>,
   core: CoreMessageHandlers,
-): (
-  message: unknown,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: unknown) => void,
-) => boolean {
+): BackgroundMessageListener {
   return (message, sender, sendResponse) => {
     const type = isRecord(message) && isString(message.type) ? message.type : undefined;
     const handler = type ? routeTable.get(type) : undefined;
     if (handler) {
-      const rejected = loginMessageError(message, sender) ?? vaultMessageError(message, sender);
+      const rejected = loginMessageError(message, sender) ?? configMessageError(message, sender);
       if (rejected) {
         sendResponse(rejected);
         return true;
@@ -324,6 +312,34 @@ export function createBackgroundMessageListener(
       core
         .openToolTab(msg.tool, msg.params ?? {}, msg.forceNew ?? false)
         .then(() => sendResponse({ success: true }));
+      return true;
+    }
+    // 快捷键兜底（content script）：先查绑定，未绑定时由页面内监听接管。
+    if (type === "GET_ACCOUNT_SWITCHER_SHORTCUT") {
+      const fromOwnExtension = sender.id !== undefined && sender.id === chrome.runtime.id;
+      core.getAccountSwitcherShortcut().then(
+        (shortcut) => sendResponse({ shortcut: fromOwnExtension ? shortcut : "" }),
+        () => sendResponse({ shortcut: "" }),
+      );
+      return true;
+    }
+    if (type === "TRIGGER_ACCOUNT_SWITCHER") {
+      const tabId = sender.tab?.id;
+      // 只接受本扩展顶层 frame 的 content script：子 frame 会与顶层重复触发。
+      const trusted =
+        sender.id !== undefined &&
+        sender.id === chrome.runtime.id &&
+        sender.frameId === 0 &&
+        typeof tabId === "number" &&
+        tabId > 0;
+      if (!trusted) {
+        sendResponse({ handled: false });
+        return true;
+      }
+      core.triggerAccountSwitcher(tabId, sender.url ?? "").then(
+        (handled) => sendResponse({ handled }),
+        () => sendResponse({ handled: false }),
+      );
       return true;
     }
     return false;

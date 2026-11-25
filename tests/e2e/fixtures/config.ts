@@ -474,11 +474,10 @@ export function makeMultiEnvironmentConfig(
 /**
  * 通过扩展自己的保存链路写入种子配置：
  * - 打开扩展页以获得 `chrome.*` 上下文；
- * - 用 `VAULT_SAVE_CONFIG` 让 Background 走真实的明文 → 保险库引用迁移；
+ * - 用 `ACCOUNT_CONFIG_SAVE` 让 Background 走真实保存链路（明文密码）；
  * - 关闭临时页。
  *
- * 测试不得直接写 `devtools-account-switch`（迁移专项除外）：直接写会绕过
- * 凭据引用，面板将看到 `hasSavedPassword: false`。
+ * 测试不得直接写 `devtools-account-switch`：直接写会绕过读取侧迁移与保存校验。
  */
 export async function seedAccountSwitch(
   context: BrowserContext,
@@ -493,7 +492,7 @@ export async function seedAccountSwitch(
     );
     const response = await page.evaluate(async (patch) => {
       return (await chrome.runtime.sendMessage({
-        type: 'VAULT_SAVE_CONFIG',
+        type: 'ACCOUNT_CONFIG_SAVE',
         patch,
       })) as { success: boolean; error?: string } | undefined;
     }, config);

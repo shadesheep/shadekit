@@ -65,8 +65,11 @@ describe("extension-local login engine boundary", () => {
     ]) {
       expect(BackgroundMessageMapKeys).not.toContain(type);
     }
-    expect(BackgroundMessageMapKeys).toEqual(
+    expect(BackgroundMessageMapKeys).not.toEqual(
       expect.arrayContaining(["VAULT_PUT_SECRET", "VAULT_PREPARE_BACKUP", "VAULT_CONFIRM_BACKUP"]),
+    );
+    expect(BackgroundMessageMapKeys).toEqual(
+      expect.arrayContaining(["ACCOUNT_CONFIG_GET", "ACCOUNT_CONFIG_SAVE", "BACKUP_PREPARE"]),
     );
     expect(panelSource).not.toContain("data-master-password");
     expect(sourceImports("entrypoints", "tests").filter((name) => name.startsWith("@shadekit/login-engine/")))

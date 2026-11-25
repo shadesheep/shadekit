@@ -1,25 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const keyStore = vi.hoisted(() => ({ kek: undefined as CryptoKey | undefined }));
-vi.mock("../entrypoints/shared/security/crypto-key-store", () => ({
-  loadVaultKek: vi.fn(async () => keyStore.kek),
-  saveVaultKek: vi.fn(async (kek: CryptoKey) => { keyStore.kek = kek; }),
-  deleteVaultKek: vi.fn(async () => { keyStore.kek = undefined; }),
-}));
-
-import {
-  accountCredentialId,
-  migratePlaintextSecrets,
-  saveAccountSwitchConfig,
-} from "../entrypoints/tools/account-switch/secret-migration";
+import { saveAccountSwitchConfig } from "../entrypoints/tools/account-switch/config-store";
 import {
   commitPreparedBackupImport,
   preparePlaintextBackupImport,
 } from "../entrypoints/shared/security/backup-service";
-import {
-  clearCachedDek,
-  resolveSecret,
-} from "../entrypoints/shared/security/vault-service";
 import { storageValuesEqual } from "../entrypoints/shared/security/canonical-json";
 import { CONFIG_VERSION } from "../entrypoints/shared/tool-config";
 import type { AccountSwitchConfig } from "../entrypoints/tools/account-switch/types";
@@ -115,8 +100,6 @@ function fullBackup(): string {
 
 beforeEach(() => {
   storage.clear();
-  keyStore.kek = undefined;
-  clearCachedDek();
   vi.clearAllMocks();
 });
 
@@ -142,19 +125,16 @@ describe("storageValuesEqual", () => {
 });
 
 describe("Chrome storage key ordering", () => {
-  it("迁移明文密码不受读回键序影响", async () => {
+  it("明文密码保存不受读回键序影响", async () => {
     storage.set("devtools-account-switch", stored(legacyAccountConfig()));
 
-    await expect(migratePlaintextSecrets()).resolves.toMatchObject({
-      migrated: true,
-      count: 1,
+    await expect(
+      saveAccountSwitchConfig({ quickLoginDefaultDomain: "https://private.test" }),
+    ).resolves.toMatchObject({
+      quickLoginDefaultDomain: "https://private.test",
     });
-    expect(await resolveSecret(accountCredentialId("acc-1"))).toBe(
-      "SAVED-PASSWORD-91",
-    );
     const raw = storage.get("devtools-account-switch") as AccountSwitchConfig;
-    expect(raw.accounts[0]).not.toHaveProperty("password");
-    expect(raw.accounts[0]?.credentialRef).toBe(accountCredentialId("acc-1"));
+    expect(raw.accounts[0]?.password).toBe("SAVED-PASSWORD-91");
   });
 
   it("保存公共配置不受读回键序影响", async () => {
@@ -173,10 +153,8 @@ describe("Chrome storage key ordering", () => {
 
     await expect(commitPreparedBackupImport(prepared)).resolves.toMatchObject({
       success: true,
-      importedSecretCount: 1,
     });
-    expect(await resolveSecret(accountCredentialId("bound-account"))).toBe(
-      "SAVED-PASSWORD-91",
-    );
+    const raw = storage.get("devtools-account-switch") as AccountSwitchConfig;
+    expect(raw.accounts[0]?.password).toBe("SAVED-PASSWORD-91");
   });
 });

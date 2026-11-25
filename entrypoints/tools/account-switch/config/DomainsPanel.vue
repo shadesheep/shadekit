@@ -57,13 +57,15 @@ import { summarizeLoginSpecRisk } from '../spec/risk-summary';
  * 由父组件走 updateConfig 增量合并持久化（只覆盖 domains 字段）。
  */
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   domains: Record<string, DomainConfig>;
   /** 登录策略库（ADR-0019）：导入默认落在这里 */
   strategies?: Record<string, StrategyEntry>;
   /** 已有账号列表（「关联账号」区块复选数据源） */
   accounts?: Account[];
-}>();
+  /** 配置页「显示密码」开关：密码输入框是否以明文展示；缺省开启 */
+  showPasswords?: boolean;
+}>(), { showPasswords: true });
 
 /** 「保存环境」事件的载荷：环境 + 关联账号变更一并交给父组件落盘 */
 export interface EnvSavePayload {
@@ -83,8 +85,6 @@ export interface EnvSavePayload {
   message: string;
   /** 仅新建自动标准表单携带；基础 domains 始终保持自动 spec。 */
   lockCandidate?: PreparedLoginFormLock;
-  /** 用户显式清除的环境默认密码引用；未点名时保持已存储密码不变。 */
-  clearCredentialRefs?: string[];
 }
 
 const emit = defineEmits<{
@@ -117,9 +117,6 @@ const newDomain = ref({
   debugRedirect: '',
   debugRedirectEnabled: false,
   defaultPassword: '',
-  defaultCredentialRef: undefined as string | undefined,
-  secretVarRefs: {} as Record<string, string>,
-  privateSecretVarRefs: {} as Record<string, string>,
   cookieClearIncludeParent: false,
   strategyParams: {} as Record<string, string | number | boolean | undefined>,
   spec: defaultLoginSpec() as LoginSpec,
@@ -135,15 +132,6 @@ const newDomain = ref({
 const editingDomain = ref<string | null>(null);
 const cloningDomain = ref(false);
 const savingDomain = ref(false);
-/** 用户点了「清除已保存密码」后暂存旧引用，保存时显式提交删除。 */
-const domainDefaultClearRef = ref<string | undefined>(undefined);
-const willClearDomainDefaultPassword = computed(
-  () => Boolean(
-    domainDefaultClearRef.value
-      && !newDomain.value.defaultCredentialRef
-      && !newDomain.value.defaultPassword,
-  ),
-);
 
 // ============================================================
 // 关联账号（环境抽屉底部「关联账号」区块）
@@ -476,7 +464,6 @@ function resetDomainForm() {
   urlTouched.value = false;
   nameTouched.value = false;
   tagsTouched.value = false;
-  domainDefaultClearRef.value = undefined;
   boundAccountIds.value = new Set();
   initialBoundAccountIds.value = new Set();
   newAccountDrafts.value = [];
@@ -492,9 +479,6 @@ function resetDomainForm() {
     debugRedirect: '',
     debugRedirectEnabled: false,
     defaultPassword: '',
-  defaultCredentialRef: undefined as string | undefined,
-  secretVarRefs: {} as Record<string, string>,
-  privateSecretVarRefs: {} as Record<string, string>,
     cookieClearIncludeParent: false,
     strategyParams: {},
     spec: defaultLoginSpec(),
@@ -522,10 +506,6 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
   newDomain.value.debugRedirect = d.debugRedirect || '';
   newDomain.value.debugRedirectEnabled = d.debugRedirectEnabled ?? false;
   newDomain.value.defaultPassword = d.defaultPassword || '';
-  newDomain.value.defaultCredentialRef = d.defaultCredentialRef;
-  domainDefaultClearRef.value = undefined;
-  newDomain.value.secretVarRefs = { ...(d.secretVarRefs ?? {}) };
-  newDomain.value.privateSecretVarRefs = { ...(d.strategyConfig?.secretVarRefs ?? {}) };
   newDomain.value.cookieClearIncludeParent = d.cookieClearIncludeParent === true;
   // 编辑与克隆都继承原账号关联；克隆通过独立新建提交，不会改动原绑定。
   const initialBound = new Set<string>();
@@ -612,18 +592,6 @@ function fillFormFromDomain(url: string, d: DomainConfig) {
     : hasCookieIncludeParent(d);
 }
 
-/**
- * 显式清除环境默认密码：记录旧引用供保存时提交，同时清空表单里的引用。
- * 仅清空输入框不会被当成删除（未提及的引用保持现状）。
- */
-function clearDomainDefaultPassword() {
-  const ref = newDomain.value.defaultCredentialRef;
-  if (!ref) return;
-  domainDefaultClearRef.value = ref;
-  newDomain.value.defaultCredentialRef = undefined;
-  newDomain.value.defaultPassword = '';
-}
-
 /** 声明里任一 `clear.cookies` 勾了含父域 → 表单开关为开 */
 function hasCookieIncludeParent(d: DomainConfig): boolean {
   const spec = readSpecFromConfig(d, props.strategies).spec;
@@ -683,10 +651,6 @@ function buildDomainEntry(): DomainConfig {
     debugRedirect: newDomain.value.debugRedirect || undefined,
     debugRedirectEnabled: newDomain.value.debugRedirectEnabled || undefined,
     defaultPassword: newDomain.value.defaultPassword || undefined,
-    defaultCredentialRef: newDomain.value.defaultCredentialRef,
-    secretVarRefs: Object.keys(newDomain.value.secretVarRefs).length > 0
-      ? { ...newDomain.value.secretVarRefs }
-      : undefined,
     cookieClearIncludeParent: newDomain.value.cookieClearIncludeParent || undefined,
     strategyParams: {},
     // 镜像态不写 strategyConfig；脱镜 / 未绑定时才落盘
@@ -696,9 +660,6 @@ function buildDomainEntry(): DomainConfig {
         ...(newDomain.value.declaredSpecVersion === undefined ? {} : {
           declaredSpecVersion: newDomain.value.declaredSpecVersion,
         }),
-        ...(Object.keys(newDomain.value.privateSecretVarRefs).length > 0
-          ? { secretVarRefs: { ...newDomain.value.privateSecretVarRefs } }
-          : {}),
       },
     }),
     // 绑定只在策略库条目仍存在时落盘：库里已被别处删掉时不留下悬空 id
@@ -903,11 +864,6 @@ function buildSavePayload(args: {
   if (boundAccountIdsList.length > 0) parts.push(`绑定 ${boundAccountIdsList.length} 个账号`);
   if (unboundAccountIdsList.length > 0) parts.push(`解绑 ${unboundAccountIdsList.length} 个账号`);
 
-  const clearCredentialRefs = willClearDomainDefaultPassword.value
-    && domainDefaultClearRef.value
-    ? [domainDefaultClearRef.value]
-    : [];
-
   return {
     domains,
     addedAccounts,
@@ -916,7 +872,6 @@ function buildSavePayload(args: {
     envKey,
     previousEnvKey,
     message: parts.join('，'),
-    clearCredentialRefs,
   };
 }
 
@@ -1441,7 +1396,7 @@ async function runTrialLogin(): Promise<void> {
             <input
               class="dt-input"
               v-model="d.password"
-              type="password"
+              :type="showPasswords ? 'text' : 'password'"
               placeholder="密码（留空走环境/全局默认）"
               :aria-label="`新账号 ${i + 1} 的密码`"
               autocomplete="off"
@@ -1523,20 +1478,14 @@ async function runTrialLogin(): Promise<void> {
       <div class="form-row">
         <label for="domain-default-password">
           默认密码 <span class="optional">（选填，快捷登录时可仅输入 URL + 账号）</span>
-          <span v-if="newDomain.defaultCredentialRef" class="stored-secret-badge">已设置</span>
         </label>
         <input
           id="domain-default-password"
           class="dt-input"
           v-model="newDomain.defaultPassword"
-          type="password"
-          :placeholder="newDomain.defaultCredentialRef ? '已保存密码；留空保持不变' : '留空表示不使用默认密码'"
+          :type="showPasswords ? 'text' : 'password'"
+          placeholder="留空表示不使用默认密码"
         />
-        <p v-if="newDomain.defaultCredentialRef" class="field-hint">
-          已保存的环境默认密码不会显示明文；输入新密码可替换，
-          <button type="button" class="secret-clear-link" @click="clearDomainDefaultPassword">清除已保存密码</button>
-        </p>
-        <p v-else-if="willClearDomainDefaultPassword" class="field-hint field-hint-warning">保存后将清除环境默认密码。</p>
         <p class="field-hint">密码优先级：用户输入 &gt; 环境默认 &gt; 全局默认</p>
       </div>
 
@@ -2373,33 +2322,4 @@ async function runTrialLogin(): Promise<void> {
   gap: 4px;
   opacity: .8;
 }
-.stored-secret-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 7px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #3b82f6;
-  background: rgba(59, 130, 246, .1);
-}
-[data-dt-dark] .stored-secret-badge {
-  color: #93c5fd;
-  background: #1e3a5f;
-}
-.secret-clear-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #dc2626;
-  font-size: 12px;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.secret-clear-link:hover { color: #b91c1c; }
-[data-dt-dark] .secret-clear-link { color: #f87171; }
-.field-hint-warning { color: #dc2626; }
-[data-dt-dark] .field-hint-warning { color: #f87171; }
 </style>

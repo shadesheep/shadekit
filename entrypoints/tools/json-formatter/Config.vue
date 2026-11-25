@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DtConfigSection from '../../shared/config/DtConfigSection.vue';
 import DtConfigHeader from '../../shared/config/DtConfigHeader.vue';
 import DtConfigItem from '../../shared/config/DtConfigItem.vue';
 import DtSegmented from '../../shared/config/DtSegmented.vue';
@@ -35,54 +36,47 @@ const INDENT_OPTIONS = [
 </script>
 
 <template>
-  <div class="json-format-config">
-    <DtConfigHeader title="JSON 格式化设置" :save-state="saveState" />
+  <div class="dt-config-page">
+    <DtConfigHeader
+      title="JSON 格式化设置"
+      description="调整格式化、内容解析与页面打开方式。"
+      :save-state="saveState"
+    />
 
-    <DtConfigItem label="缩进空格数">
-      <DtSegmented v-model="config.indent" :options="INDENT_OPTIONS" />
-    </DtConfigItem>
+    <DtConfigSection title="格式与解析" icon="i-lucide-braces">
+      <DtConfigItem label="缩进空格数">
+        <DtSegmented v-model="config.indent" :options="INDENT_OPTIONS" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="嵌套转义解析"
+        hint="当字符串值为 JSON 时,自动格式化展示"
+      >
+        <DtToggle v-model="config.nestedEscapeParse" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="自动解码"
+        hint="自动识别并解码 Unicode/URL 编码"
+      >
+        <DtToggle v-model="config.autoDecode" />
+      </DtConfigItem>
+      <DtConfigItem label="JSONLint 校验" hint="格式化时自动校验 JSON 合法性">
+        <DtToggle v-model="config.jsonLint" />
+      </DtConfigItem>
+    </DtConfigSection>
 
-    <DtConfigItem
-      label="嵌套转义解析"
-      hint="当字符串值为 JSON 时,自动格式化展示"
-    >
-      <DtToggle v-model="config.nestedEscapeParse" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="自动解码"
-      hint="自动识别并解码 Unicode/URL 编码"
-    >
-      <DtToggle v-model="config.autoDecode" />
-    </DtConfigItem>
-
-    <DtConfigItem label="JSONLint 校验" hint="格式化时自动校验 JSON 合法性">
-      <DtToggle v-model="config.jsonLint" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="允许多开"
-      hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
-    >
-      <DtToggle v-model="config.allowMultiple" />
-    </DtConfigItem>
-
-    <DtConfigItem
-      label="页面自动解析 JSON"
-      hint="访问返回 JSON 的接口或本地 .json 文件时自动格式化;Chrome/Edge 需在扩展详情中开启「允许访问文件网址」"
-    >
-      <DtToggle v-model="config.autoParseJson" />
-    </DtConfigItem>
+    <DtConfigSection title="页面行为" icon="i-lucide-panels-top-left">
+      <DtConfigItem
+        label="页面自动解析 JSON"
+        hint="访问返回 JSON 的接口或本地 .json 文件时自动格式化;Chrome/Edge 需在扩展详情中开启「允许访问文件网址」"
+      >
+        <DtToggle v-model="config.autoParseJson" />
+      </DtConfigItem>
+      <DtConfigItem
+        label="允许多开"
+        hint="每次点击都打开新标签页(关闭后聚焦已有标签页)"
+      >
+        <DtToggle v-model="config.allowMultiple" />
+      </DtConfigItem>
+    </DtConfigSection>
   </div>
 </template>
-
-<style scoped>
-.json-format-config {
-  padding: 8px 0;
-  color: #0f172a;
-}
-
-[data-dt-dark] .json-format-config {
-  color: #c9d1d9;
-}
-</style>
