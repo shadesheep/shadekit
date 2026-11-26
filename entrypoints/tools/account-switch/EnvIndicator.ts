@@ -21,7 +21,7 @@ import { normalizeEnvTag, tagColor } from './account-env-view';
 
 /** evaluateEnv 入参：账号切换配置中参与评估的部分 */
 export interface EnvEvaluateConfig {
-  domains?: Record<string, { name: string; tags: string[]; matchPath?: string }>;
+  domains?: Record<string, { name: string; tags: string[]; matchPath?: string; enabled?: boolean }>;
   envBadge?: { whitelist?: string[] };
 }
 
@@ -57,6 +57,7 @@ export function evaluateEnv(
   }
 
   const matched = pickEnvironment(pageUrl, cfg.domains);
+  if (matched?.env.enabled === false) return null;
   return matched ? { name: matched.env.name, tags: matched.env.tags } : null;
 }
 

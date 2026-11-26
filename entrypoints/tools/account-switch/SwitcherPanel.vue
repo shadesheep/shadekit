@@ -393,6 +393,11 @@ const handleQuickLogin = async () => {
   const isPureAccount = !parsed.hasUrl;
   const targetUrl =
     isPureAccount && matchedEnv.value ? pageUrl.value : parsed.url;
+  const targetEnv = isPureAccount ? matchedEnv.value : quickLoginMatchedEnv.value;
+  if (targetEnv?.enabled === false) {
+    showToast("目标环境已停用，请先在「环境与账号」中启用", "info");
+    return;
+  }
 
   // 面板只判断“是否存在默认密码”，实际秘密由 Background 按目标环境解析。
   const hasEnvDefault = isPureAccount
@@ -516,6 +521,10 @@ const quickLoginPreview = computed(() => {
 
   // 只展示密码来源，不读取任何默认密码原值。
   const isPureAccount = !parsed.hasUrl;
+  const targetEnv = isPureAccount ? matchedEnv.value : quickLoginMatchedEnv.value;
+  if (targetEnv?.enabled === false) {
+    return { ok: false, hint: "目标环境已停用，请先在「环境与账号」中启用", disabled: true };
+  }
   const currentEnvHasDefault = isPureAccount
     ? matchedEnv.value?.hasDefaultPassword
     : false;
@@ -592,6 +601,12 @@ const quickLoginPreview = computed(() => {
       </button>
     </div>
 
+    <div v-if="matchedEnv?.enabled === false" class="as-empty" role="status">
+      <p class="as-empty-text">当前环境已停用</p>
+      <p class="as-empty-hint">启用后可恢复账号切换和环境角标，账号与配置已保留。</p>
+      <button type="button" class="as-role-chip as-empty-action" @click="openAccountSettings">管理环境</button>
+    </div>
+
     <!-- 能力缺口：展示版本/算子/算法原因；登录仍由 Background 能力门拒绝 -->
     <div v-if="matchedEnvSupport" class="as-support-note" role="alert">
       <div class="i-lucide-shield-alert w-4 h-4 as-support-icon" />
@@ -602,7 +617,7 @@ const quickLoginPreview = computed(() => {
     </div>
 
     <!-- 选择账号 Tab 内容 -->
-    <div v-show="activeTab === 'users' && matchedEnv">
+    <div v-if="matchedEnv?.enabled !== false" v-show="activeTab === 'users' && matchedEnv">
       <!-- Search bar -->
       <div v-if="searchQuery || filteredAccounts.length >= 4" class="as-search-bar">
         <div class="i-lucide-search w-3.5 h-3.5 as-search-icon" />
@@ -768,7 +783,7 @@ const quickLoginPreview = computed(() => {
         <button
           type="button"
           class="as-ql-btn"
-          :disabled="quickLoginLoading || !quickLoginText.trim()"
+          :disabled="quickLoginLoading || !quickLoginText.trim() || quickLoginPreview?.disabled"
           @click="handleQuickLogin"
         >
           <div v-if="quickLoginLoading" class="as-ql-spinner" />
@@ -1091,7 +1106,7 @@ const quickLoginPreview = computed(() => {
 }
 
 .as-empty-action {
-  margin-top: 12px;
+  margin: 12px auto 0;
 }
 
 /* ===== Account list ===== */

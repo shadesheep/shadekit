@@ -50,6 +50,7 @@ export interface PublicAccount {
 export interface PublicEnvironment {
   name: string;
   tags: string[];
+  enabled?: boolean;
   /** 路径作用域；客户端可据此在面板内重新解析命中环境 */
   matchPath?: string;
   loginMethod?: string;
@@ -161,17 +162,24 @@ export function supportReason(support: SpecSupportReport): string {
     .join("；");
 }
 
+/** 停用环境在登录副作用与凭据解析之前拒绝执行；存量配置默认开启。 */
+export function assertEnvironmentEnabled(environment: { enabled?: boolean }): void {
+  if (environment.enabled === false) {
+    throw Object.assign(new Error("当前环境已停用，请先在「环境与账号」中启用"), {
+      code: "LOGIN_REJECTED",
+    });
+  }
+}
+
 /**
- * 执行前置门：在任何权限、tab、导航、HTTP、会话写入或秘密解析之前，
- * 确认环境声明的原始文档可由当前客户端执行，并返回窄化后的 LoginSpec。
- *
- * 私有声明优先于镜像策略；支持后才交给 `requireSupportedLoginSpec`
- * 做结构校验。旧配方/扁平参数走既有迁移链（迁移链自身带能力门）。
+ * 执行前置门：先检查环境启停，再确认原始声明可执行并返回 LoginSpec。
+ * 私有声明优先于镜像策略；旧配方/扁平参数走既有迁移链。
  */
 export function assertEnvironmentLoginSupported(
   environment: DomainConfig,
   strategies?: Record<string, StrategyEntry>,
 ): LoginSpec {
+  assertEnvironmentEnabled(environment);
   const document = resolveStoredLoginDocument(environment, strategies);
   if (document) {
     // 旧版本声明先走既有迁移链升级；迁移后的结果仍由能力/结构门窄化。
@@ -219,6 +227,7 @@ export function buildAccountPanel(
         {
           name: env.name,
           tags: Array.isArray(env.tags) ? [...env.tags] : [],
+          ...(env.enabled === false ? { enabled: false } : {}),
           ...(env.matchPath ? { matchPath: env.matchPath } : {}),
           ...(env.loginMethod ? { loginMethod: env.loginMethod } : {}),
           ...(env.debugRedirect ? { debugRedirect: env.debugRedirect } : {}),
@@ -355,7 +364,7 @@ export interface AccountFilter {
    * 环境配置。提供时按环境作用域（origin + matchPath）过滤：
    * 绑定到路径子系统的账号不会出现在同一 origin 的另一个子系统里。
    */
-  domains?: Record<string, { matchPath?: string }>;
+  domains?: Record<string, { matchPath?: string; enabled?: boolean }>;
   /** 角色筛选；null/undefined 不过滤 */
   role?: string | null;
   /** 搜索关键词（匹配 name / username，大小写不敏感） */
@@ -373,9 +382,11 @@ export interface FilterableAccount {
 export function accountBindingMatches(
   accountDomain: string,
   target: string,
-  domains?: Record<string, { matchPath?: string }>,
+  domains?: Record<string, { matchPath?: string; enabled?: boolean }>,
 ): boolean {
-  const targetEnvironment = pickEnvironment(target, domains)?.domain;
+  const matched = pickEnvironment(target, domains);
+  if (matched?.env.enabled === false) return false;
+  const targetEnvironment = matched?.domain;
   if (targetEnvironment) {
     // 面板可见性与切换/试跑共用同一条绑定规则，避免「看得到但切不过去」。
     return accountBoundToEnvironment(accountDomain, targetEnvironment, domains);

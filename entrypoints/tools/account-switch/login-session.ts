@@ -29,7 +29,7 @@ import {
   type DebugBuffer,
 } from "./utils/debug-log";
 import type { DebugLogEntry } from "./types";
-import { resolveEnvironment } from "./account-view";
+import { assertEnvironmentEnabled, resolveEnvironment } from "./account-view";
 import { normalizeDomain, normalizedOrigin, originMatches } from "./utils/env";
 import {
   ErrorCodes,
@@ -395,6 +395,7 @@ export async function prepareLogin(
       });
     }
     const { domainConfig } = domainResult;
+    assertEnvironmentEnabled(domainConfig);
     if (wildcardExecutionOrigin) origin = wildcardExecutionOrigin;
 
     const { spec, invalid } = readSpecFromConfig(domainConfig, config.strategies);

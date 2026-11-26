@@ -1,14 +1,14 @@
 /**
- * handleSwitchAccount 的 extension 页登录路由（options/popup）：
+ * 扩展页没有可执行的活动网页时，handleSwitchAccount 的入口地址回退：
  *
- * 从扩展页发起登录时 sender.tab 缺省、活动 tab 是扩展页自身（TAB_RESTRICTED），
+ * 活动 tab 是扩展页自身（TAB_RESTRICTED），
  * 无法在其上注入/执行。此时按账号首环境解析「可打开的具体 URL」：
  * - 环境 key 是具体地址（非通配符）→ 直接可打开
  * - 环境 key 是通配符 → 不可自动打开，返回明确提示而非底层报错
  *   （v1.1.4 起不再从环境配置里兜底）
  *
- * 断言落在纯函数 resolveOpenableUrl（URL 推导收口此处），
- * 避免为真实 new-tab 登录整条链（建 tab / runAuthFlow / setupAuthTab）做重桩。
+ * 本文件只验证 resolveOpenableUrl 的 URL 推导；活动网页登录路由由
+ * account-background-security.test.ts 与 e2e/switch/popup.spec.ts 覆盖。
  */
 import { describe, it, expect } from 'vitest';
 

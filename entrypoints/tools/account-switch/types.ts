@@ -116,6 +116,8 @@ export interface DomainConfig {
   // ===== 基础配置项（所有策略共享） =====
   name: string;
   tags: string[];
+  /** 当前环境是否启用；缺省为开启，关闭时保留配置与账号绑定。 */
+  enabled?: boolean;
   /**
    * 登录方式标识。仅作为 `SpecTemplate.id`：用于新建环境时
    * 生成默认登录声明、以及日志里的人类可读名称；**不参与执行分派**。

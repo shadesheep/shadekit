@@ -292,6 +292,32 @@ describe("SwitcherPanel 不支持的环境", () => {
 });
 
 describe("SwitcherPanel 已配置环境", () => {
+  it("停用环境显示说明、隐藏账号入口，并拦截快捷登录按钮与键盘提交", async () => {
+    mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");
+    const data = {
+      ...structuredClone(panelData),
+      matchedEnvKey: "https://target.example.com",
+      domains: {
+        "https://target.example.com": {
+          ...panelData.domains["https://target.example.com"], enabled: false,
+        },
+      },
+      accounts: [{ id: "hidden", name: "隐藏账号", username: "one", roles: [], hasSavedPassword: true }],
+    };
+    mocks.sendBgMessage.mockResolvedValue(data);
+    await mountPanel();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain("当前环境已停用");
+    expect(root.querySelector(".as-account-card")).toBeNull();
+    const textarea = root.querySelector("textarea")!;
+    textarea.value = "https://target.example.com/login\nadmin/password";
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+    expect(root.querySelector<HTMLButtonElement>(".as-ql-btn")!.disabled).toBe(true);
+    keydown(textarea, "Enter", { ctrlKey: true });
+    await flush();
+    expect(mocks.sendBgMessage.mock.calls.every(([type]) => type === "GET_ACCOUNT_PANEL")).toBe(true);
+  });
+
   it("保留快捷登录和选择账号 Tab", async () => {
     mocks.getCurrentOrigin.mockResolvedValue("https://target.example.com");
     mocks.getCurrentUrl.mockResolvedValue("https://target.example.com/");

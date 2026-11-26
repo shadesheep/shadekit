@@ -11,7 +11,7 @@ import {
 } from "./account-view";
 import { accountInitial } from "./account-palette";
 import { accountPasswordSummary } from "./account-password-state";
-import { buildEnvGroups, normalizeEnvTag, removeEnvironment, tagColor } from "./account-env-view";
+import { buildEnvGroups, normalizeEnvTag, removeEnvironment } from "./account-env-view";
 import { sendBgMessage } from "../../shared/messages";
 import { validateLoginSpec } from "./spec/validate";
 import { readSpecFromConfig } from "./spec/migrate";
@@ -172,7 +172,7 @@ async function loadConfig(): Promise<boolean> {
         data?.strategies && typeof data.strategies === "object"
           ? data.strategies
           : {},
-      // 指示器配置入响应式：设置页与主视图卡头开关共写 envBadge
+      // 指示器配置入响应式，由设置页管理角标显示。
       envBadge: data?.envBadge,
     };
 
@@ -668,11 +668,9 @@ function groupsOfKey(key: string): Account[] {
   return envGroups.value.groups.find((g) => g.key === key)?.accounts ?? [];
 }
 
-/** 指示器统计：当前白名单启用的环境数（空 = 全部） */
-const badgeEnabledCount = computed(() => {
-  const wl = envBadge.value.whitelist;
-  return wl.length === 0 ? envGroups.value.groups.length : wl.length;
-});
+const enabledEnvironmentCount = computed(() =>
+  Object.values(config.value.domains).filter((env) => env.enabled !== false).length,
+);
 
 /** 轨道项到对应「＋账号」/菜单环境 key 的统一入口（用当前过滤） */
 function railEnvKey(): string | null {
@@ -690,11 +688,6 @@ function addAccountToView() {
     newAccount.value.domains = [];
     showAccountForm.value = true;
   }
-}
-
-/** 环境色点：与指示器角标同源（tagColor，取第一个可识别的 tag，与 EnvIndicator 选择规则一致） */
-function envDotColor(env: DomainConfig): string {
-  return tagColor(env.tags?.find((t) => normalizeEnvTag(t) !== undefined));
 }
 
 // ----- 环境编辑入口：复用 DomainsPanel 的表单与导入向导 -----
@@ -813,7 +806,22 @@ function handleMenuKeydown(event: KeyboardEvent) {
 
 const handleDocumentClick = () => closeMenu();
 
-// ----- 指示器开关（per-env，落地为 envBadge.whitelist 增删） -----
+// ----- 当前环境启停：与环境角标的全局设置独立 -----
+const savingEnvironment = ref(false);
+
+async function setEnvironmentEnabled(key: string, enabled: boolean) {
+  const environment = config.value.domains[key];
+  if (!environment || savingEnvironment.value) return;
+  savingEnvironment.value = true;
+  try {
+    await saveWithFeedback({
+      domains: { ...config.value.domains, [key]: { ...environment, enabled } },
+    }, `环境「${environment.name}」已${enabled ? "启用" : "停用"}`);
+  } finally {
+    savingEnvironment.value = false;
+  }
+}
+
 const DEFAULT_ENV_BADGE: EnvBadgeConfig = {
   enabled: false,
   position: "bottom-right",
@@ -823,35 +831,8 @@ const envBadge = computed<EnvBadgeConfig>(
   () => config.value.envBadge ?? DEFAULT_ENV_BADGE,
 );
 
-/** 白名单为空 = 全部环境显示角标，此时卡头开关显示为开并附「跟随全局」提示态 */
-function envBadgeOn(key: string): boolean {
-  const wl = envBadge.value.whitelist;
-  return wl.length === 0 || wl.includes(key);
-}
-
-async function toggleEnvBadge(key: string) {
-  if (!envBadge.value.enabled) return; // 总开关已关：开关禁用（模板层 disabled 兜底）
-  const current = envBadge.value;
-  let whitelist: string[];
-  if (current.whitelist.length === 0) {
-    // 空白名单下 Uncheck：物化为「除该环境外的全部环境 key」
-    whitelist = Object.keys(config.value.domains).filter((k) => k !== key);
-  } else if (current.whitelist.includes(key)) {
-    whitelist = current.whitelist.filter((k) => k !== key);
-  } else {
-    whitelist = [...current.whitelist, key];
-  }
-  if (current.whitelist.length > 0 && whitelist.length === 0) {
-    showToast("至少保留 1 个环境；如需全部关闭，请在「设置 → 环境角标」中关闭总开关", "info");
-    return;
-  }
-  const next: EnvBadgeConfig = { ...current, whitelist };
-  config.value.envBadge = next;
-  await saveWithFeedback({ envBadge: next }, "环境角标显示范围已保存");
-}
-
 // ----- 设置页：环境指示器区块（Config Kit / ADR-0007 Auto-save 范式） -----
-// whitelist 与主视图卡头开关共写同一字段，语义不变：空 = 全部已配置环境
+// whitelist 仅控制角标范围：空 = 全部已启用环境
 const POSITION_OPTIONS: Array<{ value: EnvBadgePosition; label: string }> = [
   { value: "top-left", label: "左上" },
   { value: "top-right", label: "右上" },
@@ -1331,11 +1312,11 @@ function saveGlobalDefaultPassword() {
               class="rail-item rail-environment"
               :class="{ active: envFilter === group.key }"
               :aria-pressed="envFilter === group.key"
-              :aria-label="`${environmentLabel(group.env)}，${group.key}，${group.accounts.length} 个账号`"
+              :aria-label="`${environmentLabel(group.env)}，${group.key}，${group.accounts.length} 个账号${group.env.enabled === false ? '，已停用' : ''}`"
               @click="showEnvironmentAccounts(group.key)"
             >
-              <span class="rail-dot" :style="{ backgroundColor: envDotColor(group.env) }" aria-hidden="true" />
               <EnvironmentIdentity :env="group.env" :env-key="group.key" compact />
+              <span v-if="group.env.enabled === false" class="rail-count">已停用</span>
               <span v-if="!envSupportOf(group.key).supported" class="rail-warning" :title="supportReason(envSupportOf(group.key))" aria-label="当前客户端不支持该环境的登录声明">!</span>
               <span class="rail-count">{{ group.accounts.length }}</span>
             </button>
@@ -1372,21 +1353,18 @@ function saveGlobalDefaultPassword() {
           <span class="filter-result" role="status">{{ roleFilter ? roleFilter + ' · ' : '' }}显示 {{ filteredAccounts.length }} 个账号</span>
           <DtButton v-if="hasAnyAccountFilters" size="sm" variant="ghost" @click="clearAllAccountFilters">清除筛选</DtButton>
         </div>
-          <!-- 选中某具体环境时：环境上下文工具条（验证/指示器/编辑等，承接 A 卡头能力） -->
+          <!-- 选中具体环境时，提供当前环境启停与编辑入口。 -->
           <div v-if="envFilter !== 'all' && envFilter !== 'unbound' && envGroups.groups.find((g) => g.key === envFilter)" class="env-context-bar">
-            <span class="rail-dot" :style="{ backgroundColor: envDotColor(envOfKey(envFilter)) }" />
             <EnvironmentIdentity :env="envOfKey(envFilter)" :env-key="envFilter" />
             <span class="context-spacer" />
-            <DtButton v-if="!envBadge.enabled" size="sm" variant="secondary" title="前往设置启用环境角标" @click="activeTab = 'settings'">启用角标</DtButton>
-            <label v-else class="toggle-switch" :title="`在「${envOfKey(envFilter).name}」页面显示环境角标`">
-              <input
-                type="checkbox"
-                :checked="envBadgeOn(envFilter)"
-                :aria-label="`在「${envOfKey(envFilter).name}」页面显示环境角标`"
-                @change="toggleEnvBadge(envFilter)"
-              />
-              <span class="toggle-slider" />
-            </label>
+            <DtToggle
+              :label="`启用环境「${envOfKey(envFilter).name}」`"
+              :model-value="envOfKey(envFilter).enabled !== false"
+              :disabled="savingEnvironment"
+              :aria-busy="savingEnvironment"
+              title="控制当前环境的账号登录与环境角标"
+              @update:model-value="setEnvironmentEnabled(envFilter, $event)"
+            >{{ savingEnvironment ? '保存中…' : envOfKey(envFilter).enabled !== false ? '已启用' : '已停用' }}</DtToggle>
             <div class="more-wrap">
               <DtButton size="sm" class="more-btn" title="环境操作" :aria-label="`环境「${envOfKey(envFilter).name}」的其他操作`" :aria-expanded="openMenu === 'env:' + envFilter" :aria-controls="openMenu === 'env:' + envFilter ? 'env:' + envFilter + ':menu' : undefined" @click.stop="toggleMenu('env:' + envFilter, $event)">⋯</DtButton>
               <Teleport to="body">
@@ -1450,7 +1428,7 @@ function saveGlobalDefaultPassword() {
                     <div class="acc-main-body">
                       <div class="acc-line">
                         <span class="item-name" :title="acc.name">{{ acc.name }}</span>
-                        <span v-if="acc.roles[0]" class="role-pill" :style="roleColorStyle(acc.roles[0])" :title="acc.roles.join('、')">{{ acc.roles[0] }}</span>
+                        <span v-if="acc.roles[0]" class="role-pill" :title="acc.roles.join('、')">{{ acc.roles[0] }}</span>
                         <span v-if="acc.roles.length > 1" class="role-overflow" :title="acc.roles.join('、')" :aria-label="`角色：${acc.roles.join('、')}`">+{{ acc.roles.length - 1 }}</span>
                       </div>
                       <div v-if="!rowVerify(acc)" class="item-sub" :title="acc.username">
@@ -1476,7 +1454,7 @@ function saveGlobalDefaultPassword() {
                 </td>
                 <td class="col-envs">
                   <div v-if="accEnvList(acc).length === 0" class="env-cell">
-                    <span class="rail-dot none" /><span class="cell-hint">未关联环境</span>
+                    <span class="cell-hint">未关联环境</span>
                   </div>
                   <button
                     v-else
@@ -1538,7 +1516,7 @@ function saveGlobalDefaultPassword() {
           </div>
 
           <div class="env-table-foot">
-            <span class="badge-summary">{{ envBadge.enabled ? `环境角标：${badgeEnabledCount} / ${envCount} 个环境开启` : '环境角标：未启用' }}</span>
+            <span class="badge-summary">环境：{{ enabledEnvironmentCount }} / {{ envCount }} 个已启用</span>
             <span class="toolbar-count">{{ filteredAccounts.length }} / {{ accountCount }} 个账号</span>
           </div>
         </div>
@@ -1613,7 +1591,7 @@ function saveGlobalDefaultPassword() {
         <div class="settings-card-heading">
           <div>
             <h3><div class="i-lucide-map-pin w-4 h-4" aria-hidden="true" />环境角标</h3>
-            <p class="settings-description">在页面角落显示环境名称</p>
+            <p class="settings-description">在页面角落显示已启用环境的名称</p>
           </div>
           <DtToggle label="启用环境角标" :model-value="envBadge.enabled" @update:model-value="setEnvBadgeEnabled">
             {{ envBadge.enabled ? '已启用' : '已关闭' }}
@@ -1651,7 +1629,7 @@ function saveGlobalDefaultPassword() {
             </div>
           </div>
         </div>
-        <p class="settings-footnote"><div class="i-lucide-info w-3.5 h-3.5" aria-hidden="true" />更改后，已打开的业务页面需刷新生效</p>
+        <p class="settings-footnote"><span class="i-lucide-info w-3.5 h-3.5" aria-hidden="true" />更改后，已打开的业务页面需刷新生效</p>
         <div v-if="badgeScope === 'selected' && showBadgeEnvironments && envBadge.enabled" id="badge-environment-manager" class="badge-environment-manager">
           <div class="badge-manager-heading"><strong>选择显示角标的环境</strong><span>至少保留 1 个；全部关闭请使用总开关</span></div>
           <p v-if="domainOptions.length === 0" class="settings-description">还没有已配置的环境</p>
@@ -2193,10 +2171,7 @@ select[multiple] option {
   font-size: 12px;
 }
 
-/* 表格行内角色：中性 chip + 角色色小圆点。
-   每行都出现的元素不能用填色——色块连成一片会盖过账号名本身；
-   颜色缩成 5px 点（取自 roleColorStyle 注入的 fg token）保留跨行识别，
-   填色只留给筛选栏选中态与表单已选角色这类「表达状态、单点出现」的位置。 */
+/* 表格行内角色仅保留中性文字；颜色用于筛选栏选中态与表单已选角色。 */
 .role-pill {
   display: inline-flex;
   align-items: center;
@@ -2213,23 +2188,10 @@ select[multiple] option {
   border: 1px solid #e2e8f0;
 }
 
-.role-pill::before {
-  content: '';
-  flex-shrink: 0;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--role-light-fg);
-}
-
 [data-dt-dark] .role-pill {
   background: #21262d;
   color: #8b949e;
   border-color: var(--dt-dark-border, #30363d);
-}
-
-[data-dt-dark] .role-pill::before {
-  background: var(--role-dark-fg);
 }
 
 /* Role selector */
@@ -2458,16 +2420,6 @@ select[multiple] option {
 .rail-count { flex-shrink: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--account-secondary); }
 .rail-item.active .rail-count { color: #fff; }
 .rail-warning { color: var(--warning); font-size: 12px; }
-
-/* 主视图：顶部筛选 + 等高账号表 */
-.rail-dot {
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  background: #6b7280;
-}
-.rail-dot.none { background: var(--account-secondary); }
 
 /* 右表区 */
 .env-table-wrap {

@@ -138,6 +138,20 @@ describe('prepareLogin — prelude 不变量', () => {
     if (!outcome.ok) expect(outcome.errorCode).toBe(ErrorCodes.ENV_NOT_MATCHED);
   });
 
+  it.each(['url', 'origin'] as const)('停用环境拒绝 %s 目标，不建新标签页且释放锁', async (targetKind) => {
+    storageWith({ domains: {
+      'http://example.com': { ...CONFIG.domains['http://example.com'], enabled: false },
+    } });
+    const outcome = await prepareLogin(baseInput({
+      targetKind,
+      target: targetKind === 'url' ? 'http://example.com/page' : 'http://example.com',
+      execTarget: { kind: 'new', url: 'http://example.com/page' },
+    }));
+    expect(outcome).toMatchObject({ ok: false, errorCode: ErrorCodes.LOGIN_REJECTED });
+    expect(tabsCreateMock).not.toHaveBeenCalled();
+    expect(isLoginLocked(42)).toBe(false);
+  });
+
   it('loginMethod 缺失且无策略参数 → NO_STRATEGY（显式报错，不隐式回退）', async () => {
     storageWith({
       domains: { 'http://example.com': { name: 'x' } },

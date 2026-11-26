@@ -23,6 +23,38 @@ afterEach(() => {
 });
 
 describe("DomainsPanel 克隆环境", () => {
+  it("编辑停用环境并修改地址后仍保持停用", async () => {
+    const originalKey = "https://disabled.example.com";
+    const saves: EnvSavePayload[] = [];
+    const panel = ref<{ openEdit: (url: string) => void } | null>(null);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    app = createApp({
+      render: () => h(DomainsPanel, {
+        ref: panel,
+        domains: { [originalKey]: {
+          name: "停用环境", tags: [], enabled: false,
+          strategyConfig: { spec: defaultLoginSpec() },
+        } },
+        accounts: [],
+        onSaveWithAccounts: (payload: EnvSavePayload) => saves.push(payload),
+      }),
+    });
+    app.mount(root);
+    panel.value!.openEdit(originalKey);
+    await nextTick();
+    const input = root.querySelector<HTMLInputElement>("#domain-url")!;
+    input.value = "https://renamed.example.com";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+    Array.from(root.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.trim() === "保存环境")!.click();
+    await nextTick();
+    expect(saves).toHaveLength(1);
+    expect(saves[0].domains["https://renamed.example.com"].enabled).toBe(false);
+    expect(saves[0].domains[originalKey]).toBeUndefined();
+  });
+
   it("创建绑定相同账号的独立副本，不修改原环境或解除原账号绑定", async () => {
     const originalKey = "https://env.example.com";
     const original: DomainConfig = {

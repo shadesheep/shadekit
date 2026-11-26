@@ -4,6 +4,7 @@ const storageGet = vi.fn();
 const storageSet = vi.fn(async (..._args: unknown[]) => undefined);
 const tabsGet = vi.fn();
 const tabsCreate = vi.fn();
+const tabsQuery = vi.fn();
 const runLoginSpec = vi.fn<(
   spec: unknown,
   ctx: { credentials: { username: string; password: string }; origin: string },
@@ -21,7 +22,7 @@ vi.stubGlobal("chrome", {
   tabs: {
     get: (...args: unknown[]) => tabsGet(...args),
     create: (...args: unknown[]) => tabsCreate(...args),
-    query: vi.fn(async () => []),
+    query: (...args: unknown[]) => tabsQuery(...args),
     reload: vi.fn(async () => undefined),
     update: vi.fn(async () => undefined),
     remove: vi.fn(async () => undefined),
@@ -119,10 +120,90 @@ beforeEach(() => {
       : {},
   );
   tabsGet.mockResolvedValue({ id: 42, url: pageUrl, status: "complete" });
+  tabsQuery.mockResolvedValue([]);
   runLoginSpec.mockResolvedValue({ success: true });
 });
 
 describe("Background 按 ID 解析已保存账号", () => {
+  it.each([false, true])("弹窗对无入口地址的通配符环境在匹配的活动网页直接切换账号（sender 带 tab：%s）", async (withTab) => {
+    const environmentId = "https://*.example.com/ebidding";
+    const currentUrl = `${origin}/ebidding/home`;
+    const stored: AccountSwitchConfig = {
+      ...config,
+      accounts: [{ ...config.accounts[0]!, domains: [environmentId] }],
+      domains: { [environmentId]: { ...config.domains[origin]!, matchPath: "/ebidding" } },
+    };
+    storageGet.mockImplementation(async (keys: string[]) =>
+      keys.includes("devtools-account-switch") ? { "devtools-account-switch": stored } : {},
+    );
+    tabsQuery.mockResolvedValue([{ id: 42, url: currentUrl }]);
+    tabsGet.mockResolvedValue({ id: 42, url: currentUrl, status: "complete" });
+
+    await expect(handleSwitchAccount("acc-current", environmentId, {
+      url: "chrome-extension://shadekit-test-extension/popup.html",
+      ...(withTab ? { tab: { id: 99, url: "chrome-extension://shadekit-test-extension/popup.html" } as chrome.tabs.Tab } : {}),
+    })).resolves.toMatchObject({ success: true });
+    expect(runLoginSpec).toHaveBeenCalledOnce();
+    expect(runLoginSpec.mock.calls[0]![1]).toMatchObject({ tabId: 42, origin });
+    expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://other.example.com/ebidding/home", `${origin}/management/home`])(
+    "弹窗登录前页面已离开环境时拒绝执行：%s", async (currentUrl) => {
+      const environmentId = `${origin}/ebidding`;
+      const stored: AccountSwitchConfig = {
+        ...config,
+        accounts: [{ ...config.accounts[0]!, domains: [environmentId] }],
+        domains: { [environmentId]: { ...config.domains[origin]!, matchPath: "/ebidding" } },
+      };
+      storageGet.mockImplementation(async (keys: string[]) =>
+        keys.includes("devtools-account-switch") ? { "devtools-account-switch": stored } : {},
+      );
+      tabsQuery.mockResolvedValue([{ id: 42, url: currentUrl }]);
+
+      await expect(handleSwitchAccount("acc-current", environmentId, {
+        url: "chrome-extension://shadekit-test-extension/popup.html",
+      })).resolves.toMatchObject({ success: false, errorCode: "LOGIN_REJECTED" });
+      expect(runLoginSpec).not.toHaveBeenCalled();
+      expect(tabsCreate).not.toHaveBeenCalled();
+      expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+    },
+  );
+
+  it("当前活动页仍是扩展页时保留按具体环境入口新建标签页登录", async () => {
+    const extensionUrl = "chrome-extension://shadekit-test-extension/options.html";
+    tabsQuery.mockResolvedValue([{ id: 99, url: extensionUrl }]);
+    tabsCreate.mockResolvedValue({ id: 43, url: origin, status: "complete" });
+    tabsGet.mockResolvedValue({ id: 43, url: origin, status: "complete" });
+
+    await expect(handleSwitchAccount("acc-current", origin, {
+      url: extensionUrl,
+      tab: { id: 99, url: extensionUrl } as chrome.tabs.Tab,
+    })).resolves.toMatchObject({ success: true });
+    expect(tabsCreate).toHaveBeenCalledWith({ url: origin, active: false });
+    expect(runLoginSpec.mock.calls[0]![1]).toMatchObject({ tabId: 43, origin });
+  });
+
+  it("已停用环境拒绝账号切换、快捷登录和试登录，且不执行登录或新建标签页", async () => {
+    const stored: AccountSwitchConfig = structuredClone(config);
+    stored.domains[origin].enabled = false;
+    storageGet.mockImplementation(async () => ({ "devtools-account-switch": stored }));
+    await expect(handleSwitchAccount("acc-current", origin, sender)).resolves.toMatchObject({
+      success: false, errorCode: "LOGIN_REJECTED",
+    });
+    await expect(handleQuickLogin(pageUrl, "alice", "one-shot-password", true, sender)).resolves.toMatchObject({
+      success: false, errorCode: "LOGIN_REJECTED",
+    });
+    await expect(handleQuickLoginInNewTab(pageUrl, "alice", "one-shot-password", true)).resolves.toMatchObject({
+      success: false, errorCode: "LOGIN_REJECTED",
+    });
+    await expect(handleTrialSavedAccount("acc-current", origin)).resolves.toMatchObject({
+      ok: false, errorCode: "LOGIN_REJECTED", requestSent: false, sessionWritten: false,
+    });
+    expect(runLoginSpec).not.toHaveBeenCalled();
+    expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
   it("只把本次账号与环境的凭据交给受控执行器", async () => {
     await expect(handleSwitchAccount("acc-current", origin, sender)).resolves.toMatchObject({
       success: true,

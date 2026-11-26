@@ -284,11 +284,10 @@ const goBack = () => {
 @use '../shared/component-styles.scss' as *;
 
 .popup-container {
-  padding: 10px 0px;
+  padding: 10px 8px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   width: 100%;
   min-width: 280px;
-  max-width: 320px;
   box-sizing: border-box;
   color: var(--text-primary);
 }

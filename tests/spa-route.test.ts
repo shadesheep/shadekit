@@ -40,6 +40,17 @@ describe('evaluateEnv — 环境匹配评估', () => {
     expect(evaluateEnv(cfg, 'https://other.com')).toBeNull();
   });
 
+  it('停用最具体的环境后不显示角标，也不回退到通配符环境', () => {
+    const config = {
+      domains: {
+        'https://*.example.com': { name: '通配符环境', tags: [] },
+        'https://prod.example.com': { name: '生产环境', tags: [], enabled: false },
+      },
+    };
+    expect(evaluateEnv(config, 'https://prod.example.com')).toBeNull();
+    expect(evaluateEnv(config, 'https://dev.example.com')?.name).toBe('通配符环境');
+  });
+
   it('白名单非空且当前域名不在白名单 → null（即使环境域名命中）', () => {
     const withWhitelist = {
       ...cfg,

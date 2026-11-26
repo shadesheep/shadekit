@@ -798,6 +798,10 @@ function saveEditDomain() {
     delete next[previousKey];
   }
   next[envKey] = entry;
+  // 编辑（含修改环境 key）保留主视图的启停状态。
+  if (props.domains[previousKey]?.enabled !== undefined) {
+    entry.enabled = props.domains[previousKey].enabled;
+  }
   editingDomain.value = null;
   const savedName = newDomain.value.name || envKey;
   const payload = buildSavePayload({

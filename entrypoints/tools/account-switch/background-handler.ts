@@ -58,11 +58,16 @@ function rejectedLogin(message: string): LoginResponse {
   return { success: false, error: message, errorCode: ErrorCodes.LOGIN_REJECTED };
 }
 
-/** Content Script 只能取得公共投影；origin 由 Chrome sender 决定，不接受消息伪造。 */
+/** 公共投影：Content Script 取 sender 页面，扩展弹窗取当前活动标签页。 */
 export async function handleGetAccountPanel(
   sender: chrome.runtime.MessageSender,
 ): Promise<AccountPanelData> {
-  const pageUrl = sender.url || sender.tab?.url || "";
+  // 扩展页的 sender.url 是 popup.html，不能据此过滤站点账号。
+  // Content Script 仍只信任 sender，不接受客户端指定其他页面。
+  const fromExtensionPage = /^(chrome|moz)-extension:\/\//.test(sender.url ?? "");
+  const pageUrl = fromExtensionPage
+    ? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || sender.url || ""
+    : sender.url || sender.tab?.url || "";
   let origin = "";
   try {
     origin = new URL(pageUrl).origin;
@@ -78,7 +83,7 @@ export async function handleGetAccountPanel(
 async function resolveSavedAccount(
   accountId: string,
   environmentId: string,
-  sender: chrome.runtime.MessageSender,
+  executionTab: chrome.tabs.Tab | undefined,
 ): Promise<
   | { account: Account; password: string; origin: string; environment: DomainConfig }
   | { error: LoginResponse }
@@ -96,8 +101,8 @@ async function resolveSavedAccount(
 
   // 环境 key 可能带路径作用域或通配符：执行 origin 只取协议://host:port。
   let effectiveOrigin = normalizeDomain(environmentId);
-  if (sender.tab && !senderIsExtensionPage(sender)) {
-    const tabUrl = sender.tab.url || sender.url || "";
+  if (executionTab) {
+    const tabUrl = executionTab.url || "";
     if (!tabUrl || !matchEnvironment(environmentId, environment, tabUrl)) {
       return { error: rejectedLogin("当前页面已离开账号绑定环境") };
     }
@@ -184,8 +189,8 @@ async function getTabId(
  * `chrome-extension://`，不代表站点环境，不能参与环境 origin 匹配。
  */
 function senderIsExtensionPage(sender: chrome.runtime.MessageSender): boolean {
-  const url = sender.tab?.url ?? sender.url ?? "";
-  return url.startsWith("chrome-extension://");
+  const url = sender.url ?? sender.tab?.url ?? "";
+  return /^(chrome|moz)-extension:\/\//.test(url);
 }
 
 /**
@@ -235,9 +240,8 @@ function createLegacyTokenInjector(): (
  * 处理账号切换请求（来自 SwitcherPanel 面板的用户操作）。
  * prelude 归 login-session；本函数只剩：runLoginSpec → 记日志 → 返回。
  *
- * 从 extension 页面（options/popup，sender.tab 缺省、活动 tab 是扩展页自身）
- * 发起的登录无法在受限扩展页上执行（TAB_RESTRICTED）。此时若账号首环境可
- * 解析出具体 URL，改走「新建 tab + 登录」路径；否则返回明确提示（而非底层报错）。
+ * Popup 使用当前活动网页；Content Script 使用自身 tab。
+ * 活动页是扩展页/浏览器内置页时，按环境入口回退到新 tab 登录。
  */
 export async function handleSwitchAccount(
   accountId: string,
@@ -245,8 +249,17 @@ export async function handleSwitchAccount(
   sender: chrome.runtime.MessageSender,
 ): Promise<LoginResponse> {
   let resolved: Awaited<ReturnType<typeof resolveSavedAccount>>;
+  let executionTab: chrome.tabs.Tab | undefined;
   try {
-    resolved = await resolveSavedAccount(accountId, environmentId, sender);
+    if (sender.tab && !senderIsExtensionPage(sender)) {
+      executionTab = sender.tab;
+    } else {
+      // Popup 自身不是执行页面。只从浏览器查询活动 tab，且在解析凭据前
+      // 交给 resolveSavedAccount 校验其真实域名与路径作用域。
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (/^https?:\/\//i.test(activeTab?.url ?? "")) executionTab = activeTab;
+    }
+    resolved = await resolveSavedAccount(accountId, environmentId, executionTab);
   } catch (error) {
     return {
       success: false,
@@ -264,8 +277,8 @@ export async function handleSwitchAccount(
       errorCode: ErrorCodes.CONFIG_INVALID,
     };
   }
-  // options/popup 环境：扩展页没有可登录的站点文档（sender.tab 指向扩展页自身）。
-  if (!sender.tab || senderIsExtensionPage(sender)) {
+  // 当前没有可执行网页（如 options 自身处于前台），才按入口新建标签页。
+  if (!executionTab) {
     const openableUrl = resolveOpenableUrl(environmentId, environment.entryUrl);
     if (openableUrl) {
       return handleQuickLoginInNewTab(
@@ -284,7 +297,7 @@ export async function handleSwitchAccount(
       errorCode: ErrorCodes.TAB_RESTRICTED,
     };
   }
-  const tabId = await getTabId(sender);
+  const tabId = executionTab.id;
   const outcome = await prepareLogin({
     action: "SWITCH_ACCOUNT",
     account: { name: account.name, username: account.username },
