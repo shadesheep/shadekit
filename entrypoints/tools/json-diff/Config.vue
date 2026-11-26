@@ -15,7 +15,7 @@ interface JsonDiffConfig {
 const DEFAULTS: JsonDiffConfig = {
   autoCompare: true,
   debounceMs: 300,
-  allowMultiple: true,
+  allowMultiple: false,
 };
 
 const { config, saveState } = useToolConfig<JsonDiffConfig>(
@@ -35,7 +35,7 @@ const { config, saveState } = useToolConfig<JsonDiffConfig>(
 <template>
   <div class="dt-config-page">
     <DtConfigHeader
-      title="JSON 对比设置"
+      title="JSON / 文本对比设置"
       description="调整对比触发时机与页面打开方式。"
       :save-state="saveState"
     />

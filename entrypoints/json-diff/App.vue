@@ -1,32 +1,35 @@
 <script setup lang="ts">
-import { json } from '@codemirror/lang-json';
-import { onMounted, onUnmounted, ref } from 'vue';
+import { json } from "@codemirror/lang-json";
+import { onMounted, onUnmounted, ref } from "vue";
+import { stringify } from "lossless-json";
+import DtSegmented from "../shared/config/DtSegmented.vue";
+import { compareText } from "../tools/json-diff/lib/text-differ";
 import {
   attachFileDrop,
   type CodeEditor,
   createCodeEditor,
-} from '../shared/lib/codemirror-editor';
-import { syncScroll, type ScrollSync } from '../shared/lib/codemirror-scroll-sync';
-import { copyToClipboard } from '../shared/clipboard';
-import DtButton from '../shared/components/DtButton.vue';
-import DtPanel from '../shared/components/DtPanel.vue';
-import { getConfig } from '../shared/tool-config';
-import ToastContainer from '../shared/ToastContainer.vue';
-import { showToast } from '../shared/use-toast';
-import { createDiffMarkers } from '../tools/json-diff/lib/diff-markers';
+} from "../shared/lib/codemirror-editor";
+import {
+  syncScroll,
+  type ScrollSync,
+} from "../shared/lib/codemirror-scroll-sync";
+import { copyToClipboard } from "../shared/clipboard";
+import DtButton from "../shared/components/DtButton.vue";
+import DtPanel from "../shared/components/DtPanel.vue";
+import { getConfig } from "../shared/tool-config";
+import ToastContainer from "../shared/ToastContainer.vue";
+import { showToast } from "../shared/use-toast";
+import { createDiffMarkers } from "../tools/json-diff/lib/diff-markers";
 import {
   buildDiffPositions,
   type DiffPosition,
-} from '../tools/json-diff/lib/diff-nav';
+} from "../tools/json-diff/lib/diff-nav";
 import {
   compareJson,
-  type DiffResult,
+  type DiffEntry,
+  formatJson,
   getDiffMarkers,
-} from '../tools/json-diff/lib/json-differ';
-import {
-  parseWithBigInt,
-  safeStringify,
-} from '../tools/json-formatter/lib/json-utils';
+} from "../tools/json-diff/lib/json-differ";
 
 const leftEditorRef = ref<HTMLDivElement>();
 const rightEditorRef = ref<HTMLDivElement>();
@@ -46,6 +49,10 @@ const isDraggingLeft = ref(false);
 const isDraggingRight = ref(false);
 
 // ─── Diff State ──────────────────────────────────────────
+const mode = ref<"json" | "text">("json");
+const status = ref("粘贴内容或拖入文件开始对比");
+const errorMessage = ref("");
+const diffEntries = ref<DiffEntry[]>([]);
 const differenceCount = ref(0);
 const diffStats = ref({ add: 0, remove: 0, replace: 0 });
 const currentDiffIndex = ref(-1);
@@ -58,57 +65,40 @@ let isFormatting = false; // 格式化期间抑制 onChangeHandler
 // 因此 onMounted 中异步加载即可，无需等待再建编辑器
 const toolConfig = ref({ autoCompare: true, debounceMs: 300 });
 
-// ─── Paste Detection ──────────────────────────────────────
-function handlePaste(e: ClipboardEvent) {
-  const text = e.clipboardData?.getData('text');
-  if (!text) return;
-
-  const isCompressed = text.trim().split('\n').length === 1 &&
-                       /[{[]/.test(text) &&
-                       text.length > 50;
-
-  if (isCompressed) {
-    showToast('检测到压缩 JSON，点击"对比"将自动格式化', 'info');
-  }
-}
-
-// 滚动同步:按滚动比例而非像素,收口至 shared/lib/codemirror-scroll-sync
-// (onMounted 中两侧编辑器就绪后挂载,navigateDiff 经 scrollSync.suppress 压制)
-
 const EXAMPLES = {
   userInfo: {
     left: {
       id: 1001,
-      name: '张三',
+      name: "张三",
       age: 28,
-      email: 'zhangsan@example.com',
-      address: { city: '北京', district: '朝阳区' },
-      tags: ['前端', 'JavaScript', 'Vue'],
+      email: "zhangsan@example.com",
+      address: { city: "北京", district: "朝阳区" },
+      tags: ["前端", "JavaScript", "Vue"],
       isActive: true,
     },
     right: {
       id: 1001,
-      name: '张三',
+      name: "张三",
       age: 30,
-      email: 'zhangsan@example.com',
-      address: { city: '上海', district: '浦东新区' },
-      tags: ['前端', 'JavaScript', 'React'],
+      email: "zhangsan@example.com",
+      address: { city: "上海", district: "浦东新区" },
+      tags: ["前端", "JavaScript", "React"],
       isActive: true,
     },
   },
   configOptions: {
     left: {
       appConfig: {
-        theme: 'light',
-        language: 'zh-CN',
+        theme: "light",
+        language: "zh-CN",
         notifications: { email: true, push: true, sms: false },
         security: { twoFactorAuth: true, passwordExpiry: 90 },
       },
     },
     right: {
       appConfig: {
-        theme: 'dark',
-        language: 'zh-CN',
+        theme: "dark",
+        language: "zh-CN",
         notifications: { email: true, push: false, sms: true },
         security: { twoFactorAuth: true, passwordExpiry: 60 },
       },
@@ -116,23 +106,23 @@ const EXAMPLES = {
   },
   apiResponse: {
     left: {
-      status: 'success',
+      status: "success",
       code: 200,
       data: {
         users: [
-          { id: 1, name: '李明', role: 'admin' },
-          { id: 2, name: '王芳', role: 'user' },
+          { id: 1, name: "李明", role: "admin" },
+          { id: 2, name: "王芳", role: "user" },
         ],
         pagination: { total: 25, page: 1, limit: 10 },
       },
     },
     right: {
-      status: 'success',
+      status: "success",
       code: 200,
       data: {
         users: [
-          { id: 1, name: '李明', role: 'admin' },
-          { id: 2, name: '王芳', role: 'moderator' },
+          { id: 1, name: "李明", role: "admin" },
+          { id: 2, name: "王芳", role: "moderator" },
         ],
         pagination: { total: 28, page: 1, limit: 10 },
       },
@@ -151,7 +141,16 @@ function createSideEditor(
     extraExtensions: diffMarkers.extension,
     onModEnter: () => doCompare(),
     onChange: () => {
-      if (!isFormatting && toolConfig.value.autoCompare) {
+      if (isFormatting) return;
+      errorMessage.value = "";
+      diffEntries.value = [];
+      differenceCount.value = 0;
+      diffPositions.value = [];
+      currentDiffIndex.value = -1;
+      status.value = "内容已修改，等待对比";
+      if (leftEditor) diffMarkers.clear(leftEditor);
+      if (rightEditor) diffMarkers.clear(rightEditor);
+      if (toolConfig.value.autoCompare) {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(doCompare, toolConfig.value.debounceMs);
       }
@@ -160,7 +159,7 @@ function createSideEditor(
 }
 
 function getEditorText(editor: CodeEditor | null): string {
-  return editor?.getText() || '';
+  return editor?.getText() || "";
 }
 
 function formatEditor(editor: CodeEditor | null) {
@@ -168,8 +167,7 @@ function formatEditor(editor: CodeEditor | null) {
   const text = editor.getText();
   if (!text.trim()) return;
   try {
-    const parsed = parseWithBigInt(text);
-    const formatted = safeStringify(parsed, 2);
+    const formatted = formatJson(text);
     if (formatted !== text) {
       isFormatting = true; // 格式化期间抑制 onChangeHandler
       try {
@@ -178,28 +176,73 @@ function formatEditor(editor: CodeEditor | null) {
         isFormatting = false;
       }
     }
-  } catch {
-    // 解析失败不阻断对比，让 compareJson 处理错误提示
+  } catch (error) {
+    errorMessage.value = `格式化失败: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
-function collectDiffPositions(result: DiffResult, leftText: string, rightText: string) {
-  const markers = getDiffMarkers(result.diffs, leftText, rightText);
-  // 按 diffIndex 聚合左右两侧行号：replace 差异在左右各有一个 marker，
-  // 导航时两侧都要滚动/高亮，右侧高亮才能跟随（旧逻辑只保留左侧 marker）
-  diffPositions.value = buildDiffPositions(markers);
-  currentDiffIndex.value = -1;
+function setMode(value: "json" | "text") {
+  mode.value = value;
+  leftEditor?.setLanguage(value === "json" ? json() : []);
+  rightEditor?.setLanguage(value === "json" ? json() : []);
+  doCompare();
 }
 
-function navigateDiff(direction: 'prev' | 'next') {
+function formatBoth() {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = null;
+  errorMessage.value = "";
+  formatEditor(leftEditor);
+  formatEditor(rightEditor);
+  if (!errorMessage.value) doCompare();
+}
+
+function loadTextExample() {
+  leftEditor?.setText("# 发布说明\n\n- JSON 对比\n- 自动格式化\n");
+  rightEditor?.setText(
+    "# 发布说明\n\n- JSON 与文本对比\n- 手动格式化\n- 差异导航\n",
+  );
+  doCompare();
+}
+
+function downloadPatch() {
+  const patch = diffEntries.value.map(({ op, path, value }) =>
+    op === "remove" ? { op, path } : { op, path, value },
+  );
+  const blob = new Blob([stringify(patch, undefined, 2) ?? "[]"], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "comparison.patch.json";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function preview(value: unknown): string {
+  const text = stringify(value) ?? "";
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
+function jumpToDiff(diffIndex: number) {
+  const index = diffPositions.value.findIndex((p) => p.diffIndex === diffIndex);
+  if (index < 0) return;
+  currentDiffIndex.value = index - 1;
+  navigateDiff("next");
+}
+
+function navigateDiff(direction: "prev" | "next") {
   if (diffPositions.value.length === 0) return;
 
-  if (direction === 'next') {
-    currentDiffIndex.value = (currentDiffIndex.value + 1) % diffPositions.value.length;
+  if (direction === "next") {
+    currentDiffIndex.value =
+      (currentDiffIndex.value + 1) % diffPositions.value.length;
   } else {
-    currentDiffIndex.value = currentDiffIndex.value <= 0
-      ? diffPositions.value.length - 1
-      : currentDiffIndex.value - 1;
+    currentDiffIndex.value =
+      currentDiffIndex.value <= 0
+        ? diffPositions.value.length - 1
+        : currentDiffIndex.value - 1;
   }
 
   const pos = diffPositions.value[currentDiffIndex.value];
@@ -219,73 +262,33 @@ function doCompare() {
     debounceTimer = null;
   }
 
-  // 对比前先格式化两边内容
-  formatEditor(leftEditor);
-  formatEditor(rightEditor);
-
   const leftText = getEditorText(leftEditor);
   const rightText = getEditorText(rightEditor);
-
   if (leftEditor) diffMarkers.clear(leftEditor);
   if (rightEditor) diffMarkers.clear(rightEditor);
-
-  if (!leftText.trim() && !rightText.trim()) {
-    differenceCount.value = 0;
-    diffStats.value = { add: 0, remove: 0, replace: 0 };
-    diffPositions.value = [];
-    currentDiffIndex.value = -1;
-    return;
-  }
-
-  if (!leftText.trim()) {
-    showToast('请在左侧填入待比对的 JSON 内容', 'error');
-    differenceCount.value = 0;
-    diffStats.value = { add: 0, remove: 0, replace: 0 };
-    diffPositions.value = [];
-    currentDiffIndex.value = -1;
-    return;
-  }
-
-  if (!rightText.trim()) {
-    showToast('请在右侧填入待比对的 JSON 内容', 'error');
-    differenceCount.value = 0;
-    diffStats.value = { add: 0, remove: 0, replace: 0 };
-    diffPositions.value = [];
-    currentDiffIndex.value = -1;
-    return;
-  }
-
-  // compareJson 为同步执行且很快，无需「正在对比...」进度提示，
-  // 只保留结果提示，避免与 loadExample 等入口的提示堆叠
-  const result = compareJson(leftText, rightText);
-
-  diffStats.value = {
-    add: result.diffs.filter((d) => d.op === 'add').length,
-    remove: result.diffs.filter((d) => d.op === 'remove').length,
-    replace: result.diffs.filter((d) => d.op === 'replace').length,
-  };
-
-  if (result.error) {
-    showToast(result.error, 'error');
-    differenceCount.value = 0;
-    diffStats.value = { add: 0, remove: 0, replace: 0 };
-    diffPositions.value = [];
-    currentDiffIndex.value = -1;
-    return;
-  }
-
+  const textResult =
+    mode.value === "text" ? compareText(leftText, rightText) : null;
+  const result = textResult ?? compareJson(leftText, rightText);
+  errorMessage.value = result.error ?? "";
+  diffEntries.value = result.diffs;
   differenceCount.value = result.differenceCount;
-
-  if (result.differenceCount === 0) {
-    showToast('两侧 JSON 完全一致', 'success');
-  } else {
-    showToast(`共有 ${result.differenceCount} 处差异`, 'info');
-  }
-
-  const markers = getDiffMarkers(result.diffs, leftText, rightText);
-  if (leftEditor) diffMarkers.set(leftEditor, markers, 'left');
-  if (rightEditor) diffMarkers.set(rightEditor, markers, 'right');
-  collectDiffPositions(result, leftText, rightText);
+  diffStats.value = {
+    add: result.diffs.filter((d) => d.op === "add").length,
+    remove: result.diffs.filter((d) => d.op === "remove").length,
+    replace: result.diffs.filter((d) => d.op === "replace").length,
+  };
+  status.value = result.error
+    ? "请检查输入内容"
+    : result.isDifferent
+      ? `共有 ${result.differenceCount} ${mode.value === "text" ? "个差异块" : "处字段差异"}`
+      : "两侧内容一致";
+  if (textResult && !textResult.precise) status.value += "，大段差异已合并显示";
+  const markers =
+    textResult?.markers ?? getDiffMarkers(result.diffs, leftText, rightText);
+  if (leftEditor) diffMarkers.set(leftEditor, markers, "left");
+  if (rightEditor) diffMarkers.set(rightEditor, markers, "right");
+  diffPositions.value = buildDiffPositions(markers);
+  currentDiffIndex.value = -1;
 }
 
 function swapLeftRight() {
@@ -295,8 +298,8 @@ function swapLeftRight() {
   leftEditor?.setText(rightText);
   rightEditor?.setText(leftText);
 
-  showToast('已互换左右内容', 'info');
-  setTimeout(doCompare, 100);
+  showToast("已互换左右内容", "info");
+  doCompare();
 }
 
 function loadExample(key: keyof typeof EXAMPLES) {
@@ -308,26 +311,27 @@ function loadExample(key: keyof typeof EXAMPLES) {
   rightEditor?.setText(rightJson);
   // 不再单独提示「已加载示例数据」：随后的 doCompare 会给出结果提示，
   // 避免一次点击弹出多条 Toast
-  setTimeout(doCompare, 100);
+  doCompare();
 }
 
 function clearAll() {
-  leftEditor?.setText('');
-  rightEditor?.setText('');
+  leftEditor?.setText("");
+  rightEditor?.setText("");
   if (leftEditor) diffMarkers.clear(leftEditor);
   if (rightEditor) diffMarkers.clear(rightEditor);
   differenceCount.value = 0;
   diffStats.value = { add: 0, remove: 0, replace: 0 };
   diffPositions.value = [];
   currentDiffIndex.value = -1;
-  showToast('已清空', 'info');
+  doCompare();
+  status.value = "已清空";
 }
 
 async function copyLeft() {
   const text = getEditorText(leftEditor);
   if (text) {
     const ok = await copyToClipboard(text);
-    showToast(ok ? '已复制左侧内容' : '复制失败', ok ? 'success' : 'error');
+    showToast(ok ? "已复制左侧内容" : "复制失败", ok ? "success" : "error");
   }
 }
 
@@ -335,32 +339,32 @@ async function copyRight() {
   const text = getEditorText(rightEditor);
   if (text) {
     const ok = await copyToClipboard(text);
-    showToast(ok ? '已复制右侧内容' : '复制失败', ok ? 'success' : 'error');
+    showToast(ok ? "已复制右侧内容" : "复制失败", ok ? "success" : "error");
   }
 }
 
 // ─── Drag & Drop：由 attachFileDrop 挂载到两侧面板（见 onMounted） ──
 
 // 从 URL 参数预填内容
-function getInitialText(side: 'left' | 'right'): string {
+function getInitialText(side: "left" | "right"): string {
   const params = new URLSearchParams(window.location.search);
   const text = params.get(side);
-  return text ? decodeURIComponent(text) : '';
+  return text ?? "";
 }
 
 onMounted(() => {
   // 加载配置（autoCompare / debounceMs）；闭包读取 toolConfig ref，无需 await
-  void getConfig<{ autoCompare?: boolean; debounceMs?: number }>('json-diff').then(
-    (saved) => {
-      if (typeof saved?.autoCompare === 'boolean')
-        toolConfig.value.autoCompare = saved.autoCompare;
-      if (typeof saved?.debounceMs === 'number' && saved.debounceMs >= 0)
-        toolConfig.value.debounceMs = saved.debounceMs;
-    },
-  );
+  void getConfig<{ autoCompare?: boolean; debounceMs?: number }>(
+    "json-diff",
+  ).then((saved) => {
+    if (typeof saved?.autoCompare === "boolean")
+      toolConfig.value.autoCompare = saved.autoCompare;
+    if (typeof saved?.debounceMs === "number" && saved.debounceMs >= 0)
+      toolConfig.value.debounceMs = saved.debounceMs;
+  });
 
-  const leftInitial = getInitialText('left');
-  const rightInitial = getInitialText('right');
+  const leftInitial = getInitialText("left");
+  const rightInitial = getInitialText("right");
 
   if (leftEditorRef.value) {
     leftEditor = createSideEditor(leftEditorRef.value, leftInitial);
@@ -370,19 +374,21 @@ onMounted(() => {
   }
 
   // 拖拽文件载入（目标为两侧面板整体）
-  const sideDropOptions = (side: 'left' | 'right') => ({
+  const sideDropOptions = (side: "left" | "right") => ({
     accept: (file: File) =>
-      file.name.endsWith('.json') ? null : '请拖入 .json 文件',
+      mode.value === "text" || /\.json$/i.test(file.name)
+        ? null
+        : "请拖入 .json 文件，或切换文本模式",
     // 非文件拖入（文本/链接）也提示同一句
-    noFileError: '请拖入 .json 文件',
+    noFileError: "请拖入文本文件",
     onText: (text: string, file: File) => {
-      const editor = side === 'left' ? leftEditor : rightEditor;
+      const editor = side === "left" ? leftEditor : rightEditor;
       editor?.setText(text);
-      showToast(`已加载 ${file.name}`, 'success');
+      showToast(`已加载 ${file.name}`, "success");
     },
-    onError: (message: string) => showToast(message, 'error'),
+    onError: (message: string) => showToast(message, "error"),
     onDraggingChange: (dragging: boolean) => {
-      if (side === 'left') {
+      if (side === "left") {
         isDraggingLeft.value = dragging;
       } else {
         isDraggingRight.value = dragging;
@@ -391,15 +397,16 @@ onMounted(() => {
   });
   const leftPanelEl = leftPanelRef.value?.$el as HTMLElement | undefined;
   const rightPanelEl = rightPanelRef.value?.$el as HTMLElement | undefined;
-  if (leftPanelEl) detachDrops.push(attachFileDrop(leftPanelEl, sideDropOptions('left')));
-  if (rightPanelEl) detachDrops.push(attachFileDrop(rightPanelEl, sideDropOptions('right')));
+  if (leftPanelEl)
+    detachDrops.push(attachFileDrop(leftPanelEl, sideDropOptions("left")));
+  if (rightPanelEl)
+    detachDrops.push(attachFileDrop(rightPanelEl, sideDropOptions("right")));
 
   if (leftEditor && rightEditor) {
     scrollSync = syncScroll(leftEditor, rightEditor);
   }
 
-  // 监听粘贴事件，检测压缩 JSON
-  document.addEventListener('paste', handlePaste);
+  if (leftInitial || rightInitial) doCompare();
 });
 
 onUnmounted(() => {
@@ -410,7 +417,6 @@ onUnmounted(() => {
   for (const detach of detachDrops) detach();
   detachDrops = [];
   if (debounceTimer) clearTimeout(debounceTimer);
-  document.removeEventListener('paste', handlePaste);
 });
 </script>
 
@@ -420,18 +426,21 @@ onUnmounted(() => {
     <div class="top-bar">
       <div class="brand">
         <div class="i-lucide-git-compare w-5 h-5" />
-        <span>JSON 对比</span>
+        <span>内容对比</span>
       </div>
       <div class="toolbar-actions">
+        <DtSegmented :model-value="mode" :options="[{value: 'json', label: 'JSON'}, {value: 'text', label: '文本'}]" aria-label="对比模式" @update:model-value="setMode" />
         <DtButton variant="primary" @click="doCompare">对比</DtButton>
+        <DtButton v-if="mode === 'json'" @click="formatBoth">格式化</DtButton>
         <DtButton icon title="左右互换" @click="swapLeftRight">
           <div class="i-lucide-arrow-left-right w-4 h-4" />
         </DtButton>
         <span class="divider" />
-        <span class="toolbar-label">示例：</span>
-        <DtButton variant="ghost" icon @click="loadExample('userInfo')">用户信息</DtButton>
-        <DtButton variant="ghost" icon @click="loadExample('configOptions')">配置选项</DtButton>
-        <DtButton variant="ghost" icon @click="loadExample('apiResponse')">API 响应</DtButton>
+        <span class="toolbar-label">示例</span>
+        <DtButton v-if="mode === 'text'" variant="ghost" @click="loadTextExample">发布说明</DtButton>
+        <DtButton v-if="mode === 'json'" variant="ghost" icon @click="loadExample('userInfo')">用户信息</DtButton>
+        <DtButton v-if="mode === 'json'" variant="ghost" icon @click="loadExample('configOptions')">配置选项</DtButton>
+        <DtButton v-if="mode === 'json'" variant="ghost" icon @click="loadExample('apiResponse')">API 响应</DtButton>
         <span class="divider" />
         <DtButton icon @click="clearAll">清空</DtButton>
         <DtButton variant="ghost" icon @click="copyLeft">复制左侧</DtButton>
@@ -453,10 +462,27 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <div class="comparison-status" role="status" aria-live="polite">{{ status }}</div>
+    <div v-if="errorMessage" class="comparison-error" role="alert">
+      {{ errorMessage }}
+      <DtButton v-if="mode === 'json'" size="sm" @click="setMode('text')">切换文本对比</DtButton>
+    </div>
+    <details v-if="diffEntries.length" class="diff-details">
+      <summary>差异明细（{{ diffEntries.length }}）</summary>
+      <div class="diff-list">
+        <button v-for="(entry, index) in diffEntries.slice(0, 100)" :key="index" type="button" @click="jumpToDiff(index)">
+          <strong>{{ { add: '新增', remove: '删除', replace: '修改' }[entry.op] }} {{ entry.path || '根节点' }}</strong>
+          <span v-if="entry.op !== 'add'">原值 {{ preview(entry.oldValue) }}</span>
+          <span v-if="entry.op !== 'remove'">新值 {{ preview(entry.value) }}</span>
+        </button>
+        <span v-if="diffEntries.length > 100">显示前 100 项，可使用差异导航查看其余项</span>
+      </div>
+      <DtButton v-if="mode === 'json'" size="sm" @click="downloadPatch">导出 JSON Patch</DtButton>
+    </details>
     <!-- 编辑器区域 -->
     <div class="content-area">
       <DtPanel ref="leftPanelRef" class="editor-panel"
-        title="左侧 JSON"
+        :title="mode === 'json' ? '左侧 JSON' : '左侧文本'"
       >
         <div v-if="isDraggingLeft" class="drop-overlay">
           <div class="i-lucide-upload w-5 h-5 mb-1" />
@@ -467,7 +493,7 @@ onUnmounted(() => {
         </div>
       </DtPanel>
       <DtPanel ref="rightPanelRef" class="editor-panel"
-        title="右侧 JSON"
+        :title="mode === 'json' ? '右侧 JSON' : '右侧文本'"
       >
         <div v-if="isDraggingRight" class="drop-overlay">
           <div class="i-lucide-upload w-5 h-5 mb-1" />
@@ -484,6 +510,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.top-bar { flex-wrap: wrap; }
+.comparison-status, .comparison-error, .diff-details { padding: 8px 16px; font-size: 12px; }
+.comparison-status { color: #64748b; }
+.comparison-error { color: #dc2626; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 120px; overflow: auto; }
+.diff-details { border-bottom: 1px solid #e2e8f0; }
+.diff-details summary { cursor: pointer; }
+.diff-list { max-height: 180px; overflow: auto; margin: 8px 0; }
+.diff-list button { display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left; background: transparent; color: inherit; border: 0; border-bottom: 1px solid #e2e8f0; padding: 8px; cursor: pointer; overflow-wrap: anywhere; }
+.diff-list button:hover { background: #eef2ff; }
+.diff-list button:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
+[data-dt-dark] .comparison-status { color: #8b949e; }
+[data-dt-dark] .comparison-error { color: #f87171; }
+[data-dt-dark] .diff-details, [data-dt-dark] .diff-list button { border-color: #30363d; }
+[data-dt-dark] .diff-list button:hover { background: #21262d; }
 /* 两个编辑器面板等宽 */
 .editor-panel {
   flex: 1;

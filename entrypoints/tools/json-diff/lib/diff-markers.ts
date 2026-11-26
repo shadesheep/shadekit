@@ -66,9 +66,10 @@ export function createDiffMarkers(): DiffMarkers {
             const endLine = view.state.doc.line(marker.endLine + 1);
             const from = startLine.from + marker.startCh;
             const to = endLine.from + marker.endCh;
-            return Decoration.mark({
-              class: marker.className,
-            }).range(from, to);
+            if (marker.wholeLine) {
+              return Decoration.line({ class: marker.className }).range(startLine.from);
+            }
+            return Decoration.mark({ class: marker.className }).range(from, to);
           } catch {
             return null;
           }

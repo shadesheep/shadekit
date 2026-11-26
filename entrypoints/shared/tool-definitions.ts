@@ -176,14 +176,14 @@ export const allTools: ToolDefinition[] = [
   },
   {
     id: "json-diff",
-    name: "JSON 对比",
-    description: "左右对比两个 JSON，RFC 6902 标准差异高亮",
+    name: "JSON / 文本对比",
+    description: "JSON 语义对比与文本差异高亮，支持差异导航和 JSON Patch 导出",
     icon: "i-lucide-git-compare",
     enabledByDefault: true,
     openInTab: { url: "json-diff.html", allowMultiple: false },
     configSection: {
       id: "json-diff",
-      label: "JSON 对比",
+      label: "JSON / 文本对比",
       icon: "i-lucide-git-compare",
     },
     defaultConfig: {

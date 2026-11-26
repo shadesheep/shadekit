@@ -68,8 +68,8 @@ describe('工具总览卡片间距', () => {
 });
 
 describe('工具选择弹窗间距', () => {
-  it('保留上下留白，去除容器左右留白', () => {
+  it('容器显式提供上下与左右留白', () => {
     const css = getStyle('entrypoints/popup/App.vue');
-    expect(getRule(css, '.popup-container')).toContain('padding: 10px 0px');
+    expect(getRule(css, '.popup-container')).toContain('padding: 10px 8px');
   });
 });
