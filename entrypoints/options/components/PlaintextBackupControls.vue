@@ -26,14 +26,11 @@ function downloadBackup(backup: Record<string, unknown>): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function prepareImport(event: Event): Promise<void> {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file || busy.value) return;
+async function previewImport(source: File | string): Promise<void> {
+  if (busy.value) return;
   busy.value = true;
   try {
-    const text = await file.text();
+    const text = typeof source === "string" ? source : await source.text();
     const response = await sendBgMessage("BACKUP_PREPARE", { text });
     if (!response.success || !response.summary) {
       showToast(response.error || "明文备份预览失败", "error");
@@ -47,6 +44,15 @@ async function prepareImport(event: Event): Promise<void> {
     busy.value = false;
   }
 }
+
+function onFileChange(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (file) void previewImport(file);
+}
+
+defineExpose({ previewImport });
 
 async function confirmOperation(): Promise<void> {
   if (busy.value || !mode.value) return;
@@ -86,7 +92,7 @@ async function confirmOperation(): Promise<void> {
     <button type="button" class="btn-import" title="预览并导入 shadekit-config 明文完整备份" @click="fileInput?.click()">
       <div class="i-lucide-download w-4 h-4" aria-hidden="true" />导入完整备份
     </button>
-    <input ref="fileInput" type="file" accept=".json,application/json" class="hidden-file" @change="prepareImport" />
+    <input ref="fileInput" type="file" accept=".json,application/json" class="hidden-file" @change="onFileChange" />
     <button type="button" class="btn-export" title="显式确认后导出包含秘密的明文完整备份" aria-describedby="export-backup-warning" @click="mode = 'export'">
       <div class="i-lucide-upload w-4 h-4" aria-hidden="true" />导出明文备份
     </button>

@@ -31,6 +31,7 @@ interface ConfigSectionItem {
 const sections = ref<ConfigSectionItem[]>([]);
 const activeView = ref<View>('market');
 const editEnv = ref<string | undefined>(undefined);
+const backupControls = ref<InstanceType<typeof PlaintextBackupControls> | null>(null);
 let unsubscribeOptionsRoute: (() => void) | undefined;
 
 const activeComponent = computed(() => {
@@ -42,7 +43,11 @@ const activeComponent = computed(() => {
 
 const activeComponentProps = computed(() =>
   activeView.value === 'account-switch'
-    ? { editEnv: editEnv.value, onEditEnvConsumed: clearEditEnv }
+    ? {
+        editEnv: editEnv.value,
+        onEditEnvConsumed: clearEditEnv,
+        onImportBackup: (text: string) => backupControls.value?.previewImport(text),
+      }
     : {},
 );
 
@@ -153,8 +158,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 完整备份仅由 Background 解析和物化秘密；页面只展示预览摘要。 -->
-      <PlaintextBackupControls @imported="refreshConfigSections" />
+      <!-- 完整备份由 Background 校验并提交，预览只展示摘要。 -->
+      <PlaintextBackupControls ref="backupControls" @imported="refreshConfigSections" />
     </div>
 
     <div class="main-layout">

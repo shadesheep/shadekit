@@ -31,7 +31,7 @@ import type {
 } from '../types';
 import { sendBgMessage } from '../../../shared/messages';
 import type { TrialSignalState } from '../spec/run';
-import { deriveEnvName, deriveEnvTag, normalizeEnvTag, planImport, type EnvTag } from '../account-env-view';
+import { deriveEnvName, deriveEnvTag, detectImportKind, normalizeEnvTag, planImport, type EnvTag } from '../account-env-view';
 import {
   environmentLoginSupport,
   resolveStoredLoginDocument,
@@ -96,6 +96,7 @@ const emit = defineEmits<{
   savePatch: [patch: Partial<AccountSwitchConfig>, message: string];
   /** 环境保存 + 关联账号变更一并落盘（addDomain / saveEditDomain 走这里） */
   saveWithAccounts: [payload: EnvSavePayload];
+  importBackup: [text: string];
 }>();
 
 /** 默认登录方式：通用登录（配方） */
@@ -1014,7 +1015,16 @@ async function importConfigPackage() {
   try {
     parsed = JSON.parse(text);
   } catch {
-    toast('登录策略包不是合法 JSON', 'error');
+    toast('文件不是合法 JSON', 'error');
+    return;
+  }
+  const kind = detectImportKind(parsed);
+  if (kind === 'full') {
+    emit('importBackup', text);
+    return;
+  }
+  if (kind !== 'strategy') {
+    toast('请选择登录策略包（dt-login-config/v1）或 ShadeKit 完整备份', 'error');
     return;
   }
   const preview = planImport(parsed, {

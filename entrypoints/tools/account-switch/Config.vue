@@ -50,7 +50,10 @@ import DtPanel from "../../shared/components/DtPanel.vue";
 import DtEmptyState from "../../shared/components/DtEmptyState.vue";
 
 const props = defineProps<{ editEnv?: string }>();
-const emit = defineEmits<{ editEnvConsumed: [] }>();
+const emit = defineEmits<{
+  editEnvConsumed: [];
+  importBackup: [text: string];
+}>();
 
 
 // 主视图（环境卡片）为默认视图；设置页承载环境指示器等次级配置
@@ -1176,7 +1179,7 @@ function saveGlobalDefaultPassword() {
           <DtButton size="sm" variant="primary" @click="addAccountToView">
             <div class="i-lucide-plus w-3.5 h-3.5 mr-1" />新建账号
           </DtButton>
-          <DtButton size="sm" variant="ghost" title="从文件导入可复用的登录方式，不包含账号密码" @click="domainsPanelRef?.openImport()">
+          <DtButton size="sm" variant="ghost" title="选择登录策略包或 ShadeKit 完整备份" @click="domainsPanelRef?.openImport()">
             <div class="i-lucide-download w-3.5 h-3.5 mr-1" />导入策略
           </DtButton>
         </div>
@@ -1541,6 +1544,7 @@ function saveGlobalDefaultPassword() {
         @save="onDomainsSave"
         @save-patch="onDomainsPatch"
         @save-with-accounts="onEnvSaveWithAccounts"
+        @import-backup="emit('importBackup', $event)"
       />
     </div>
 
